@@ -7,8 +7,8 @@
 | 0 | Project foundation | ✅ Complete (2026-11-13) |
 | 1 | Core circuit model | ✅ Complete (2026-11-13) |
 | 2 | Simulation engine | ✅ Complete (2026-11-13) |
-| 3 | Visual circuit editor | ⏳ Next |
-| 4 | Custom gate packaging | — |
+| 3 | Visual circuit editor | ✅ Complete (2026-11-13) |
+| 4 | Custom gate packaging | ⏳ Next |
 | 5 | Hierarchical composition & inspection | — |
 | 6 | Animated signal visualization | — |
 | 7 | Truth table generator | — |
@@ -208,15 +208,76 @@ Phases 0–1 committed as `e301066`.
 - PlayMode: **1 / 1 passed**. Console: 0 errors, 0 warnings.
 
 ### Known issues
-- Unity editor restart still pending for the Input System native backend (needed in Phase 3).
+- ~~Unity editor restart pending for the Input System backend~~ (resolved; `ENABLE_INPUT_SYSTEM` active).
 - Runtime evaluation budget is per settle; a slowly oscillating loop that happens to stabilise within the
   budget is reported as stable (correct behaviour for combinational semantics).
 
-### Pending (Phase 3 – Visual circuit editor)
-- Scene composition root (`App`), `InputActionAsset` with the Workspace action map, EventSystem with
-  `InputSystemUIInputModule`.
-- Workspace camera (pan/zoom with DOTween easing), grid rendering, grid snapping.
-- Pooled gate/pin/wire views driven by `CircuitDefinition.Changed` and the live `SimulationRunner`.
-- Placement from the library, selection (single/multi/rectangle), drag-move, wire creation with preview,
-  compatible-pin highlighting via `ConnectionRules`, orthogonal routing, deletion.
-- Input switches and output indicators; recompile on edit through `SimulationRunner.Load`.
+### Pending (Phase 3)
+Delivered – see the Phase 3 section below.
+
+---
+
+## Phase 3 – Visual circuit editor (2026-11-13)
+
+### Implemented
+- **Commands** (`Commands/`): `ICommand`, `CommandHistory` (undo/redo stacks, max depth 500, re-entrancy
+  guard, `Record` for already-applied live drags), `CompositeCommand`; circuit commands `AddNodeCommand`,
+  `RemoveNodesCommand` (nodes and/or wires), `ConnectCommand`, `TransformNodesCommand` (move/rotate),
+  `DuplicateNodesCommand` (copies internal connections only). All restore original node ids, interface port
+  ids and port order via `NodeSnapshot`. `BoundaryNames` generates A, B, C… / OUT, OUT2….
+- **Rendering** (`Rendering/`): URP HLSL shaders `DigitalLogicSandbox/Unlit` and `/Grid`, materials
+  `DlsUnlit.mat` / `DlsGrid.mat`, `VisualTheme` ScriptableObject (`ScriptableObjects/DefaultVisualTheme.asset`),
+  generated sprites (`RenderAssets`), `GateLayout` / `GateGeometry`, `WireRouter` (orthogonal, backward
+  detours), `CircuitGeometry` (cached gate shapes, pin positions and wire paths, shared by drawing and
+  hit-testing), pooled `GateView` / `WireView` (`ViewPool<T>`), `GridView` (one procedural quad),
+  `SelectionRectView`, and `CircuitPresenter`, which maps model events and simulation net changes to views
+  (net → targets index; only changed nets are touched).
+- **CircuitEditor** (`Editor/`): `CircuitSession` (model + compiler + runner; recompiles at most once per frame
+  and only on structural changes; inputs preserved by port id), `WorkspaceController` (public editing API,
+  frame orchestration), `WorkspaceInteraction` (state machine: wiring by drag or click-click with
+  compatible-pin highlighting; select / multi-select / rectangle; drag-move with half-grid snapping; click on
+  an input switch toggles it; pan with middle / right / Space+left; scroll zoom at cursor; shortcuts),
+  `WorkspaceControls` (Input System action map built in code; optional `InputActionAsset` override),
+  `WorkspaceCamera` (DOTween-eased zoom buttons / reset / frame), `WorkspaceHitTester` (model-based picking:
+  pins → bodies → wires), `SelectionModel`, `GridSnap`, `PlacementRequest`.
+- **UI** (`UI/`): code-built UGUI via `UiFactory`; `AppShell` (canvas, scaler), `ToolbarView` (Undo, Redo,
+  Delete, Zoom +/-, Reset View, Grid, Play/Pause, Step, Reset Sim; enabled states follow history, selection
+  and simulation), `LibraryPanel` (built-ins listed from the primitive registry, Circuit I/O, My Custom Gates
+  grouped by category, search, click-to-arm or drag-to-place, auto-refresh on `DefinitionAdded`),
+  `StatusBarView` (status, evaluation count, first error/warning, live input/output values).
+- **App**: `AppBootstrap` composition root in `Scenes/Main.unity` (theme and camera references). It creates
+  the EventSystem with `InputSystemUIInputModule`, initialises DOTween, wires services and starts an empty
+  "Main Circuit".
+
+### Decisions
+- **Half-unit grid snapping.** Pins are 1 unit apart and centred on the gate, so gate centres on the 0.5 grid
+  keep every pin on the 0.5 grid and aligned wires run straight.
+- **Input toggles are not undoable yet.** They are live simulation state, not model edits. Revisit in Phase 8
+  (CLAUDE.md lists "change input value" as an undoable command).
+- **Click on an input switch toggles it.** Input boundaries are selected by dragging, Shift-click or rectangle.
+- **Toggle syncs first.** `ToggleInput` / `SetInput` call `Sync()` so edits made earlier in the same frame are
+  compiled before the input is addressed (found via screenshot check; regression test added).
+- **Live drag, recorded once.** Dragging moves the model directly (views and wires follow through events); on
+  release one `TransformNodesCommand` is `Record`ed. Moves never recompile.
+- **Hit-testing is linear** over nodes/wires per pointer query. Fast enough for hundreds of gates; a spatial
+  grid will be added in Phase 9 if profiling shows a need.
+- **Namespace `CircuitEditor.CameraControl`** for `Editor/Camera/`, to avoid shadowing `UnityEngine.Camera`.
+- Rendering now references `Components` (titles from primitives) and TextMeshPro (gate labels); the
+  ArchitectureTests allowlist was updated accordingly.
+- UI strings use ASCII/Latin-1 glyphs only (the default TMP font lacks ▶, →, −).
+
+### Test results
+- EditMode: **189 / 189 passed** (new: `CircuitCommandTests`, `CircuitSessionTests`, `SelectionModelTests`,
+  `LayoutAndRoutingTests`, `GeometryAndHitTestTests`, `WorkspaceControlsTests`).
+- PlayMode: **7 / 7 passed** (new: `WorkspaceIntegrationTests` covering build/wire/toggle with view checks,
+  undo/redo of connections and deletion, move/rotate/duplicate undo with wire rerouting, snapping and
+  paused stepping, and the same-frame toggle regression; `AppBootstrapTests` covering Main scene
+  composition, only AND/NOT built in, search filter and toolbar state).
+- Manual: a NAND circuit built in play mode renders correctly (screenshot verified); console clean.
+
+### Known issues / deferred
+- Right panel (properties inspector): Phase 4, together with packaging options.
+- Context menus: Phase 9 (right button currently pans / cancels).
+- Toolbar project actions (New/Open/Save/Save As): Phase 8. Truth Table / Inspect / Circuit Properties:
+  Phases 4–7. Buttons are added when their systems exist (no dead buttons).
+- Signal travel animation: Phase 6 (views currently switch to the new value immediately).

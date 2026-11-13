@@ -285,19 +285,46 @@ with an explanation. Export: CSV and tab-separated clipboard text.
 - Saves are atomic: write `*.tmp`, flush, then `File.Replace` keeping `*.bak`. Autosave writes a separate
   recovery file; on startup an autosave newer than the project file is offered for recovery.
 
-## 11. Undo / redo *(planned – Phase 8, used from Phase 3)*
+## 11. Undo / redo *(editing commands implemented – Phase 3; remaining commands – Phase 8)*
 
 `ICommand { Execute(); Undo(); }` operating on the **model only**; views re-sync from model change events,
 so undo restores the visual state automatically. Large operations (packaging, publishing a version) use
 composite commands holding targeted snapshots, never whole-project serialization.
 
-## 12. Editor interaction *(planned – Phase 3)*
+## 12. Editor interaction *(implemented – Phase 3)*
 
-Input comes from the Input System through one `InputActionAsset` (Workspace action map: point, primary/
-secondary click, pan, zoom, delete, duplicate, undo/redo, select-all), read by a single `WorkspaceInput`
-controller. Gates have no per-object input handlers. Hit-testing is done against model geometry (node bounds, pin positions, wire segments) in a spatial grid
-rather than through physics colliders, keeping GameObjects pure views. Wire routing is orthogonal by default
-and recomputed for wires touching moved nodes only.
+```
+Input System actions --> WorkspaceInteraction (state machine, one Update)
+                                  | calls public API
+UI panels (toolbar, library) --> WorkspaceController --> CommandHistory --> CircuitDefinition (model)
+                                  |                                              | Changed events
+                                  | LateUpdate: Sync()                           v
+                                  +--> CircuitSession.RebuildIfDirty --> CircuitCompiler --> SimulationRunner
+                                  +--> CircuitPresenter.ApplyChanges(change log) <------------------+
+                                             |
+                                    pooled GateView / WireView (pure views)
+```
+
+- **Single input reader.** `WorkspaceInteraction` polls `WorkspaceControls` (an `InputActionMap`; the default
+  is built in code and can be replaced by an asset) once per frame. Gates have no input handlers. Pointer
+  input is ignored over UI, and shortcuts are ignored while a text field has focus (predicates injected by
+  the App).
+- **Model-based hit-testing** (`WorkspaceHitTester`) against `CircuitGeometry`: pins (screen-constant radius)
+  → gate bodies → wires (distance to path). No colliders.
+- **Geometry cache.** `CircuitGeometry` caches gate layouts and wire routes. The presenter forwards each model
+  change to it *before* updating views, so drawing and picking always agree. Only wires touching a moved
+  node are rerouted.
+- **Recompile policy.** Structural changes (nodes, connections, interface) mark the session dirty; moves,
+  rotations, labels and renames do not. Recompilation happens at most once per frame in `Sync()` (or
+  immediately before an input toggle), and input values carry over by port id.
+- **Signal views.** `CircuitPresenter.SetSimulation(context, scope)` builds a net → view-target index for the
+  displayed `CompiledInstance` (the root for now; a nested instance when inspecting in Phase 5). Each frame,
+  only nets in the change log are pushed to views. Phase 6 will put the animation controller between the
+  change log and `ApplyNetSignal`.
+- **Placement.** Clicking a library item arms placement: a ghost follows the pointer, a click places it, and
+  Shift keeps placing. Dragging an item places it on release. Positions snap to a 0.5-unit grid so pins align.
+- **Camera.** Drag and scroll apply immediately. Toolbar zoom/reset/frame use DOTween easing, which is killed
+  on direct manipulation and on destroy.
 
 ## 13. Extension points
 

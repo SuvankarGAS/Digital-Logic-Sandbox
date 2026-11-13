@@ -4,7 +4,9 @@
     "references": [
         "DigitalLogicSandbox.Utilities",
         "DigitalLogicSandbox.Core",
-        "DigitalLogicSandbox.Simulation"
+        "DigitalLogicSandbox.Components",
+        "DigitalLogicSandbox.Simulation",
+        "Unity.TextMeshPro"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

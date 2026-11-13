@@ -41,7 +41,7 @@ namespace DigitalLogicSandbox.Tests.EditMode
             [Prefix + "TruthTable"] = new[] { "Utilities", "Core", "Components", "Simulation" },
             [Prefix + "Commands"] = new[] { "Utilities", "Core", "Components", "GateLibrary" },
             [Prefix + "Persistence"] = new[] { "Utilities", "Core", "Components", "GateLibrary" },
-            [Prefix + "Rendering"] = new[] { "Utilities", "Core", "Simulation" },
+            [Prefix + "Rendering"] = new[] { "Utilities", "Core", "Components", "Simulation" },
             [Prefix + "Animation"] = new[] { "Utilities", "Core", "Simulation", "Rendering" },
             [Prefix + "CircuitEditor"] = new[]
             {

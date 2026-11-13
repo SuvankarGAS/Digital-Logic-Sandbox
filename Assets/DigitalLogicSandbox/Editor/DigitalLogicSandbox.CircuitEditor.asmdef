@@ -11,7 +11,8 @@
         "DigitalLogicSandbox.Rendering",
         "DigitalLogicSandbox.Animation",
         "Unity.InputSystem",
-        "DOTween.Modules"
+        "DOTween.Modules",
+        "UnityEngine.UI"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
