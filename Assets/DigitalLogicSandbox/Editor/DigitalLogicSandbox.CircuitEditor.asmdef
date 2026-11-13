@@ -1,0 +1,27 @@
+{
+    "name": "DigitalLogicSandbox.CircuitEditor",
+    "rootNamespace": "DigitalLogicSandbox.CircuitEditor",
+    "references": [
+        "DigitalLogicSandbox.Utilities",
+        "DigitalLogicSandbox.Core",
+        "DigitalLogicSandbox.Components",
+        "DigitalLogicSandbox.Simulation",
+        "DigitalLogicSandbox.GateLibrary",
+        "DigitalLogicSandbox.Commands",
+        "DigitalLogicSandbox.Rendering",
+        "DigitalLogicSandbox.Animation",
+        "Unity.InputSystem",
+        "DOTween.Modules"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "DOTween.dll"
+    ],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

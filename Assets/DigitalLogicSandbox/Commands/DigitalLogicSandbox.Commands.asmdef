@@ -1,0 +1,19 @@
+{
+    "name": "DigitalLogicSandbox.Commands",
+    "rootNamespace": "DigitalLogicSandbox.Commands",
+    "references": [
+        "DigitalLogicSandbox.Utilities",
+        "DigitalLogicSandbox.Core",
+        "DigitalLogicSandbox.Components",
+        "DigitalLogicSandbox.GateLibrary"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": true
+}

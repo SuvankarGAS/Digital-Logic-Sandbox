@@ -1,0 +1,43 @@
+{
+    "name": "DigitalLogicSandbox.Tests.EditMode",
+    "rootNamespace": "DigitalLogicSandbox.Tests.EditMode",
+    "references": [
+        "DigitalLogicSandbox.Utilities",
+        "DigitalLogicSandbox.Core",
+        "DigitalLogicSandbox.Components",
+        "DigitalLogicSandbox.Simulation",
+        "DigitalLogicSandbox.GateLibrary",
+        "DigitalLogicSandbox.TruthTable",
+        "DigitalLogicSandbox.TruthTable.UI",
+        "DigitalLogicSandbox.Commands",
+        "DigitalLogicSandbox.Persistence",
+        "DigitalLogicSandbox.Rendering",
+        "DigitalLogicSandbox.Animation",
+        "DigitalLogicSandbox.CircuitEditor",
+        "DigitalLogicSandbox.UI",
+        "DigitalLogicSandbox.App",
+        "Unity.TextMeshPro",
+        "UnityEngine.UI",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner",
+        "Unity.InputSystem",
+        "DOTween.Modules"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll",
+        "Newtonsoft.Json.dll",
+        "DOTween.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

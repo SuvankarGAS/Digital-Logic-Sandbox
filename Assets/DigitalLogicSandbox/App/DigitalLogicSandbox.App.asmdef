@@ -1,0 +1,34 @@
+{
+    "name": "DigitalLogicSandbox.App",
+    "rootNamespace": "DigitalLogicSandbox.App",
+    "references": [
+        "DigitalLogicSandbox.Utilities",
+        "DigitalLogicSandbox.Core",
+        "DigitalLogicSandbox.Components",
+        "DigitalLogicSandbox.Simulation",
+        "DigitalLogicSandbox.GateLibrary",
+        "DigitalLogicSandbox.TruthTable",
+        "DigitalLogicSandbox.TruthTable.UI",
+        "DigitalLogicSandbox.Commands",
+        "DigitalLogicSandbox.Persistence",
+        "DigitalLogicSandbox.Rendering",
+        "DigitalLogicSandbox.Animation",
+        "DigitalLogicSandbox.CircuitEditor",
+        "DigitalLogicSandbox.UI",
+        "Unity.TextMeshPro",
+        "UnityEngine.UI",
+        "Unity.InputSystem",
+        "DOTween.Modules"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "DOTween.dll"
+    ],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

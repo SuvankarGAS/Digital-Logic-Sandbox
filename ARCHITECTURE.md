@@ -1,0 +1,294 @@
+# Architecture – Digital Logic Sandbox
+
+Status: **Phase 1 (core circuit model) complete.** Sections marked *(planned)* describe the committed design for
+later phases; they become *(implemented)* as each phase lands. Changing a committed decision requires a
+strong technical reason recorded in `DEVELOPMENT_LOG.md`.
+
+---
+
+## 1. Guiding principles
+
+1. The circuit **model** (pure C# data) is the single source of truth. GameObjects are disposable views.
+2. Only **AND** and **NOT** are logic primitives. Everything else is a packaged circuit definition.
+3. Behaviour is derived from structure, never from names. No code anywhere may branch on a gate's name.
+4. Simulation is headless and engine-free; visualization consumes simulation **events** and never feeds back.
+5. Truth tables run the real engine in an **isolated context**; the live simulation is never touched.
+6. Every persisted artefact is versioned (project schema and individual gate definitions).
+
+---
+
+## 2. Module layering (enforced)
+
+Each module is its own assembly. Arrows mean "may reference". The graph is enforced by
+`Tests/EditMode/ArchitectureTests.cs`, which fails if any assembly gains an unlisted dependency or if an
+engine-free assembly references `UnityEngine`/`UnityEditor`.
+
+```
+                        ┌───────────── engine-free (noEngineReferences) ─────────────┐
+ Utilities ◄─ Core ◄─ Components ◄─ Simulation ◄─┬─ GateLibrary ◄─┬─ Commands
+                                                  │                └─ Persistence (+Newtonsoft.Json)
+                                                  └─ TruthTable
+                        └────────────────────────────────────────────────────────────┘
+                        ┌──────────────── Unity-dependent ───────────────────────────┐
+ Rendering (Core, Simulation) ◄─ Animation
+ CircuitEditor (Core..GateLibrary, Commands, Rendering, Animation)
+ TruthTable.UI (TruthTable, Simulation, TMP, UGUI)
+ UI (everything above, TMP, UGUI)
+ App (composition root: references everything; owns the scene bootstrap)
+                        └────────────────────────────────────────────────────────────┘
+```
+
+| Assembly | Folder | Engine | Responsibility |
+|---|---|---|---|
+| `DigitalLogicSandbox.Utilities` | `Utilities/` | no | Pooled collections, ring buffer queue, ID generation, guards |
+| `DigitalLogicSandbox.Core` | `Core/` | no | Circuit definitions, nodes, ports, connections, nets, signals, structural validation |
+| `DigitalLogicSandbox.Components` | `Components/` | no | Component evaluation contract, AND/NOT primitives, custom-component references |
+| `DigitalLogicSandbox.Simulation` | `Simulation/` | no | Hierarchy compiler (flattening), event-driven engine, contexts, diagnostics, change events |
+| `DigitalLogicSandbox.GateLibrary` | `GateLibrary/` | no | Definition library (versioned), packaging + packaging validation, dependency graph |
+| `DigitalLogicSandbox.TruthTable` | `TruthTable/` | no | Combination generation, isolated evaluation, CSV/text export, limits, cancellation |
+| `DigitalLogicSandbox.Commands` | `Commands/` | no | Reversible command model, undo/redo history |
+| `DigitalLogicSandbox.Persistence` | `Persistence/` | no | DTOs, JSON (de)serialization, schema migration, atomic save, autosave recovery |
+| `DigitalLogicSandbox.Rendering` | `Rendering/` | yes | Pooled gate/wire/pin views, wire mesh generation, signal styling |
+| `DigitalLogicSandbox.Animation` | `Animation/` | yes | Central signal-animation controller consuming simulation change events |
+| `DigitalLogicSandbox.CircuitEditor` | `Editor/` | yes | Workspace, camera, selection, placement, wiring, hit-testing, navigation |
+| `DigitalLogicSandbox.TruthTable.UI` | `TruthTable/UI/` | yes | Truth table panel |
+| `DigitalLogicSandbox.UI` | `UI/` | yes | Toolbar, library panel, inspector, bottom panel, dialogs, context menus |
+| `DigitalLogicSandbox.App` | `App/` | yes | Composition root, settings, application lifecycle |
+| `DigitalLogicSandbox.Tests.EditMode` | `Tests/EditMode/` | editor | Headless unit/integration/architecture tests |
+| `DigitalLogicSandbox.Tests.PlayMode` | `Tests/PlayMode/` | yes | Scene/view integration tests |
+
+**Decision – `Editor/` folder vs. namespace.** The folder is named `Editor/` as specified, but the assembly
+and namespace are `DigitalLogicSandbox.CircuitEditor`. Reasons: (a) a namespace segment called `Editor`
+shadows `UnityEditor.Editor` inside any `DigitalLogicSandbox.*` code and breaks custom inspectors;
+(b) Unity treats loose scripts in `Editor/` folders as editor-only. Because the folder is covered by an
+asmdef, the special-folder rule does not apply; `ArchitectureTests.RuntimeAssembly_IsCompiledIntoPlayer`
+proves the assembly ships in player builds.
+
+**Decision – App assembly.** Added beyond the §17 list as the single composition root, so no feature module
+needs to know about every other module.
+
+**Decision – Newtonsoft.Json.** `com.unity.nuget.newtonsoft-json` (Unity-maintained, already in the package
+cache) is an explicit dependency, referenced only by `Persistence` and tests. `JsonUtility` cannot express
+dictionaries, polymorphic payloads or `JObject`-based schema migrations, which §13 requires.
+
+**Decision – Input System.** `com.unity.inputsystem` 1.19.0 with *Active Input Handling = Input System Package
+(New)*. Only `CircuitEditor`, `UI` and `App` may reference `Unity.InputSystem`. UI uses
+`InputSystemUIInputModule` (not `StandaloneInputModule`). Editor interactions are driven by an
+`InputActionAsset` so bindings (pan, zoom, delete, undo/redo, duplicate) are remappable in one place.
+
+**Decision – DOTween (free, Demigiant).** Installed in `Assets/Plugins/Demigiant/DOTween` with the
+`DOTween.Modules` asmdef. Only `Animation`, `CircuitEditor`, `TruthTable.UI`, `UI` and `App` may reference it.
+DOTween drives *presentation* tweens (panel transitions, camera zoom/pan easing, gate placement/selection
+feedback, pin highlights, indicator pulses). It never runs simulation logic. Per-wire signal propagation is
+not one DOTween tween per wire: it stays in the central `AnimationController` tick (§8), because thousands of
+concurrent wire highlights must be allocation-free and ordered by propagation wave.
+
+**Third-party governance.** Every runtime asmdef sets `overrideReferences: true`, so precompiled DLLs
+(DOTween.dll, Newtonsoft.Json.dll) are never auto-referenced. `ArchitectureTests` holds an allowlist of
+which assembly may use which library and fails on anything else.
+
+---
+
+## 3. Circuit graph model *(implemented – Phase 1)*
+
+```
+CircuitDefinition                (Core.Circuit; frozen once published; identity = DefinitionId + Version)
+ ├─ Id: DefinitionId             stable GUID string, never reused, never derived from the name
+ ├─ Version: int                 explicit; a new version is CloneAsVersion(n) of the previous one
+ ├─ Name, Description, Category, Icon, CreatedUtc, ModifiedUtc
+ ├─ Inputs / Outputs: InterfacePort[]   (PortId, Name); display order = list order
+ ├─ Nodes: NodeDefinition[]      (Core.Nodes)
+ │    ├─ Id: NodeId              positive int, unique within the circuit, allocated by the circuit
+ │    ├─ Component: ComponentRef → Primitive("builtin.and") | Custom(DefinitionRef) | InputBoundary | OutputBoundary
+ │    ├─ Position: CircuitPoint (engine-free float grid units), Rotation (90° steps)
+ │    ├─ Label                   node metadata
+ │    └─ InterfacePort: PortId   boundary nodes only
+ └─ Connections: ConnectionDefinition[]  PinRef(source node, port) → PinRef(dest node, port)
+```
+
+Key rules and how they are enforced:
+
+| Rule | Enforced by |
+|---|---|
+| Unique node ids; restore keeps ids (`RestoreNode`/`RestoreBoundary`) | `CircuitDefinition` |
+| One driver per input pin (connections keyed by destination) | `CircuitDefinition.TryConnect` |
+| No connection from a node to itself | `CircuitDefinition.TryConnect` |
+| Removing a node removes its connections; removing a boundary removes its interface port | `CircuitDefinition.RemoveNode` |
+| Published definitions are immutable | `Freeze()`; every mutator throws afterwards |
+| Pins exist and have the right direction | `ConnectionRules.Check` (editor) / `CircuitValidator` (load, package) |
+
+- **PortIds are unique across all of a component's inputs and outputs** and independent of display order,
+  so renaming or reordering an interface never breaks connections in circuits that use the gate.
+- **Boundary nodes** (input switches / output indicators) are *utility components*, not logic gates. Each
+  is bound one-to-one to an `InterfacePort`, so packaging needs no separate mapping layer. Their fixed pin
+  layout is `BoundarySignatures` (single pin, id 0).
+- **Nets** are derived, never stored (`NetBuilder`): one driver output plus all inputs it drives.
+  Unconnected inputs read `Low` and produce a warning.
+- **Signal** is `enum Signal : byte { Low, High, Unknown, HighImpedance }`.
+- **Change notification.** Every mutation raises `CircuitDefinition.Changed` with an allocation-free
+  `CircuitChange` (kind + node/port/connection). Views, the simulation and the inspector sync from this
+  event, which is also what lets undo restore the visuals automatically.
+- `ComponentSignature` is the one shape description for every component kind (ordered `PortDescriptor`s).
+  A custom gate's signature is derived from (and cached by) its definition's interface.
+
+### Validation (`Core.Validation`)
+
+`CircuitValidator` reports `Diagnostic`s (severity, code, actionable message, node/pin/definition for UI
+highlighting) into a reusable `ValidationReport`:
+
+- Errors: missing component/definition, invalid source/destination pin, dangling connection, boundary/port
+  mismatch, duplicate port name within a direction, no outputs (when packaging), combinational cycle,
+  circular reference, hierarchy too deep.
+- Warnings: unconnected gate input, unused interface input (allowed intentionally), undriven output,
+  unnamed port.
+- **Cycles:** iterative Tarjan SCC (`Utilities.CycleFinder`, no recursion, tested with 100k vertices) on
+  the node graph. Custom gates are treated conservatively as all-inputs→all-outputs. Wiring a loop is
+  allowed in the editor (future latches need feedback); it is reported, not blocked.
+- **Hierarchy** (`HierarchyValidator`): DFS over custom references with memoised subtree heights. A
+  definition may not contain *any version of itself*, directly or transitively. Recursion is bounded by
+  `MaxHierarchyDepth` (default 32).
+
+## 4. Components and evaluation contract *(implemented – Phase 1)*
+
+`IPrimitiveComponent` (`Components.Abstractions`) declares `Id`, `DisplayName`, `Signature` and
+`void Evaluate(ReadOnlySpan<Signal> inputs, Span<Signal> outputs)`. Implementations are stateless,
+allocation-free singletons shared by every instance and context. `AndGate` and `NotGate` are the only
+implementations, and `PrimitiveRegistry.CreateDefault()` registers exactly those two. They use 3-valued logic:
+AND gives LOW if any input is LOW, else HIGH if all are HIGH, else UNKNOWN; NOT inverts binary values and
+maps the rest to UNKNOWN.
+
+`ComponentCatalog : IComponentResolver` is the only place that dispatches on `ComponentKind`: primitives come
+from the registry, custom gates from an `IDefinitionProvider` (the `DefinitionLibrary`), boundaries have fixed
+signatures. Everything else (validation, editor, renderer, simulation compiler) asks the resolver, so **no
+gate-specific code exists outside the two primitive classes**. Sequential primitives (Phase B) will add a
+separate `ISequentialComponent` with `Commit()`, keeping combinational evaluation pure.
+
+`DefinitionLibrary` (`GateLibrary.Custom`) stores published versions keyed by id and version, freezes them on
+insertion, and never replaces them. It exposes the latest version and the next version number, and raises
+`DefinitionAdded` so the library panel can refresh.
+
+## 5. Simulation lifecycle *(planned – Phase 2)*
+
+1. **Compile.** `CircuitCompiler` walks the root definition, recursively expanding custom nodes into a
+   flat `CompiledCircuit`: arrays of primitive instances, net indices, fan-out adjacency (CSR arrays), and
+   a `HierarchyMap` from instance path (`rootNode/childNode/...`) to net indices. Every placed custom gate
+   is expanded separately, so **instances never share state**. Expansion enforces a depth limit and
+   detects definition cycles (DFS colouring), producing diagnostics instead of recursing forever.
+   Combinational loops are found statically with Tarjan SCC on the flat graph.
+2. **Context.** `SimulationContext` holds the mutable state (net signal array, dirty flags, worklist)
+   for one compiled circuit. Topology is immutable and shareable; state is per-context. The live editor
+   and each truth-table run own separate contexts.
+3. **Propagate (event-driven).** Setting an input marks its fan-out dirty. A preallocated ring-buffer
+   worklist (no `PriorityQueue`, no LINQ, no per-step allocation) pops primitives, evaluates them and
+   enqueues fan-out only for nets whose value actually changed. Each change carries a *wave number*
+   (propagation depth). A configurable evaluation budget stops oscillation and reports the nets involved.
+4. **Events.** Changes are appended to a reusable `SignalChangeBuffer` (net, old, new, wave). Consumers
+   (animation, inspector, bottom panel) read it after `Settle()`; the engine never waits on them.
+5. **Controls.** Play = settle on every input change; Pause = queue input changes; Step = process one wave;
+   Reset = all nets to initial state. A future clock phase runs *after* combinational settle
+   (`Settle → Commit sequential → Settle`), so sequential logic slots in without rewriting the engine.
+
+Signals at any hierarchy level are read from the single flat context via `HierarchyMap`, which is what lets
+an opened custom gate show live values for *that specific instance*.
+
+## 6. Custom gate packaging *(planned – Phase 4)*
+
+`Packager` takes the current circuit (or a selection), the user-specified name/description/category/icon and
+the ordered boundary nodes, then validates: ≥1 output, unique port IDs/names, all references resolvable, no
+definition cycle (the new definition must not, transitively, contain itself), no unsupported combinational
+feedback (Tarjan), depth within limit. Unused inputs → warning. On success a new `DefinitionId` (v1) is
+added to the `DefinitionLibrary` with a **deep copy** of the graph; the source circuit is untouched unless
+the user opts to replace the selection with an instance of the new gate. Nested definitions are stored by
+reference, never duplicated.
+
+## 7. Hierarchy, inspection and versioning *(planned – Phase 5)*
+
+- `NavigationStack` of frames `(DefinitionRef, InstancePath, Mode)` drives the breadcrumbs
+  (`Main Circuit → ALU → Full Adder → Half Adder`); clicking a crumb pops to that frame. Each frame keeps
+  its own camera/selection state.
+- **Inspection mode** renders the referenced definition read-only, coloured from the live context through
+  `HierarchyMap`.
+- **Edit mode** edits a *draft copy*. Saving publishes `Version + 1` of the same `DefinitionId`; published
+  versions are immutable. The library computes reverse dependencies, lists circuits referencing older
+  versions, and offers *keep* or *update* per reference (an undoable command), re-validating dependents.
+
+## 8. Signal animation pipeline *(planned – Phase 6)*
+
+`Simulation (settle) → SignalChangeBuffer → AnimationController → WireView property updates`.
+One `AnimationController.LateUpdate()` drives all animations. For each changed net it schedules a
+travelling highlight along the wire polyline, delayed by `wave × waveDelay`, so the visual order follows
+the logical order. Animations are pooled structs in an array; a rapid re-toggle retargets the existing entry
+for that net. Wires are pooled mesh views with `MaterialPropertyBlock`s (state, progress); no per-wire
+coroutine or `Update()`. Disabling animation snaps views to the final state. DOTween handles the discrete presentation effects
+around this pipeline: pin/indicator pulses on change, gate placement pop-in, selection feedback and
+camera easing. Each effect is a recycled tween started from the same change events. LOW/HIGH/UNKNOWN/Z differ in
+colour **and** in thickness/dash pattern for colour-blind accessibility.
+
+## 9. Truth table generation *(planned – Phase 7)*
+
+`TruthTableGenerator` compiles the target definition and creates a **fresh `SimulationContext`**, so the live
+context never changes and nothing needs restoring. Rows are enumerated in binary order with input 0 as the
+most significant bit (`00, 01, 10, 11`). Work is time-sliced (rows per frame budget) via an iterator driven
+by the UI, with progress reporting and a `CancellationToken`. Limits (max inputs, max rows) are configurable;
+crossing a warning threshold requires confirmation. Circuits containing sequential components are rejected
+with an explanation. Export: CSV and tab-separated clipboard text.
+
+## 10. Persistence format *(planned – Phase 8)*
+
+```json
+{
+  "schemaVersion": 1,
+  "app": { "name": "Digital Logic Sandbox", "version": "0.1.0" },
+  "settings": { "grid": {}, "animation": { "enabled": true, "speed": 1.0 }, "truthTable": {} },
+  "rootCircuit": { "...CircuitDefinition DTO..." },
+  "definitions": [ { "id": "…", "version": 2, "...": "..." } ]
+}
+```
+
+- DTOs are separate from domain types; no Unity types are serialized.
+- Each `(id, version)` is written once, regardless of instance count.
+- Loading runs `IMigration` steps `vN → vN+1` over `JObject` before binding, then validates references.
+- Saves are atomic: write `*.tmp`, flush, then `File.Replace` keeping `*.bak`. Autosave writes a separate
+  recovery file; on startup an autosave newer than the project file is offered for recovery.
+
+## 11. Undo / redo *(planned – Phase 8, used from Phase 3)*
+
+`ICommand { Execute(); Undo(); }` operating on the **model only**; views re-sync from model change events,
+so undo restores the visual state automatically. Large operations (packaging, publishing a version) use
+composite commands holding targeted snapshots, never whole-project serialization.
+
+## 12. Editor interaction *(planned – Phase 3)*
+
+Input comes from the Input System through one `InputActionAsset` (Workspace action map: point, primary/
+secondary click, pan, zoom, delete, duplicate, undo/redo, select-all), read by a single `WorkspaceInput`
+controller. Gates have no per-object input handlers. Hit-testing is done against model geometry (node bounds, pin positions, wire segments) in a spatial grid
+rather than through physics colliders, keeping GameObjects pure views. Wire routing is orthogonal by default
+and recomputed for wires touching moved nodes only.
+
+## 13. Extension points
+
+| Future feature | Extension point |
+|---|---|
+| New primitives (only if ever needed) | Implement `IPrimitiveComponent`, register it |
+| Sequential logic / clocks | `ISequentialComponent` + commit phase in the engine loop |
+| Buses / multi-bit | `PortDefinition.Width`; net values become spans of `Signal` |
+| Tri-state, contention | `Signal.HighImpedance` + net resolver replacing the single-driver rule |
+| Displays (LED, 7-seg) | Output-side utility components with custom views; no logic change |
+| New file schema | Add an `IMigration` |
+
+---
+
+## 14. Coding conventions
+
+- C# 9, **block-scoped namespaces** (enforced as an error in `.editorconfig`). Namespace = assembly name +
+  subfolder (e.g. `DigitalLogicSandbox.Core.Circuit`).
+- `PascalCase` types/members/constants, `_camelCase` private fields, `I`-prefixed interfaces.
+- Braces always; `using` directives outside the namespace; one public type per file, file named after it.
+- Engine-free assemblies must not use `UnityEngine` (compile-enforced).
+- Third-party libraries only where allowlisted (§2, test-enforced). No legacy `UnityEngine.Input` calls.
+- Hot paths (engine, animation tick, hit-testing): no LINQ, no closures/lambdas, no boxing, no `foreach` over
+  interfaces; preallocate and reuse buffers.
+- Internals are visible to the test assemblies (`AssemblyInfo.cs`); prefer `internal` over `public` for
+  implementation details.
+- No `Update()` on per-gate/per-wire MonoBehaviours; a few central controllers tick everything.
+- Every phase ships with tests; `ArchitectureTests` must stay green.

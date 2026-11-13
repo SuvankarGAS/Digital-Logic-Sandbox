@@ -1,0 +1,14 @@
+{
+    "name": "DigitalLogicSandbox.Utilities",
+    "rootNamespace": "DigitalLogicSandbox.Utilities",
+    "references": [],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": true
+}

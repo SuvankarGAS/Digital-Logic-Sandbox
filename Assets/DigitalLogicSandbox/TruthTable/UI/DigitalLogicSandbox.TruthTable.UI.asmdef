@@ -1,0 +1,24 @@
+{
+    "name": "DigitalLogicSandbox.TruthTable.UI",
+    "rootNamespace": "DigitalLogicSandbox.TruthTable.UI",
+    "references": [
+        "DigitalLogicSandbox.Utilities",
+        "DigitalLogicSandbox.Core",
+        "DigitalLogicSandbox.Simulation",
+        "DigitalLogicSandbox.TruthTable",
+        "Unity.TextMeshPro",
+        "UnityEngine.UI",
+        "DOTween.Modules"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "DOTween.dll"
+    ],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
