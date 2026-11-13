@@ -24,6 +24,9 @@ namespace DigitalLogicSandbox.UI.Toolbar
         private Button _createGate;
         private Button _inspect;
 
+        /// <summary>Raised by the "Signals" button (signal visualization settings).</summary>
+        public event System.Action SignalSettingsRequested;
+
         /// <summary>Raised by the "Create Gate" button.</summary>
         public event System.Action CreateGateRequested;
 
@@ -75,6 +78,7 @@ namespace DigitalLogicSandbox.UI.Toolbar
             view._playPauseLabel = view._playPause.GetComponentInChildren<TextMeshProUGUI>();
             view._step = ui.Button("Step", rect, "Step", () => workspace.Step());
             view._resetSimulation = ui.Button("ResetSimulation", rect, "Reset Sim", workspace.ResetSimulation);
+            ui.Button("Signals", rect, "Signals", () => view.SignalSettingsRequested?.Invoke());
 
             ui.Separator(rect, vertical: true);
             view._createGate = ui.Button("CreateGate", rect, "Create Gate", () => view.CreateGateRequested?.Invoke());

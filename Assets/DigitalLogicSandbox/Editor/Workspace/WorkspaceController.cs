@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using DigitalLogicSandbox.Animation.Controllers;
+using DigitalLogicSandbox.Animation.Signals;
 using DigitalLogicSandbox.CircuitEditor.CameraControl;
 using DigitalLogicSandbox.CircuitEditor.Interaction;
 using DigitalLogicSandbox.CircuitEditor.Navigation;
@@ -19,6 +21,7 @@ using DigitalLogicSandbox.GateLibrary.Custom;
 using DigitalLogicSandbox.GateLibrary.Packaging;
 using DigitalLogicSandbox.Rendering;
 using DigitalLogicSandbox.Rendering.Gates;
+using DigitalLogicSandbox.Rendering.Wires;
 using DigitalLogicSandbox.Simulation.Engine;
 using DigitalLogicSandbox.Simulation.Propagation;
 using UnityEngine;
@@ -59,6 +62,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
         private bool _scopeDirty;
         private CircuitGeometry _geometry;
         private CircuitPresenter _presenter;
+        private SignalAnimationController _animation;
         private WorkspaceCamera _camera;
         private WorkspaceHitTester _hitTester;
         private WorkspaceInteraction _interaction;
@@ -118,6 +122,25 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
         public SelectionModel Selection => _selection;
 
         public CircuitPresenter Presenter => _presenter;
+
+        /// <summary>Presentation-only replay of signal changes (never affects logical values).</summary>
+        public SignalAnimationController SignalAnimation => _animation;
+
+        public SignalAnimationSettings AnimationSettings => _animation?.Settings;
+
+        /// <summary>How wire signal states are drawn.</summary>
+        public SignalVisualizationMode VisualizationMode
+        {
+            get => _presenter != null ? _presenter.VisualizationMode : SignalVisualizationMode.Standard;
+            set
+            {
+                if (_presenter != null)
+                {
+                    _presenter.SetVisualizationMode(value);
+                    MarkStatusDirty();
+                }
+            }
+        }
 
         public CircuitGeometry Geometry => _geometry;
 
@@ -208,6 +231,9 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
 
             _geometry = new CircuitGeometry(_catalog);
             _presenter = new CircuitPresenter(transform, setup.Theme, _geometry);
+            _animation = new SignalAnimationController(_presenter, setup.Theme,
+                setup.SignalAnimation ?? new SignalAnimationSettings { Enabled = false });
+            _animation.ActivityChanged += MarkStatusDirty;
             _hitTester = new WorkspaceHitTester(_geometry);
             _camera = new WorkspaceCamera(setup.Camera);
             _selectionRect = SelectionRectView.Create(transform, setup.Theme);
@@ -256,6 +282,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             }
 
             Sync();
+            _animation.Tick(Time.unscaledDeltaTime);
             if (_statusDirty)
             {
                 _statusDirty = false;
@@ -281,6 +308,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
                 _camera.StopAnimations();
             }
 
+            _animation?.Dispose();
             _presenter?.Dispose();
             _navigator?.Dispose();
             if (_grid != null)
@@ -335,7 +363,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             SignalChangeLog changes = session.Runner.Context.Changes;
             if (changes.Count > 0 || changes.Overflowed)
             {
-                _presenter.ApplyChanges(changes);
+                _animation.Consume(changes); // animated or instant; the simulation is already up to date
                 changes.Clear();
                 MarkStatusDirty();
             }
@@ -1027,6 +1055,13 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
                 Session.Runner.Reset();
                 MarkStatusDirty();
             }
+        }
+
+        /// <summary>Drops running signal animations and redraws every view from the simulation.</summary>
+        public void ResetVisualState()
+        {
+            EnsureInitialized();
+            _animation.ResetVisualState();
         }
 
         // ------------------------------------------------------------------------------------------------

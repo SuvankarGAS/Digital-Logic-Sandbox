@@ -314,17 +314,36 @@ CircuitNavigator (engine-free, CircuitEditor/Navigation)
   - Toolbar: "Inspect".
   - Opening a gate: double-click, context menu, inspector button or toolbar.
 
-## 8. Signal animation pipeline *(planned – Phase 6)*
+## 8. Signal animation pipeline *(implemented – Phase 6)*
 
-`Simulation (settle) → SignalChangeBuffer → AnimationController → WireView property updates`.
-One `AnimationController.LateUpdate()` drives all animations. For each changed net it schedules a
-travelling highlight along the wire polyline, delayed by `wave × waveDelay`, so the visual order follows
-the logical order. Animations are pooled structs in an array; a rapid re-toggle retargets the existing entry
-for that net. Wires are pooled mesh views with `MaterialPropertyBlock`s (state, progress); no per-wire
-coroutine or `Update()`. Disabling animation snaps views to the final state. DOTween handles the discrete presentation effects
-around this pipeline: pin/indicator pulses on change, gate placement pop-in, selection feedback and
-camera easing. Each effect is a recycled tween started from the same change events. LOW/HIGH/UNKNOWN/Z differ in
-colour **and** in thickness/dash pattern for colour-blind accessibility.
+`CircuitSession.Settle → SignalChangeLog (net, old, new, wave) → SignalAnimationController.Consume →
+Tick(dt) in WorkspaceController.LateUpdate → CircuitPresenter.ApplyNetSource / ApplyWireArrival → WireView.SetTransition`.
+
+- **Separation.** The engine settles immediately. The controller only reads the change log and drives views.
+  It never writes signals, and the simulation never waits for it.
+- **Scheduling.**
+  - Every changed net becomes one pooled `Pulse` holding a `WireTrip` per wire of the net (fan-out).
+  - Wave *k* starts when wave *k-1*'s longest wire arrives, plus `WaveGap`. Travel time is wire length divided
+    by `UnitsPerSecond`; both scale with the speed setting.
+  - A batch longer than `MaxBatchSeconds` is scaled down to fit.
+- **Updates.**
+  - At a pulse's start the source side updates (driver pins, input switches).
+  - Each wire draws its transition at the current progress.
+  - On arrival the destination side updates (wire, destination pin, output lamp).
+- **Robustness.**
+  - A new change on a net that is still animating from an earlier batch first completes the old pulse.
+  - Presenter rebinds (structural edits, navigation) drop every pulse.
+  - Logs that overflowed or exceed `MaxAnimatedWires` are applied instantly.
+  - Disabling animation completes everything to the true state.
+- **Allocation.** Pulses, trip lists, wave arrays and particles are pooled, and steady-state ticking
+  allocates nothing (verified by a test). There are no per-wire coroutines or `Update()` calls.
+- **Visual language.** `SignalStyle` (Standard / HighContrast) maps LOW/HIGH/UNKNOWN/Z to colour **and** line
+  width. The travelling front is a bright gradient key plus a wider width-curve key, with an optional pooled
+  particle dot.
+- **Settings.** `SignalAnimationSettings`: Enabled, Speed 0.25x–4x, ShowParticles, MaxBatchSeconds,
+  MaxAnimatedWires. They are serialized on `AppBootstrap` and edited live from the toolbar "Signals" popup.
+  "Reset visual state" drops pulses and repaints true values.
+- **DOTween** is used for camera easing and UI effects, not for wires.
 
 ## 9. Truth table generation *(planned – Phase 7)*
 

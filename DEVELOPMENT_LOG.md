@@ -10,8 +10,8 @@
 | 3 | Visual circuit editor | ✅ Complete (2026-11-13) |
 | 4 | Custom gate packaging | ✅ Complete (2026-11-14) |
 | 5 | Hierarchical composition & inspection | ✅ Complete (2026-11-14) |
-| 6 | Animated signal visualization | ⏳ Next |
-| 7 | Truth table generator | — |
+| 6 | Animated signal visualization | ✅ Complete (2026-11-14) |
+| 7 | Truth table generator | ⏳ Next |
 | 8 | Persistence & undo/redo | — |
 | 9 | Polish & optimization | — |
 
@@ -448,3 +448,70 @@ Delivered – see the Phase 3 section below.
 - Editing a gate opened from the library panel (without an instance) is not offered yet; open an instance.
 - Edits made while inspecting inside a draft are not possible by design (inspection is read-only); go back
   to the draft level to edit.
+
+---
+
+## Phase 6 – Animated signal visualization (2026-11-14)
+
+### Implemented
+- **Signal change events**: each `SignalChangeLog` entry carries the propagation *wave* in which the net changed.
+  The workspace hands the log to the animator once per frame, after the session settles.
+- **`SignalAnimationController`** (`Animation/Controllers`, plain C#, ticked once from `WorkspaceController.LateUpdate`):
+  - One pulse per changed net. Its front travels from the driver along every wire of the net (fan-out).
+  - Wave *k* starts when wave *k-1*'s longest wire arrives, plus a small gap, so the visuals follow the logical order.
+  - Batches longer than `MaxBatchSeconds` are compressed to fit, so deep circuits never lag behind.
+  - Rapid toggling: a pulse from an earlier batch on the same net snaps to its end before the new one starts,
+    so stale states are never shown. Glitches inside one batch are handled the same way.
+  - Pulses, trip lists and timing arrays are pooled, and ticking allocates nothing.
+  - Logs with structural edits, overflowed logs, or animation disabled fall back to instant display.
+  - When the presenter rebinds, all pulses are dropped.
+- **Presenter split** (`CircuitPresenter`):
+  - `ApplyNetSource`: driver pins and input switches update the moment a net changes.
+  - `ApplyWireArrival`: the wire, the destination pin and the output lamp update when the front arrives.
+  - Other additions: `GetNetWires`, `RefreshSignals`, `SignalsRefreshed`, `SetVisualizationMode`.
+- **`WireView`**:
+  - `SetTransition(from, to, progress)` draws the travelling front with the line gradient and width curve: new
+    value behind the front, a bright highlight at it, old value ahead.
+  - Path sampling: `Length`, `GetPointAt`.
+- **`SignalStyle`**: Standard and HighContrast modes. LOW/HIGH/UNKNOWN/Z always differ in **width as well as colour**.
+- **`SignalParticlePool`**: fixed-capacity, lazily created dots that mark each front (optional).
+- **`SignalAnimationSettings`** (serialized on `AppBootstrap`):
+  - Options: Enabled, Speed (0.25x–4x), ShowParticles, MaxBatchSeconds, MaxAnimatedWires.
+  - A `Changed` event applies changes live.
+- **UI**:
+  - Toolbar "Signals" popup: animate toggle, speed -/+, particles, high contrast, "Reset visual state".
+  - The status bar shows "propagating" while pulses run.
+
+### Decisions
+- **The simulation never waits.** The engine settles synchronously. The animator only replays the recorded
+  waves, and a wave is a visual timing unit, not a gate delay. Tests prove that net values are final before
+  any animation starts and are never changed by it.
+- **Wires use a batched controller instead of DOTween tweens.** Hundreds of wires can change at once, and one
+  allocation-free loop over pooled pulses is cheaper and easier to keep deterministic than one tween per wire.
+  DOTween remains in use for camera easing and UI effects.
+- **Width as well as colour** encodes signal state, so the visuals do not rely on colour alone.
+- **Tests run with animation off** (`WorkspaceSetup.SignalAnimation == null` → instant), so earlier phases are
+  unaffected. The app enables it through the serialized settings.
+- Animation settings will be persisted with the project in Phase 8.
+
+### Test results
+- EditMode: **232 / 232 passed**.
+- PlayMode: **37 / 37 passed** (17 new).
+  - `SignalAnimationTests` (16):
+    - Transitions: LOW→HIGH with immediate simulation; HIGH→LOW.
+    - Ordering and concurrency: wave order; fan-out; simultaneous changes; rapid toggling.
+    - Disabled animation: disabled; disabled mid-animation; logic never changed by animation.
+    - Robustness: reset visual state; deep-circuit compression; structural edits mid-animation.
+    - Allocations: zero-allocation ticking (`Is.Not.AllocatingGCMemory`), with a control test proving the
+      constraint detects allocations.
+    - Visualization-mode widths; settings clamping.
+  - `SignalSettingsUiTests` (1): in the real Main scene, the toolbar "Signals" popup drives the shared settings.
+- Manual: play-mode screenshot of a NAND built from AND + NOT, with the Signals popup open, energized
+  HIGH wires and the LOW output wire.
+
+### Known issues / deferred
+- Wire routing is still the simple orthogonal router from Phase 3, so pulses follow it. Better routing comes in
+  Phase 9.
+- Inside an inspected gate, nets are recoloured instantly, not animated, because the animator follows the
+  shown level's log.
+- Animation settings are not persisted until Phase 8.

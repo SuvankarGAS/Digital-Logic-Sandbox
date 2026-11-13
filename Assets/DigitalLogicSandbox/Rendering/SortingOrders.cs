@@ -6,6 +6,7 @@ namespace DigitalLogicSandbox.Rendering
         public const int Wire = 0;
         public const int SelectedWire = 1;
         public const int PreviewWire = 2;
+        public const int SignalSpark = 3;
         public const int GateOutline = 10;
         public const int GateFill = 11;
         public const int GateState = 12;

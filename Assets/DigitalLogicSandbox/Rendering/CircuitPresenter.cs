@@ -33,6 +33,7 @@ namespace DigitalLogicSandbox.Rendering
         private readonly HashSet<NodeId> _selectedNodes = new HashSet<NodeId>();
         private readonly List<ConnectionDefinition> _scratchConnections = new List<ConnectionDefinition>();
         private readonly List<PinRef> _highlightedPins = new List<PinRef>();
+        private readonly SignalStyle _style;
 
         private CircuitDefinition _circuit;
         private SimulationContext _context;
@@ -51,11 +52,25 @@ namespace DigitalLogicSandbox.Rendering
             _wireRoot.SetParent(root, false);
             _gateRoot = new GameObject("Gates").transform;
             _gateRoot.SetParent(root, false);
+            _style = new SignalStyle(theme);
             _gatePool = new ViewPool<GateView>(() => GateView.Create(_gateRoot, _theme));
-            _wirePool = new ViewPool<WireView>(() => WireView.Create(_wireRoot, _theme));
+            _wirePool = new ViewPool<WireView>(() => WireView.Create(_wireRoot, _theme, _style));
         }
 
+        /// <summary>
+        /// Raised after every full signal refresh (new simulation or scope, detach, overflow, rebind). Animation
+        /// layers drop in-flight transitions then, because the views already show the true values.
+        /// </summary>
+        public event Action SignalsRefreshed;
+
         public CircuitGeometry Geometry => _geometry;
+
+        /// <summary>True while views are bound to a simulation (signals can change).</summary>
+        public bool HasSimulation => _context != null && _scope != null;
+
+        public SignalVisualizationMode VisualizationMode => _style.Mode;
+
+        public Transform Root => _wireRoot.parent;
 
         public CircuitDefinition Circuit => _circuit;
 
@@ -90,6 +105,7 @@ namespace DigitalLogicSandbox.Rendering
             _geometry.Bind(circuit);
             _context = null;
             _scope = null;
+            SignalsRefreshed?.Invoke();
             if (circuit == null)
             {
                 return;
@@ -313,6 +329,7 @@ namespace DigitalLogicSandbox.Rendering
 
                         break;
                     case NetTargetKind.BoundaryState:
+                    case NetTargetKind.LampState:
                         if (_gates.TryGetValue(target.Node, out GateView boundary))
                         {
                             boundary.SetStateSignal(signal);
@@ -353,7 +370,7 @@ namespace DigitalLogicSandbox.Rendering
                     AddTarget(net, new NetTarget(NetTargetKind.InputPin, node.Id, p, default));
                     if (node.Component.Kind == ComponentKind.OutputBoundary)
                     {
-                        AddTarget(net, new NetTarget(NetTargetKind.BoundaryState, node.Id, 0, default));
+                        AddTarget(net, new NetTarget(NetTargetKind.LampState, node.Id, 0, default));
                     }
                 }
 
@@ -393,7 +410,108 @@ namespace DigitalLogicSandbox.Rendering
             list.Add(target);
         }
 
+        /// <summary>Re-applies the simulation's current values to every view (ends all visual transitions).</summary>
+        public void RefreshSignals()
+        {
+            RefreshAllSignals();
+        }
+
+        /// <summary>Switches how wire signal states are drawn (all wires update at once).</summary>
+        public void SetVisualizationMode(SignalVisualizationMode mode)
+        {
+            if (_style.Mode == mode)
+            {
+                return;
+            }
+
+            _style.Mode = mode;
+            foreach (WireView wire in _wires.Values)
+            {
+                wire.RefreshStyle();
+            }
+        }
+
+        /// <summary>Destination pins of every wire carrying <paramref name="net"/> (fan-out order).</summary>
+        public void GetNetWires(int net, List<PinRef> destinations)
+        {
+            if (!_netTargets.TryGetValue(net, out List<NetTarget> targets))
+            {
+                return;
+            }
+
+            for (int i = 0; i < targets.Count; i++)
+            {
+                if (targets[i].Kind == NetTargetKind.Wire)
+                {
+                    destinations.Add(targets[i].Wire);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Applies a net change on its driving side only: driver output pins and input-switch states. Wires and
+        /// destination pins keep their old state until <see cref="ApplyWireArrival"/>.
+        /// </summary>
+        public void ApplyNetSource(int net, Signal signal)
+        {
+            if (!_netTargets.TryGetValue(net, out List<NetTarget> targets))
+            {
+                return;
+            }
+
+            for (int i = 0; i < targets.Count; i++)
+            {
+                NetTarget target = targets[i];
+                if (target.Kind == NetTargetKind.OutputPin && _gates.TryGetValue(target.Node, out GateView gate))
+                {
+                    gate.SetOutputSignal(target.Index, signal);
+                }
+                else if (target.Kind == NetTargetKind.BoundaryState && _gates.TryGetValue(target.Node, out GateView source))
+                {
+                    source.SetStateSignal(signal);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Completes a signal's arrival over one wire: the wire settles to <paramref name="signal"/> and the
+        /// destination pin (and an output lamp) take the new value.
+        /// </summary>
+        public void ApplyWireArrival(PinRef destination, Signal signal)
+        {
+            if (_wires.TryGetValue(destination, out WireView wire))
+            {
+                wire.SetSignal(signal);
+            }
+
+            if (!_gates.TryGetValue(destination.Node, out GateView gate))
+            {
+                return;
+            }
+
+            PortId[] inputs = gate.Geometry.InputPorts;
+            for (int p = 0; p < inputs.Length; p++)
+            {
+                if (inputs[p] == destination.Port)
+                {
+                    gate.SetInputSignal(p, signal);
+                    break;
+                }
+            }
+
+            if (gate.Geometry.Kind == ComponentKind.OutputBoundary)
+            {
+                gate.SetStateSignal(signal);
+            }
+        }
+
         private void RefreshAllSignals()
+        {
+            RefreshAllSignalsCore();
+            SignalsRefreshed?.Invoke();
+        }
+
+        private void RefreshAllSignalsCore()
         {
             if (_context == null)
             {
@@ -611,7 +729,12 @@ namespace DigitalLogicSandbox.Rendering
             Wire,
             InputPin,
             OutputPin,
+
+            /// <summary>State of an input switch (driving side of its net).</summary>
             BoundaryState,
+
+            /// <summary>State of an output lamp (receiving side of its net).</summary>
+            LampState,
         }
 
         private readonly struct NetTarget

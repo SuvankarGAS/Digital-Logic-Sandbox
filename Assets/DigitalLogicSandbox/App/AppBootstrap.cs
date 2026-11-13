@@ -1,4 +1,5 @@
 using DG.Tweening;
+using DigitalLogicSandbox.Animation.Signals;
 using DigitalLogicSandbox.CircuitEditor.Interaction;
 using DigitalLogicSandbox.CircuitEditor.Workspace;
 using DigitalLogicSandbox.Components.Abstractions;
@@ -25,6 +26,9 @@ namespace DigitalLogicSandbox.App
 
         [Tooltip("Optional replacement bindings. Needs an action map named 'Workspace' with the standard actions.")]
         [SerializeField] private InputActionAsset _inputActions;
+
+        [Tooltip("Initial signal animation settings (the user can change them at runtime).")]
+        [SerializeField] private SignalAnimationSettings _signalAnimation = new SignalAnimationSettings();
 
         private WorkspaceControls _controls;
 
@@ -77,6 +81,7 @@ namespace DigitalLogicSandbox.App
                 Controls = _controls,
                 IsPointerOverUi = AppShell.IsPointerOverUi,
                 IsTextInputFocused = AppShell.IsTextInputFocused,
+                SignalAnimation = _signalAnimation ?? new SignalAnimationSettings(),
             });
 
             Shell = AppShell.Create(_theme, Workspace, Catalog, Library);

@@ -57,7 +57,7 @@ namespace DigitalLogicSandbox.UI.Panels
             view._workspace = workspace;
             view._ui = ui;
             view._status = view.Cell("Status", rect, 150f);
-            view._evaluations = view.Cell("Evaluations", rect, 150f);
+            view._evaluations = view.Cell("Evaluations", rect, 210f);
             view._values = view.Cell("Values", rect, 360f);
             view._message = view.Cell("Message", rect, -1f);
 
@@ -120,7 +120,8 @@ namespace DigitalLogicSandbox.UI.Panels
                     SetStatus("Running", _ui.Theme.TextPrimary);
                 }
 
-                _evaluations.text = "Evaluations: " + runner.EvaluationCount;
+                _evaluations.text = "Evaluations: " + runner.EvaluationCount +
+                    (_workspace.SignalAnimation != null && _workspace.SignalAnimation.IsAnimating ? "  - propagating" : string.Empty);
                 _values.text = DescribeValues(session);
             }
 

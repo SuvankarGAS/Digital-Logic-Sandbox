@@ -1,4 +1,5 @@
 using System;
+using DigitalLogicSandbox.Animation.Signals;
 using DigitalLogicSandbox.CircuitEditor.Interaction;
 using DigitalLogicSandbox.Components.Abstractions;
 using DigitalLogicSandbox.GateLibrary.Custom;
@@ -32,5 +33,11 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
         public SimulationOptions SimulationOptions { get; set; }
 
         public bool ShowGrid { get; set; } = true;
+
+        /// <summary>
+        /// Signal animation settings shared with the UI. Leave null for instant signal display (headless use and
+        /// tests); the application passes enabled settings.
+        /// </summary>
+        public SignalAnimationSettings SignalAnimation { get; set; }
     }
 }

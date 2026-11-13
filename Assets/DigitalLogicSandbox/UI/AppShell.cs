@@ -42,6 +42,8 @@ namespace DigitalLogicSandbox.UI
 
         public VersionSaveDialog VersionSaveDialog { get; private set; }
 
+        public SignalSettingsPanel SignalSettings { get; private set; }
+
         public Canvas Canvas => _canvas;
 
         public static AppShell Create(VisualTheme theme, WorkspaceController workspace, ComponentCatalog catalog,
@@ -65,10 +67,12 @@ namespace DigitalLogicSandbox.UI
             shell.StatusBar = StatusBarView.Create(go.transform, shell.Factory, workspace);
             shell.Inspector = InspectorPanel.Create(go.transform, shell.Factory, workspace);
             shell.NavigationBar = NavigationBar.Create(go.transform, shell.Factory, workspace);
+            shell.SignalSettings = SignalSettingsPanel.Create(go.transform, shell.Factory, workspace);
             shell.ContextMenu = ContextMenuView.Create(go.transform, shell.Factory, workspace);
             shell.PackagingDialog = PackagingDialog.Create(go.transform, shell.Factory, workspace);
             shell.VersionSaveDialog = VersionSaveDialog.Create(go.transform, shell.Factory, workspace);
 
+            shell.Toolbar.SignalSettingsRequested += shell.SignalSettings.Toggle;
             shell.Toolbar.CreateGateRequested += () => shell.PackagingDialog.Open(selectionOnly: false);
             shell.Inspector.PackageRequested += selectionOnly => shell.PackagingDialog.Open(selectionOnly);
             shell.ContextMenu.PackageRequested += selectionOnly => shell.PackagingDialog.Open(selectionOnly);
