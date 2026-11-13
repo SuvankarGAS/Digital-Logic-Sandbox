@@ -14,11 +14,11 @@ namespace DigitalLogicSandbox.Commands.Library
         private readonly DefinitionLibrary _library;
         private readonly CircuitDefinition _definition;
 
-        public PublishDefinitionCommand(DefinitionLibrary library, CircuitDefinition definition)
+        public PublishDefinitionCommand(DefinitionLibrary library, CircuitDefinition definition, string description = null)
         {
             _library = library ?? throw new ArgumentNullException(nameof(library));
             _definition = definition ?? throw new ArgumentNullException(nameof(definition));
-            Description = "Package gate '" + definition.Name + "'";
+            Description = description ?? "Package gate '" + definition.Name + "'";
         }
 
         public string Description { get; }

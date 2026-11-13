@@ -2,6 +2,7 @@ using DigitalLogicSandbox.CircuitEditor.Workspace;
 using DigitalLogicSandbox.Components.Abstractions;
 using DigitalLogicSandbox.GateLibrary.Custom;
 using DigitalLogicSandbox.Rendering;
+using DigitalLogicSandbox.UI.ContextMenus;
 using DigitalLogicSandbox.UI.Dialogs;
 using DigitalLogicSandbox.UI.Inspector;
 using DigitalLogicSandbox.UI.Panels;
@@ -14,7 +15,8 @@ using UnityEngine.UI;
 namespace DigitalLogicSandbox.UI
 {
     /// <summary>
-    /// Screen-space UI around the workspace: toolbar (top), gate library (left) and status bar (bottom). The
+    /// Screen-space UI around the workspace: toolbar (top), breadcrumb bar, gate library (left), inspector (right), status bar (bottom), context menu and
+    /// modal dialogs. The
     /// workspace camera renders full screen behind the panels. Pointer input over the panels is filtered out by
     /// the workspace through <see cref="IsPointerOverUi"/>.
     /// </summary>
@@ -33,6 +35,12 @@ namespace DigitalLogicSandbox.UI
         public InspectorPanel Inspector { get; private set; }
 
         public PackagingDialog PackagingDialog { get; private set; }
+
+        public NavigationBar NavigationBar { get; private set; }
+
+        public ContextMenuView ContextMenu { get; private set; }
+
+        public VersionSaveDialog VersionSaveDialog { get; private set; }
 
         public Canvas Canvas => _canvas;
 
@@ -56,10 +64,16 @@ namespace DigitalLogicSandbox.UI
             shell.Toolbar = ToolbarView.Create(go.transform, shell.Factory, workspace);
             shell.StatusBar = StatusBarView.Create(go.transform, shell.Factory, workspace);
             shell.Inspector = InspectorPanel.Create(go.transform, shell.Factory, workspace);
+            shell.NavigationBar = NavigationBar.Create(go.transform, shell.Factory, workspace);
+            shell.ContextMenu = ContextMenuView.Create(go.transform, shell.Factory, workspace);
             shell.PackagingDialog = PackagingDialog.Create(go.transform, shell.Factory, workspace);
+            shell.VersionSaveDialog = VersionSaveDialog.Create(go.transform, shell.Factory, workspace);
 
             shell.Toolbar.CreateGateRequested += () => shell.PackagingDialog.Open(selectionOnly: false);
             shell.Inspector.PackageRequested += selectionOnly => shell.PackagingDialog.Open(selectionOnly);
+            shell.ContextMenu.PackageRequested += selectionOnly => shell.PackagingDialog.Open(selectionOnly);
+            shell.Inspector.SaveDraftRequested += shell.VersionSaveDialog.Open;
+            shell.NavigationBar.SaveRequested += shell.VersionSaveDialog.Open;
             return shell;
         }
 

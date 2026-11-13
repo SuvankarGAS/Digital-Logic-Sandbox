@@ -171,9 +171,13 @@ namespace DigitalLogicSandbox.Rendering
                         ? primitive.DisplayName
                         : "? " + component.PrimitiveId;
                 case ComponentKind.Custom:
-                    return _catalog.TryGetDefinition(component.Definition, out CircuitDefinition definition)
-                        ? definition.Name
-                        : "Missing gate";
+                    if (!_catalog.TryGetDefinition(component.Definition, out CircuitDefinition definition))
+                    {
+                        return "Missing gate";
+                    }
+
+                    // Show the version once a gate has several, so old and new instances are distinguishable.
+                    return definition.Version > 1 ? definition.Name + " v" + definition.Version : definition.Name;
                 case ComponentKind.InputBoundary:
                     return "Input";
                 default:

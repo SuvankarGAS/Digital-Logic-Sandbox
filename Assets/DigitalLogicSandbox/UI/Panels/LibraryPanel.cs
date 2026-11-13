@@ -121,7 +121,7 @@ namespace DigitalLogicSandbox.UI.Panels
                 ComponentSignature signature = definition.GetSignature();
                 LibraryItemView item = LibraryItemView.Create(_customRoot, _ui, _workspace,
                     new PlacementRequest(ComponentRef.Custom(definition.Reference), definition.Name),
-                    definition.Name, Describe(signature));
+                    definition.Name, Describe(signature) + (definition.Version > 1 ? "  -  v" + definition.Version : string.Empty));
                 _customItems.Add(item);
                 _items.Add(item);
             }

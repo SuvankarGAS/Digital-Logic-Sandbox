@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using DigitalLogicSandbox.CircuitEditor.Navigation;
 using DigitalLogicSandbox.CircuitEditor.Workspace;
 using DigitalLogicSandbox.Components.Abstractions;
 using DigitalLogicSandbox.Core.Circuit;
@@ -35,6 +36,9 @@ namespace DigitalLogicSandbox.UI.Inspector
 
         /// <summary>Requested by the "Create Custom Gate" buttons; argument = package selection only.</summary>
         public event Action<bool> PackageRequested;
+
+        /// <summary>Raised by "Save as new version..." while a gate is being edited.</summary>
+        public event Action SaveDraftRequested;
 
         public string HeaderText => _header.text;
 
@@ -75,7 +79,8 @@ namespace DigitalLogicSandbox.UI.Inspector
 
             workspace.StatusChanged += panel.OnStatusChanged;
             workspace.Selection.Changed += panel.MarkRebuild;
-            workspace.History.Changed += panel.MarkRebuild;
+            workspace.Navigator.HistoryChanged += panel.MarkRebuild;
+            workspace.NavigationChanged += panel.MarkRebuild;
             workspace.Library.DefinitionAdded += panel.OnLibraryChanged;
             workspace.Library.DefinitionRemoved += panel.OnLibraryChanged;
             panel.Rebuild();
@@ -147,13 +152,18 @@ namespace DigitalLogicSandbox.UI.Inspector
 
         private void BuildCircuit(CircuitDefinition circuit)
         {
-            _header.text = "Circuit";
+            NavigationLevel level = _workspace.CurrentLevel;
+            _header.text = level == null || level.Kind == NavigationLevelKind.Root
+                ? "Circuit"
+                : level.IsDraft ? "Editing gate" : "Custom gate (inspecting)";
+            BuildLevelSection(level);
+            bool editable = _workspace.IsEditable;
             _ui.FieldRow(_content, "Name", circuit.Name,
-                value => _workspace.SetCircuitProperties(value, circuit.Description, circuit.Category));
+                value => _workspace.SetCircuitProperties(value, circuit.Description, circuit.Category)).interactable = editable;
             _ui.FieldRow(_content, "Description", circuit.Description,
-                value => _workspace.SetCircuitProperties(circuit.Name, value, circuit.Category));
+                value => _workspace.SetCircuitProperties(circuit.Name, value, circuit.Category)).interactable = editable;
             _ui.FieldRow(_content, "Category", circuit.Category,
-                value => _workspace.SetCircuitProperties(circuit.Name, circuit.Description, value));
+                value => _workspace.SetCircuitProperties(circuit.Name, circuit.Description, value)).interactable = editable;
 
             int gates = 0;
             for (int i = 0; i < circuit.Nodes.Count; i++)
@@ -167,6 +177,11 @@ namespace DigitalLogicSandbox.UI.Inspector
             BuildInterfaceList(circuit, circuit.Inputs, "Input interface", input: true);
             BuildInterfaceList(circuit, circuit.Outputs, "Output interface", input: false);
 
+            if (!_workspace.CanPackage)
+            {
+                return;
+            }
+
             _ui.Caption(_content, "Packaging");
             TextMeshProUGUI note = _ui.Text("Note", _content,
                 "Turn this circuit into a reusable gate. Its inputs and outputs become the gate's pins.", 12f,
@@ -174,6 +189,38 @@ namespace DigitalLogicSandbox.UI.Inspector
             note.enableWordWrapping = true;
             note.gameObject.AddComponent<LayoutElement>().preferredHeight = 34f;
             _ui.Button("Package", _content, "Create Custom Gate...", () => PackageRequested?.Invoke(false));
+        }
+
+        /// <summary>Mode explanation and actions for inspected gates and drafts.</summary>
+        private void BuildLevelSection(NavigationLevel level)
+        {
+            if (level == null || level.Kind == NavigationLevelKind.Root)
+            {
+                return;
+            }
+
+            string text = level.IsDraft
+                ? "Draft of version " + level.Circuit.Version + ". Existing instances keep using " + level.DraftSource +
+                  " until you save."
+                : level.CanToggleInputs
+                    ? "Read-only view of this gate's implementation."
+                    : "Read-only view. Signals are live values of this instance; its inputs are driven by the enclosing circuit.";
+            TextMeshProUGUI note = _ui.Text("Mode", _content, text, 12f,
+                level.IsDraft ? _ui.Theme.Warning : _ui.Theme.TextSecondary, TextAlignmentOptions.TopLeft);
+            note.enableWordWrapping = true;
+            note.gameObject.AddComponent<LayoutElement>().preferredHeight = 48f;
+            if (level.IsDraft)
+            {
+                _ui.Button("SaveDraft", _content, "Save as new version...", () => SaveDraftRequested?.Invoke())
+                    .interactable = level.HasUnsavedChanges;
+                _ui.Button("DiscardDraft", _content, "Discard changes", () => _workspace.DiscardDraft());
+            }
+            else
+            {
+                _ui.Button("Edit", _content, "Edit implementation", () => _workspace.BeginEdit())
+                    .interactable = _workspace.Navigator.CanBeginEdit(out _);
+                _ui.Button("Up", _content, "Back to parent circuit", () => _workspace.NavigateUp());
+            }
         }
 
         private void BuildInterfaceList(CircuitDefinition circuit, IReadOnlyList<InterfacePort> ports, string title,
@@ -196,6 +243,7 @@ namespace DigitalLogicSandbox.UI.Inspector
                 TMP_InputField field = _ui.FieldRow(_content, (i + 1) + ".", port.Name,
                     value => _workspace.RenameInterfacePort(port.Id, value.Trim()), 28f);
                 field.characterLimit = 16;
+                field.interactable = _workspace.IsEditable;
                 if (circuit.TryGetBoundaryNode(port.Id, out NodeId node))
                 {
                     TextMeshProUGUI value = _ui.Text("Value", field.transform.parent, "0", 12.5f, _ui.Theme.TextPrimary,
@@ -227,6 +275,7 @@ namespace DigitalLogicSandbox.UI.Inspector
                 TMP_InputField field = _ui.FieldRow(_content, "Port name", port?.Name ?? string.Empty,
                     value => _workspace.RenameInterfacePort(node.InterfacePort, value.Trim()));
                 field.characterLimit = 16;
+                field.interactable = _workspace.IsEditable;
                 int index = input ? circuit.IndexOfInput(node.InterfacePort) : circuit.IndexOfOutput(node.InterfacePort);
                 _ui.Property(_content, "Order", (index + 1) + " of " + (input ? circuit.Inputs.Count : circuit.Outputs.Count));
                 _liveValues.Add(LiveValue.ForBoundary(_ui.Property(_content, "Value", "0"), node.Id, input));
@@ -262,7 +311,16 @@ namespace DigitalLogicSandbox.UI.Inspector
             }
 
             _ui.Caption(_content, "Actions");
-            _ui.Button("Package", _content, "Create Custom Gate from selection...", () => PackageRequested?.Invoke(true));
+            if (node.Component.Kind == ComponentKind.Custom)
+            {
+                _ui.Button("Open", _content, "Open Internal Circuit", () => _workspace.OpenNode(id)).interactable =
+                    _workspace.CanOpenNode(id);
+            }
+
+            if (_workspace.CanPackage)
+            {
+                _ui.Button("Package", _content, "Create Custom Gate from selection...", () => PackageRequested?.Invoke(true));
+            }
         }
 
         private void BuildCustomGateInfo(DefinitionRef reference)
@@ -333,8 +391,11 @@ namespace DigitalLogicSandbox.UI.Inspector
             _ui.Property(_content, "Gates", gates.ToString(CultureInfo.InvariantCulture));
             _ui.Property(_content, "Inputs", inputs.ToString(CultureInfo.InvariantCulture));
             _ui.Property(_content, "Outputs", outputs.ToString(CultureInfo.InvariantCulture));
-            _ui.Caption(_content, "Actions");
-            _ui.Button("Package", _content, "Create Custom Gate from selection...", () => PackageRequested?.Invoke(true));
+            if (_workspace.CanPackage)
+            {
+                _ui.Caption(_content, "Actions");
+                _ui.Button("Package", _content, "Create Custom Gate from selection...", () => PackageRequested?.Invoke(true));
+            }
         }
 
         private void BuildWire(CircuitDefinition circuit, PinRef destination)
@@ -348,7 +409,8 @@ namespace DigitalLogicSandbox.UI.Inspector
             _ui.Property(_content, "Source", DescribePin(circuit, connection.Source), 80f);
             _ui.Property(_content, "Destination", DescribePin(circuit, destination), 80f);
             _liveValues.Add(LiveValue.ForWire(_ui.Property(_content, "Signal", "-", 80f), destination));
-            _ui.Button("Delete", _content, "Delete wire", () => _workspace.DeleteWire(destination));
+            _ui.Button("Delete", _content, "Delete wire", () => _workspace.DeleteWire(destination)).interactable =
+                _workspace.IsEditable;
         }
 
         // ------------------------------------------------------------------------------------------------
@@ -468,7 +530,8 @@ namespace DigitalLogicSandbox.UI.Inspector
 
             _workspace.StatusChanged -= OnStatusChanged;
             _workspace.Selection.Changed -= MarkRebuild;
-            _workspace.History.Changed -= MarkRebuild;
+            _workspace.Navigator.HistoryChanged -= MarkRebuild;
+            _workspace.NavigationChanged -= MarkRebuild;
             if (_workspace.Library != null)
             {
                 _workspace.Library.DefinitionAdded -= OnLibraryChanged;

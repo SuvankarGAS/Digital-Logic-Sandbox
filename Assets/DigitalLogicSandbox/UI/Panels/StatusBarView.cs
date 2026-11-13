@@ -22,6 +22,9 @@ namespace DigitalLogicSandbox.UI.Panels
     {
         private const int MaxListedPorts = 8;
 
+        /// <summary>How long a notification replaces the validation message.</summary>
+        public const float NotificationSeconds = 6f;
+
         private readonly StringBuilder _builder = new StringBuilder(128);
 
         private WorkspaceController _workspace;
@@ -30,6 +33,8 @@ namespace DigitalLogicSandbox.UI.Panels
         private TextMeshProUGUI _evaluations;
         private TextMeshProUGUI _message;
         private TextMeshProUGUI _values;
+        private string _notification;
+        private float _notificationUntil;
 
         public string StatusText => _status.text;
 
@@ -57,8 +62,26 @@ namespace DigitalLogicSandbox.UI.Panels
             view._message = view.Cell("Message", rect, -1f);
 
             workspace.StatusChanged += view.Refresh;
+            workspace.Notification += view.ShowNotification;
             view.Refresh();
             return view;
+        }
+
+        /// <summary>Shows a transient message (e.g. a refused edit or a saved version).</summary>
+        public void ShowNotification(string message)
+        {
+            _notification = message;
+            _notificationUntil = Time.unscaledTime + NotificationSeconds;
+            Refresh();
+        }
+
+        private void Update()
+        {
+            if (_notification != null && Time.unscaledTime > _notificationUntil)
+            {
+                _notification = null;
+                Refresh();
+            }
         }
 
         public void Refresh()
@@ -99,6 +122,22 @@ namespace DigitalLogicSandbox.UI.Panels
 
                 _evaluations.text = "Evaluations: " + runner.EvaluationCount;
                 _values.text = DescribeValues(session);
+            }
+
+            if (_workspace.CurrentLevel != null && !_workspace.IsEditable)
+            {
+                _status.text = "Inspecting - " + _status.text;
+            }
+            else if (_workspace.CurrentLevel != null && _workspace.CurrentLevel.IsDraft)
+            {
+                _status.text = "Editing - " + _status.text;
+            }
+
+            if (_notification != null)
+            {
+                _message.text = _notification;
+                _message.color = _ui.Theme.Accent;
+                return;
             }
 
             DescribeFirstProblem(report);
@@ -199,6 +238,7 @@ namespace DigitalLogicSandbox.UI.Panels
             if (_workspace != null)
             {
                 _workspace.StatusChanged -= Refresh;
+                _workspace.Notification -= ShowNotification;
             }
         }
     }

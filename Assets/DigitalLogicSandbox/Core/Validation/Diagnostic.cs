@@ -46,6 +46,7 @@ namespace DigitalLogicSandbox.Core.Validation
         NoInputs,
         DuplicateGateName,
         InterfaceMismatch,
+        CircuitReadOnly,
     }
 
     /// <summary>A single validation finding with enough context for the UI to highlight the culprit.</summary>

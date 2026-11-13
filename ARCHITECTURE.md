@@ -262,16 +262,57 @@ WorkspaceController.PreviewPackaging / PackageCustomGate ──► CircuitPackag
 - **Instancing.** The compiler expands each instance into its own gates and nets (Phase 2), so instances
   never share state. Custom gates show only their external pins, labelled with the interface names.
 
-## 7. Hierarchy, inspection and versioning *(planned – Phase 5)*
+## 7. Hierarchy, inspection and versioning *(implemented – Phase 5)*
 
-- `NavigationStack` of frames `(DefinitionRef, InstancePath, Mode)` drives the breadcrumbs
-  (`Main Circuit → ALU → Full Adder → Half Adder`); clicking a crumb pops to that frame. Each frame keeps
-  its own camera/selection state.
-- **Inspection mode** renders the referenced definition read-only, coloured from the live context through
-  `HierarchyMap`.
-- **Edit mode** edits a *draft copy*. Saving publishes `Version + 1` of the same `DefinitionId`; published
-  versions are immutable. The library computes reverse dependencies, lists circuits referencing older
-  versions, and offers *keep* or *update* per reference (an undoable command), re-validating dependents.
+```
+CircuitNavigator (engine-free, CircuitEditor/Navigation)
+  levels: [Root(main circuit, root session, root history)]
+          [Inspect(definition, session = owner's, path = node ids from that session's root)]
+          [Draft(definition vN+1, own session, own history, DraftSource = vN)]   ← at most one
+  TryOpen(node)       checks: custom gate · definition resolvable · id not already on the path · depth limit
+  TryNavigateTo(i)    refuses to leave a draft with unsaved changes (unless discardChanges)
+  TryBeginEdit()      replaces the top Inspect level by a Draft (CloneAsVersion(NextVersion))
+  DiscardDraft()      drops the draft and goes back to inspecting vN
+  ResolveScope(level) walks Compiled.Root.TryGetChild(path) → CompiledInstance whose nets colour the views
+  ValidateStack()     drops levels whose node vanished or no longer references the shown definition
+```
+
+- **One presenter, many levels.** `WorkspaceController` always works on `Navigator.Current`: `Circuit`,
+  `Session` and `History` follow the level. On a level change the presenter is rebound, and
+  `SetSimulation(context, scope)` makes an inspected gate show the **live signals of that particular
+  instance** (the same `SimulationContext` as its parent; changes reach the views through the normal change
+  log). Each level remembers its camera view.
+- **Read-only inspection.** Inspect levels have no history; every editing call (place, connect, delete,
+  duplicate, rotate, move, rename, properties, packaging) is refused with a `Notification`. Inputs inside an
+  instance cannot be toggled because the parent drives them (`CanToggleInputs` is true only at a session root).
+  The interaction layer never starts wiring or dragging there.
+- **Edit mode.** A draft is a mutable copy with the same `DefinitionId` and the next version number. It has its
+  own `CircuitSession` (inputs toggleable, so the user can test the edit in isolation) and its own undo
+  history. Published versions are frozen and never modified. Placing a gate that contains the draft's gate
+  (`DefinitionVersioning.DependsOn`) is refused, and the validator reports circular references.
+- **Saving a version** (`WorkspaceController.SaveDraft(mode)`):
+  1. The draft is validated with the packaging rules (`CircuitPackager.ValidateDefinition`).
+  2. `DefinitionVersioning.Plan` builds the publish set and the old → new reference map. With
+     `UpdateEverywhere`, every latest definition that uses a planned definition gets a retargeted new version
+     too (fixed point, dependencies first).
+  3. One `CompositeCommand` on the **root** history: `PublishDefinitionCommand` for each new version, then
+     `RetargetReferencesCommand` on the main circuit unless the mode is `KeepReferences`.
+  4. Navigation returns to the main circuit. One undo withdraws everything.
+- **Retargeting** (`ComponentRetargeting`) swaps a node's `ComponentRef` and keeps its id, position, rotation
+  and label. Connections are re-made wherever the new version still has the pin, matched by stable `PortId`;
+  the rest are reported as dropped. `Revert` restores the exact previous state.
+- **Impact analysis** (`AnalyzeImpact`): instances in the main circuit, direct dependents, number of cascaded
+  versions and the connections each mode would drop. It runs on probes, so nothing changes. The save dialog
+  shows it.
+- **Old references stay valid.** Old versions remain in the library. A circuit that keeps v1 keeps v1's
+  behaviour. Gate titles show `vN` for N > 1, so mixed versions are distinguishable.
+- **UI.**
+  - `NavigationBar`: breadcrumbs, a mode badge and Edit / Save / Discard.
+  - `ContextMenuView`: right-click without dragging.
+  - `VersionSaveDialog`.
+  - Inspector: mode section and "Open Internal Circuit".
+  - Toolbar: "Inspect".
+  - Opening a gate: double-click, context menu, inspector button or toolbar.
 
 ## 8. Signal animation pipeline *(planned – Phase 6)*
 

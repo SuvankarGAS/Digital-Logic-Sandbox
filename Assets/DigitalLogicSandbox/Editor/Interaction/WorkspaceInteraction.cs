@@ -23,12 +23,16 @@ namespace DigitalLogicSandbox.CircuitEditor.Interaction
     /// - Primary on a node: select and drag. A click on an input boundary toggles it.
     /// - Primary on a wire: select it. Primary on empty space: rectangle select.
     /// - Middle/secondary drag, or Space+primary: pan. Scroll: zoom at the cursor.
+    /// - Double-click a custom gate: open its internal circuit. Right-click without dragging: context menu.
+    /// - Escape with nothing selected inside a gate: go up one level.
+    /// - In read-only (inspection) levels, pins and nodes can be selected but nothing is wired, moved or toggled.
     /// </summary>
     internal sealed class WorkspaceInteraction
     {
         private const float DragThresholdPixels = 4f;
         private const float PinPickPixels = 10f;
         private const float WirePickPixels = 6f;
+        private const float DoubleClickSeconds = 0.35f;
 
         private readonly WorkspaceController _workspace;
         private readonly WorkspaceControls _controls;
@@ -44,6 +48,9 @@ namespace DigitalLogicSandbox.CircuitEditor.Interaction
         private bool _pressAdditive;
         private bool _pressWasSelected;
         private InputAction _panButton;
+        private float _panDistance;
+        private float _lastClickTime = -10f;
+        private NodeId _lastClickNode;
 
         private NodeId[] _dragNodes;
         private CircuitPoint[] _dragFrom;
@@ -164,6 +171,10 @@ namespace DigitalLogicSandbox.CircuitEditor.Interaction
                 {
                     _workspace.CancelPlacement();
                 }
+                else if (_workspace.Selection.IsEmpty && _workspace.Navigator.CurrentIndex > 0)
+                {
+                    _workspace.NavigateUp();
+                }
                 else
                 {
                     _workspace.Selection.Clear();
@@ -253,6 +264,19 @@ namespace DigitalLogicSandbox.CircuitEditor.Interaction
             _pressWorld = world;
             _pressAdditive = _controls.MultiSelect.IsPressed();
 
+            if (overPin && !_workspace.IsEditable)
+            {
+                // Read-only level: pins only select their gate (or the wire feeding an input).
+                if (direction == PortDirection.Input && Circuit.IsDriven(pin))
+                {
+                    _workspace.Selection.SelectWire(pin);
+                    return;
+                }
+
+                overPin = false;
+                hoverNode = pin.Node;
+            }
+
             if (overPin)
             {
                 if (direction == PortDirection.Input && Circuit.IsDriven(pin))
@@ -270,7 +294,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Interaction
             {
                 _pressNode = hoverNode;
                 _pressWasSelected = _workspace.Selection.Contains(hoverNode);
-                bool isInputSwitch = IsInputBoundary(hoverNode);
+                bool isInputSwitch = IsInputBoundary(hoverNode) && _workspace.CanToggleInputs;
                 if (_pressAdditive)
                 {
                     if (!_pressWasSelected)
@@ -324,6 +348,8 @@ namespace DigitalLogicSandbox.CircuitEditor.Interaction
 
             _panButton = button;
             _lastScreen = screen;
+            _pressScreen = screen;
+            _panDistance = 0f;
             _mode = Mode.Panning;
             _workspace.Presenter.SetHover(NodeId.None, null);
             return true;
@@ -333,11 +359,18 @@ namespace DigitalLogicSandbox.CircuitEditor.Interaction
         {
             if (_panButton == null || !_panButton.IsPressed())
             {
+                bool contextClick = _panButton == _controls.Secondary && _panDistance < DragThresholdPixels;
                 _mode = Mode.Idle;
                 _panButton = null;
+                if (contextClick)
+                {
+                    _workspace.RequestContextMenu(_pressScreen, _workspace.WorkspaceCamera.ScreenToWorld(_pressScreen));
+                }
+
                 return;
             }
 
+            _panDistance = Mathf.Max(_panDistance, (screen - _pressScreen).magnitude);
             _workspace.WorkspaceCamera.Pan(screen - _lastScreen);
         }
 
@@ -350,6 +383,18 @@ namespace DigitalLogicSandbox.CircuitEditor.Interaction
             if (_controls.Primary.WasReleasedThisFrame() || !_controls.Primary.IsPressed())
             {
                 // A click without dragging.
+                float now = Time.unscaledTime;
+                bool doubleClick = !_pressAdditive && _pressNode == _lastClickNode &&
+                    now - _lastClickTime <= DoubleClickSeconds;
+                _lastClickTime = doubleClick ? -10f : now;
+                _lastClickNode = _pressNode;
+                if (doubleClick && _workspace.CanOpenNode(_pressNode))
+                {
+                    _mode = Mode.Idle;
+                    _workspace.OpenNode(_pressNode);
+                    return;
+                }
+
                 if (_pressAdditive)
                 {
                     if (_pressWasSelected)
@@ -357,7 +402,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Interaction
                         _workspace.Selection.Toggle(_pressNode);
                     }
                 }
-                else if (IsInputBoundary(_pressNode))
+                else if (IsInputBoundary(_pressNode) && _workspace.CanToggleInputs)
                 {
                     _workspace.ToggleInput(_pressNode);
                 }
@@ -370,9 +415,10 @@ namespace DigitalLogicSandbox.CircuitEditor.Interaction
                 return;
             }
 
-            if ((screen - _pressScreen).sqrMagnitude < DragThresholdPixels * DragThresholdPixels)
+            if ((screen - _pressScreen).sqrMagnitude < DragThresholdPixels * DragThresholdPixels ||
+                !_workspace.IsEditable)
             {
-                return;
+                return; // read-only levels never move nodes
             }
 
             if (!_workspace.Selection.Contains(_pressNode))

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using DigitalLogicSandbox.CircuitEditor.CameraControl;
 using DigitalLogicSandbox.CircuitEditor.Interaction;
+using DigitalLogicSandbox.CircuitEditor.Navigation;
 using DigitalLogicSandbox.CircuitEditor.Placement;
 using DigitalLogicSandbox.CircuitEditor.Selection;
 using DigitalLogicSandbox.Commands.Circuit;
@@ -34,13 +35,18 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
     /// Frame order: input (Update) → model mutations via commands → <see cref="Sync"/> (LateUpdate), which
     /// recompiles at most once per frame after structural edits and forwards the simulation's change log to the
     /// views. The views never drive logic.
+    ///
+    /// Hierarchy: the <see cref="CircuitNavigator"/> holds the breadcrumb levels. <see cref="Circuit"/>,
+    /// <see cref="Session"/> and <see cref="History"/> always refer to the level being shown. Inspection levels are
+    /// read-only (every editing call is refused with a notification); a draft level edits the next version of a
+    /// gate, which <see cref="SaveDraft"/> publishes as one undoable step on the main circuit's history.
     /// </summary>
     public sealed class WorkspaceController : MonoBehaviour
     {
         public const float DuplicateOffset = 1f;
         public const string DefaultCircuitName = "Main Circuit";
 
-        private readonly CommandHistory _history = new CommandHistory();
+        private readonly CommandHistory _readOnlyHistory = new CommandHistory();
         private readonly SelectionModel _selection = new SelectionModel();
         private readonly List<NodeId> _scratchNodes = new List<NodeId>();
 
@@ -48,7 +54,9 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
         private ComponentCatalog _catalog;
         private DefinitionLibrary _library;
         private CircuitPackager _packager;
-        private CircuitSession _session;
+        private CircuitNavigator _navigator;
+        private NavigationLevel _shownLevel;
+        private bool _scopeDirty;
         private CircuitGeometry _geometry;
         private CircuitPresenter _presenter;
         private WorkspaceCamera _camera;
@@ -68,15 +76,44 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
         /// <summary>Raised when placement mode starts or ends.</summary>
         public event Action PlacementChanged;
 
-        public bool IsInitialized => _session != null;
+        /// <summary>Raised after the shown circuit level changed (open, back, edit, save, discard, load).</summary>
+        public event Action NavigationChanged;
 
-        public CircuitDefinition Circuit => _session?.Circuit;
+        /// <summary>Short user-facing messages (refused operations, save results) for the status bar.</summary>
+        public event Action<string> Notification;
 
-        public CircuitSession Session => _session;
+        /// <summary>Raised on a right-click without dragging.</summary>
+        public event Action<ContextMenuRequest> ContextMenuRequested;
 
-        public SimulationRunner Runner => _session?.Runner;
+        public bool IsInitialized => _navigator != null;
 
-        public CommandHistory History => _history;
+        public CircuitNavigator Navigator => _navigator;
+
+        /// <summary>The breadcrumb level being shown.</summary>
+        public NavigationLevel CurrentLevel => _navigator?.Current;
+
+        /// <summary>The circuit being shown (the main circuit, an inspected gate or a draft).</summary>
+        public CircuitDefinition Circuit => _navigator?.Current?.Circuit;
+
+        /// <summary>The project's main circuit, whatever level is shown.</summary>
+        public CircuitDefinition RootCircuit => _navigator?.Root?.Circuit;
+
+        /// <summary>The session simulating the shown level.</summary>
+        public CircuitSession Session => _navigator?.Current?.Session ?? _navigator?.RootSession;
+
+        public SimulationRunner Runner => Session?.Runner;
+
+        /// <summary>Undo history of the shown level (an always-empty history for read-only levels).</summary>
+        public CommandHistory History => _navigator?.Current?.History ?? _readOnlyHistory;
+
+        /// <summary>False while inspecting a custom gate: its internals cannot be changed outside edit mode.</summary>
+        public bool IsEditable => CurrentLevel != null && CurrentLevel.IsEditable;
+
+        /// <summary>Input switches are user-controlled only at the top of a simulation (main circuit or draft).</summary>
+        public bool CanToggleInputs => CurrentLevel != null && CurrentLevel.CanToggleInputs;
+
+        /// <summary>Packaging new gates happens in the main circuit.</summary>
+        public bool CanPackage => CurrentLevel != null && CurrentLevel.Kind == NavigationLevelKind.Root;
 
         public SelectionModel Selection => _selection;
 
@@ -163,10 +200,10 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             }
 
             setup.Theme.EnsureMaterials();
-            _session = new CircuitSession(_catalog, setup.SimulationOptions);
-            _session.Rebuilt += MarkStatusDirty;
-            _session.Runner.StateChanged += _ => MarkStatusDirty();
-            _history.Changed += OnHistoryChanged;
+            _navigator = new CircuitNavigator(_catalog, _library, setup.SimulationOptions);
+            _navigator.SessionActivity += MarkStatusDirty;
+            _navigator.HistoryChanged += OnHistoryChanged;
+            _navigator.LevelsChanged += OnLevelsChanged;
             _selection.Changed += OnSelectionChanged;
 
             _geometry = new CircuitGeometry(_catalog);
@@ -191,10 +228,14 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
         {
             EnsureInitialized();
             CancelInteraction();
-            _history.Clear();
             _selection.Clear();
-            _session.Bind(circuit);
-            _presenter.Bind(circuit);
+            _shownLevel = null;
+            _navigator.LoadRoot(circuit);
+            if (circuit == null)
+            {
+                _presenter.Bind(null);
+            }
+
             Sync();
             MarkStatusDirty();
         }
@@ -241,7 +282,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             }
 
             _presenter?.Dispose();
-            _session?.Dispose();
+            _navigator?.Dispose();
             if (_grid != null)
             {
                 Destroy(_grid.gameObject);
@@ -255,27 +296,43 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
         public void Sync()
         {
             EnsureInitialized();
-            if (_session.RebuildIfDirty())
+            _navigator.ValidateStack();
+            if (_navigator.RebuildDirtySessions())
             {
-                if (_session.IsSimulating)
+                _scopeDirty = true;
+            }
+
+            NavigationLevel level = _navigator.Current;
+            if (level == null)
+            {
+                return;
+            }
+
+            CircuitSession session = level.Session;
+            if (_scopeDirty)
+            {
+                _scopeDirty = false;
+                CompiledInstance scope = _navigator.ResolveScope(level);
+                if (scope != null)
                 {
-                    _presenter.SetSimulation(_session.Runner.Context, _session.Compiled.Root);
-                    _session.Runner.Context.Changes.Clear();
+                    _presenter.SetSimulation(session.Runner.Context, scope);
+                    session.Runner.Context.Changes.Clear();
                 }
                 else
                 {
                     _presenter.ClearSimulation();
                 }
 
+                MarkStatusDirty();
                 return;
             }
 
-            if (!_session.IsSimulating)
+            if (!session.IsSimulating)
             {
                 return;
             }
 
-            SignalChangeLog changes = _session.Runner.Context.Changes;
+            SignalChangeLog changes = session.Runner.Context.Changes;
             if (changes.Count > 0 || changes.Overflowed)
             {
                 _presenter.ApplyChanges(changes);
@@ -292,6 +349,11 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
         public NodeId PlaceNode(ComponentRef component, Vector2 world, string displayName = null)
         {
             EnsureCircuit();
+            if (!CheckEditable() || !CheckPlaceable(component))
+            {
+                return NodeId.None;
+            }
+
             string boundaryName = null;
             if (component.Kind == ComponentKind.InputBoundary)
             {
@@ -304,7 +366,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
 
             var command = new AddNodeCommand(Circuit, component, GridSnap.ToPoint(world, SnapToGrid),
                 displayName ?? boundaryName ?? _geometry.TitleOf(component), boundaryName);
-            _history.Execute(command);
+            History.Execute(command);
             _selection.Select(command.CreatedNode);
             return command.CreatedNode;
         }
@@ -319,6 +381,11 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             if (Circuit == null)
             {
                 return ConnectionError.MissingSourceNode;
+            }
+
+            if (!IsEditable)
+            {
+                return ConnectionError.CircuitReadOnly;
             }
 
             if (!_geometry.TryGetPin(a, out _, out PortDirection directionA))
@@ -354,7 +421,11 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             ConnectionError error = CheckConnection(a, b, out PinRef source, out PinRef destination);
             if (error == ConnectionError.None)
             {
-                _history.Execute(new ConnectCommand(Circuit, source, destination));
+                History.Execute(new ConnectCommand(Circuit, source, destination));
+            }
+            else if (error == ConnectionError.CircuitReadOnly)
+            {
+                NotifyReadOnly();
             }
 
             return error;
@@ -364,8 +435,13 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
         public bool ToggleInput(NodeId boundary)
         {
             EnsureInitialized();
+            if (!CanToggleInputs)
+            {
+                return false; // inside an inspected gate inputs are driven by the enclosing circuit
+            }
+
             Sync(); // edits made earlier this frame must be compiled before the input can be addressed
-            bool toggled = _session.ToggleInput(boundary);
+            bool toggled = Session.ToggleInput(boundary);
             if (toggled)
             {
                 MarkStatusDirty();
@@ -377,8 +453,13 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
         public void SetInput(NodeId boundary, Signal value)
         {
             EnsureInitialized();
+            if (!CanToggleInputs)
+            {
+                return;
+            }
+
             Sync();
-            if (_session.SetInput(boundary, value))
+            if (Session.SetInput(boundary, value))
             {
                 MarkStatusDirty();
             }
@@ -386,35 +467,35 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
 
         public bool DeleteSelection()
         {
-            if (Circuit == null || _selection.IsEmpty)
+            if (Circuit == null || _selection.IsEmpty || !CheckEditable())
             {
                 return false;
             }
 
             PinRef[] wires = _selection.Wire.HasValue ? new[] { _selection.Wire.Value } : null;
-            _history.Execute(new RemoveNodesCommand(Circuit, _selection.ToSortedArray(), wires));
+            History.Execute(new RemoveNodesCommand(Circuit, _selection.ToSortedArray(), wires));
             _selection.Prune(Circuit);
             return true;
         }
 
         public void DeleteWire(PinRef destination)
         {
-            if (Circuit != null && Circuit.IsDriven(destination))
+            if (Circuit != null && Circuit.IsDriven(destination) && CheckEditable())
             {
-                _history.Execute(new RemoveNodesCommand(Circuit, null, new[] { destination }));
+                History.Execute(new RemoveNodesCommand(Circuit, null, new[] { destination }));
                 _selection.Prune(Circuit);
             }
         }
 
         public bool DuplicateSelection()
         {
-            if (Circuit == null || _selection.NodeCount == 0)
+            if (Circuit == null || _selection.NodeCount == 0 || !CheckEditable())
             {
                 return false;
             }
 
             var command = new DuplicateNodesCommand(Circuit, _selection.ToSortedArray(), DuplicateOffset, -DuplicateOffset);
-            _history.Execute(command);
+            History.Execute(command);
             _scratchNodes.Clear();
             for (int i = 0; i < command.Created.Count; i++)
             {
@@ -428,7 +509,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
         /// <summary>Rotates every selected node 90° counter-clockwise about its own centre.</summary>
         public bool RotateSelection()
         {
-            if (Circuit == null || _selection.NodeCount == 0)
+            if (Circuit == null || _selection.NodeCount == 0 || !CheckEditable())
             {
                 return false;
             }
@@ -441,7 +522,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
                 to[i] = GateLayout.Next(from[i]);
             }
 
-            _history.Execute(new TransformNodesCommand(nodes.Length == 1 ? "Rotate node" : "Rotate " + nodes.Length + " nodes",
+            History.Execute(new TransformNodesCommand(nodes.Length == 1 ? "Rotate node" : "Rotate " + nodes.Length + " nodes",
                 Circuit, nodes, positions, positions, from, to));
             return true;
         }
@@ -450,8 +531,13 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
         public void RecordMove(NodeId[] nodes, CircuitPoint[] from)
         {
             EnsureCircuit();
+            if (!IsEditable)
+            {
+                return;
+            }
+
             TransformNodesCommand.CaptureTransforms(Circuit, nodes, out CircuitPoint[] to, out Rotation[] rotations);
-            _history.Record(new TransformNodesCommand(nodes.Length == 1 ? "Move node" : "Move " + nodes.Length + " nodes",
+            History.Record(new TransformNodesCommand(nodes.Length == 1 ? "Move node" : "Move " + nodes.Length + " nodes",
                 Circuit, nodes, from, to, rotations, rotations));
         }
 
@@ -459,8 +545,13 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
         public void MoveNodes(NodeId[] nodes, CircuitPoint[] to)
         {
             EnsureCircuit();
+            if (!CheckEditable())
+            {
+                return;
+            }
+
             TransformNodesCommand.CaptureTransforms(Circuit, nodes, out CircuitPoint[] from, out Rotation[] rotations);
-            _history.Execute(new TransformNodesCommand(nodes.Length == 1 ? "Move node" : "Move " + nodes.Length + " nodes",
+            History.Execute(new TransformNodesCommand(nodes.Length == 1 ? "Move node" : "Move " + nodes.Length + " nodes",
                 Circuit, nodes, from, to, rotations, rotations));
         }
 
@@ -484,7 +575,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
         public bool Undo()
         {
             CancelInteraction();
-            bool undone = _history.Undo();
+            bool undone = History.Undo();
             _selection.Prune(Circuit);
             return undone;
         }
@@ -492,7 +583,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
         public bool Redo()
         {
             CancelInteraction();
-            bool redone = _history.Redo();
+            bool redone = History.Redo();
             _selection.Prune(Circuit);
             return redone;
         }
@@ -502,9 +593,9 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
         {
             EnsureCircuit();
             if (Circuit.TryGetInterfacePort(port, out InterfacePort existing) &&
-                !string.Equals(existing.Name, name, StringComparison.Ordinal))
+                !string.Equals(existing.Name, name, StringComparison.Ordinal) && CheckEditable())
             {
-                _history.Execute(new RenameInterfacePortCommand(Circuit, port, name));
+                History.Execute(new RenameInterfacePortCommand(Circuit, port, name));
             }
         }
 
@@ -512,12 +603,13 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
         public void SetCircuitProperties(string name, string description, string category)
         {
             EnsureCircuit();
-            if (Circuit.Name == name && Circuit.Description == description && Circuit.Category == category)
+            if ((Circuit.Name == name && Circuit.Description == description && Circuit.Category == category) ||
+                !CheckEditable())
             {
                 return;
             }
 
-            _history.Execute(new SetCircuitPropertiesCommand(Circuit, name, description, category));
+            History.Execute(new SetCircuitPropertiesCommand(Circuit, name, description, category));
             MarkStatusDirty();
         }
 
@@ -549,6 +641,10 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             return _packager.Package(Circuit, spec);
         }
 
+        /// <summary>Why packaging is unavailable at the current level, or null.</summary>
+        public string PackagingUnavailableReason =>
+            CanPackage ? null : "Return to the main circuit to create a custom gate.";
+
         /// <summary>
         /// Packages the circuit (or selection) as a new custom gate and publishes it to the library as one undoable
         /// step. The original circuit is unchanged unless <paramref name="clearWorkspace"/> asks to remove the
@@ -557,6 +653,14 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
         public PackagingResult PackageCustomGate(PackagingSpec spec, bool clearWorkspace = false)
         {
             EnsureCircuit();
+            if (!CanPackage)
+            {
+                var refused = new ValidationReport();
+                refused.Add(new Diagnostic(DiagnosticSeverity.Error, DiagnosticCode.CircuitReadOnly,
+                    PackagingUnavailableReason));
+                return new PackagingResult(null, refused);
+            }
+
             PackagingResult result = _packager.Package(Circuit, spec);
             if (!result.Succeeded)
             {
@@ -566,7 +670,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             var publish = new PublishDefinitionCommand(_library, result.Definition);
             if (!clearWorkspace)
             {
-                _history.Execute(publish);
+                History.Execute(publish);
                 return result;
             }
 
@@ -580,13 +684,217 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
                 }
             }
 
-            _history.Execute(new CompositeCommand(publish.Description, new ICommand[]
+            History.Execute(new CompositeCommand(publish.Description, new ICommand[]
             {
                 publish,
                 new RemoveNodesCommand(Circuit, _scratchNodes.ToArray()),
             }));
             _selection.Prune(Circuit);
             return result;
+        }
+
+        // ------------------------------------------------------------------------------------------------
+        // Hierarchy navigation, edit mode and versioning
+        // ------------------------------------------------------------------------------------------------
+
+        /// <summary>True when <paramref name="node"/> is a custom gate whose internals can be opened.</summary>
+        public bool CanOpenNode(NodeId node)
+        {
+            return IsInitialized && _navigator.CanOpen(node, out _, out _);
+        }
+
+        /// <summary>
+        /// Navigates into the internal circuit of a custom gate (read-only, live signals of that instance).
+        /// Refusals (missing definition, circular path, depth limit) are reported through <see cref="Notification"/>.
+        /// </summary>
+        public bool OpenNode(NodeId node)
+        {
+            EnsureInitialized();
+            Sync();
+            StoreCurrentView();
+            if (_navigator.TryOpen(node, out string error))
+            {
+                Sync();
+                return true;
+            }
+
+            Notify(error);
+            return false;
+        }
+
+        /// <summary>Opens the single selected custom gate.</summary>
+        public bool OpenSelected()
+        {
+            if (_selection.NodeCount == 1)
+            {
+                foreach (NodeId node in _selection.Nodes)
+                {
+                    return OpenNode(node);
+                }
+            }
+
+            Notify("Select one custom gate to open its internal circuit.");
+            return false;
+        }
+
+        /// <summary>Breadcrumb navigation. Leaving an edited draft requires <paramref name="discardChanges"/>.</summary>
+        public bool NavigateTo(int index, bool discardChanges = false)
+        {
+            EnsureInitialized();
+            StoreCurrentView();
+            if (_navigator.TryNavigateTo(index, out string error, discardChanges))
+            {
+                Sync();
+                return true;
+            }
+
+            Notify(error);
+            return false;
+        }
+
+        public bool NavigateUp()
+        {
+            return IsInitialized && _navigator.CurrentIndex > 0 && NavigateTo(_navigator.CurrentIndex - 1);
+        }
+
+        /// <summary>Switches the inspected gate to edit mode (a draft of its next version).</summary>
+        public bool BeginEdit()
+        {
+            EnsureInitialized();
+            StoreCurrentView();
+            if (_navigator.TryBeginEdit(out string error))
+            {
+                Sync();
+                Notify("Editing '" + Circuit.Name + "' as version " + Circuit.Version +
+                    ". Existing instances are unaffected until you save.");
+                return true;
+            }
+
+            Notify(error);
+            return false;
+        }
+
+        /// <summary>Throws away the draft and returns to where editing started.</summary>
+        public bool DiscardDraft()
+        {
+            EnsureInitialized();
+            StoreCurrentView();
+            if (!_navigator.DiscardDraft())
+            {
+                return false;
+            }
+
+            Sync();
+            Notify("Changes discarded.");
+            return true;
+        }
+
+        /// <summary>Validation of the current draft with the packaging rules (null when nothing is being edited).</summary>
+        public ValidationReport ValidateDraft()
+        {
+            NavigationLevel draft = _navigator?.Draft;
+            return draft == null ? null : _packager.ValidateDefinition(draft.Circuit);
+        }
+
+        /// <summary>What saving the draft would affect under each update mode (null when nothing is being edited).</summary>
+        public VersionImpact AnalyzeDraftSave()
+        {
+            NavigationLevel draft = _navigator?.Draft;
+            return draft == null
+                ? null
+                : DefinitionVersioning.AnalyzeImpact(_library, draft.Circuit, draft.DraftSource, RootCircuit);
+        }
+
+        /// <summary>
+        /// Publishes the draft as a new version and, per <paramref name="mode"/>, switches references to it, all as
+        /// one undoable step on the main circuit's history. Older versions stay in the library, so circuits that keep
+        /// them remain valid. Afterwards the main circuit is shown.
+        /// </summary>
+        public DraftSaveResult SaveDraft(VersionUpdateMode mode)
+        {
+            EnsureInitialized();
+            NavigationLevel draft = _navigator.Draft;
+            if (draft == null)
+            {
+                return DraftSaveResult.Failed("No gate is being edited.");
+            }
+
+            if (!draft.HasUnsavedChanges)
+            {
+                return DraftSaveResult.Failed("There are no changes to save.");
+            }
+
+            ValidationReport report = _packager.ValidateDefinition(draft.Circuit);
+            if (report.HasErrors)
+            {
+                return DraftSaveResult.Failed("Fix the errors before saving.", report);
+            }
+
+            VersionPlan plan = DefinitionVersioning.Plan(_library, draft.Circuit, draft.DraftSource,
+                cascade: mode == VersionUpdateMode.UpdateEverywhere);
+            var commands = new List<ICommand>();
+            foreach (CircuitDefinition definition in plan.AllNewDefinitions())
+            {
+                commands.Add(new PublishDefinitionCommand(_library, definition,
+                    "Publish '" + definition.Name + "' v" + definition.Version));
+            }
+
+            RetargetReferencesCommand retarget = null;
+            if (mode != VersionUpdateMode.KeepReferences && RootCircuit != null)
+            {
+                retarget = new RetargetReferencesCommand(RootCircuit, plan.Map, plan.SignatureOf);
+                commands.Add(retarget);
+            }
+
+            CircuitDefinition saved = plan.Draft;
+            _navigator.ReturnToRoot();
+            _navigator.RootHistory.Execute(new CompositeCommand("Save '" + saved.Name + "' v" + saved.Version, commands));
+            Sync();
+
+            int dropped = plan.DroppedConnections + (retarget?.DroppedConnections ?? 0);
+            var result = new DraftSaveResult(report, null, plan, dropped, retarget?.RetargetedNodes ?? 0);
+            string message = "Saved '" + saved.Name + "' v" + saved.Version;
+            if (plan.Cascaded.Count > 0)
+            {
+                message += " and " + plan.Cascaded.Count + " dependent gate" + (plan.Cascaded.Count == 1 ? "" : "s");
+            }
+
+            message += mode == VersionUpdateMode.KeepReferences
+                ? ". Existing instances keep the previous version."
+                : ". Updated " + result.RetargetedNodes + " instance" + (result.RetargetedNodes == 1 ? "" : "s") + ".";
+            if (dropped > 0)
+            {
+                message += " " + dropped + " connection" + (dropped == 1 ? " was" : "s were") + " removed (pins no longer exist).";
+            }
+
+            Notify(message);
+            return result;
+        }
+
+        /// <summary>
+        /// Right-click without dragging: selects what is under the pointer (keeping an existing multi-selection that
+        /// contains it) and raises <see cref="ContextMenuRequested"/>.
+        /// </summary>
+        public void RequestContextMenu(Vector2 screen, Vector2 world)
+        {
+            EnsureInitialized();
+            NodeId node = NodeId.None;
+            PinRef? wire = null;
+            if (_hitTester.TryHitNode(world, out NodeId hit))
+            {
+                node = hit;
+                if (!_selection.Contains(hit))
+                {
+                    _selection.Select(hit);
+                }
+            }
+            else if (_hitTester.TryHitWire(world, 6f * _camera.WorldPerPixel, out PinRef hitWire))
+            {
+                wire = hitWire;
+                _selection.SelectWire(hitWire);
+            }
+
+            ContextMenuRequested?.Invoke(new ContextMenuRequest(screen, node, wire));
         }
 
         // ------------------------------------------------------------------------------------------------
@@ -600,6 +908,11 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
         public void BeginPlacement(PlacementRequest request, bool fromDrag)
         {
             EnsureCircuit();
+            if (!CheckEditable() || !CheckPlaceable(request.Component))
+            {
+                return;
+            }
+
             _interaction?.Cancel();
             _placement = request;
             _placementFromDrag = fromDrag;
@@ -671,20 +984,20 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
 
         public void Play()
         {
-            if (_session.IsSimulating)
+            if (Session.IsSimulating)
             {
-                _session.Runner.Play();
+                Session.Runner.Play();
             }
         }
 
         public void Pause()
         {
-            _session.Runner.Pause();
+            Session.Runner.Pause();
         }
 
         public void TogglePlayPause()
         {
-            if (_session.Runner.State == SimulationState.Running)
+            if (Session.Runner.State == SimulationState.Running)
             {
                 Pause();
             }
@@ -697,21 +1010,21 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
         /// <summary>Propagates one wave (meaningful while paused).</summary>
         public bool Step()
         {
-            if (!_session.IsSimulating)
+            if (!Session.IsSimulating)
             {
                 return false;
             }
 
-            bool more = _session.Runner.Step();
+            bool more = Session.Runner.Step();
             MarkStatusDirty();
             return more;
         }
 
         public void ResetSimulation()
         {
-            if (_session.IsSimulating)
+            if (Session.IsSimulating)
             {
-                _session.Runner.Reset();
+                Session.Runner.Reset();
                 MarkStatusDirty();
             }
         }
@@ -794,8 +1107,91 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
         private void OnLibraryChanged(CircuitDefinition definition)
         {
             // Instances may have become resolvable (redo) or unresolvable (undo of a publication).
-            _session?.MarkDirty();
+            _navigator?.MarkAllDirty();
             MarkStatusDirty();
+        }
+
+        private void OnLevelsChanged()
+        {
+            CancelInteraction();
+            _selection.Clear();
+            NavigationLevel level = _navigator.Current;
+            if (level == _shownLevel)
+            {
+                return;
+            }
+
+            bool firstShow = _shownLevel == null;
+            _shownLevel = level;
+            _presenter.Bind(level?.Circuit);
+            _presenter.SetSelection(_selection.Nodes, _selection.Wire);
+            _scopeDirty = true;
+            if (level != null && !firstShow)
+            {
+                if (level.HasView)
+                {
+                    _camera.MoveTo(new Vector2(level.ViewX, level.ViewY), level.ViewSize);
+                }
+                else if (level.Kind != NavigationLevelKind.Root)
+                {
+                    FrameContent();
+                }
+            }
+
+            MarkStatusDirty();
+            NavigationChanged?.Invoke();
+        }
+
+        private void StoreCurrentView()
+        {
+            NavigationLevel level = _navigator.Current;
+            if (level != null && _camera != null && _camera.Camera != null)
+            {
+                level.StoreView(_camera.Position.x, _camera.Position.y, _camera.Size);
+            }
+        }
+
+        private bool CheckEditable()
+        {
+            if (IsEditable)
+            {
+                return true;
+            }
+
+            NotifyReadOnly();
+            return false;
+        }
+
+        private void NotifyReadOnly()
+        {
+            Notify("'" + Circuit?.Name + "' is open for inspection only. Click Edit to change its implementation.");
+        }
+
+        /// <summary>Refuses custom gates that would make the edited draft contain itself.</summary>
+        private bool CheckPlaceable(ComponentRef component)
+        {
+            NavigationLevel level = CurrentLevel;
+            if (level == null || !level.IsDraft || component.Kind != ComponentKind.Custom)
+            {
+                return true;
+            }
+
+            if (!DefinitionVersioning.DependsOn(_library, component.Definition, level.Circuit.Id))
+            {
+                return true;
+            }
+
+            Notify("'" + _geometry.TitleOf(component) + "' contains '" + level.Circuit.Name +
+                "', so it cannot be placed inside it (circular reference).");
+            return false;
+        }
+
+        private void Notify(string message)
+        {
+            if (!string.IsNullOrEmpty(message))
+            {
+                Notification?.Invoke(message);
+            }
         }
 
         private void OnHistoryChanged()

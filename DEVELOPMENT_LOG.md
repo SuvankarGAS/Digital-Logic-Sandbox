@@ -9,8 +9,8 @@
 | 2 | Simulation engine | ✅ Complete (2026-11-13) |
 | 3 | Visual circuit editor | ✅ Complete (2026-11-13) |
 | 4 | Custom gate packaging | ✅ Complete (2026-11-14) |
-| 5 | Hierarchical composition & inspection | ⏳ Next |
-| 6 | Animated signal visualization | — |
+| 5 | Hierarchical composition & inspection | ✅ Complete (2026-11-14) |
+| 6 | Animated signal visualization | ⏳ Next |
 | 7 | Truth table generator | — |
 | 8 | Persistence & undo/redo | — |
 | 9 | Polish & optimization | — |
@@ -362,3 +362,89 @@ Delivered – see the Phase 3 section below.
 - Custom gates live only for the session until persistence lands in Phase 8.
 - The icon is stored and shown nowhere yet except the inspector metadata; it will be used for the
   library/gate badge in Phase 9.
+
+---
+
+## Phase 5 – Hierarchical composition, inspection and versioning (2026-11-14)
+
+### Implemented
+- **Navigation** (`Editor/Navigation`, no Unity objects):
+  - `NavigationLevel` comes in three kinds:
+    - Root: main circuit.
+    - Inspect: read-only internals of one instance.
+    - Draft: editable next version of a gate.
+  - `CircuitNavigator`:
+    - Opens a custom gate with checks for missing definition, circular path and depth limit, and gives
+      meaningful messages.
+    - Breadcrumb navigation, edit mode, discard, stack validation and instance-scope resolution.
+- **Workspace** (`WorkspaceController`):
+  - `Circuit`, `Session` and `History` now follow the shown level.
+  - New API: `OpenNode`, `OpenSelected`, `NavigateTo`, `NavigateUp`, `BeginEdit`, `DiscardDraft`,
+    `ValidateDraft`, `AnalyzeDraftSave`, `SaveDraft(mode)`, `RequestContextMenu`.
+  - New events: `NavigationChanged`, `Notification`, `ContextMenuRequested`.
+  - Read-only guards on every editing call. Packaging is allowed only in the main circuit.
+  - Camera view saved and restored per level.
+- **Interaction**:
+  - Double-click a custom gate to open it.
+  - Right-click without dragging opens the context menu (right-drag still pans).
+  - Escape with an empty selection goes up one level.
+  - No wiring, dragging or input toggling in read-only levels.
+- **Versioning** (`GateLibrary/Custom`):
+  - `DefinitionVersioning`: drafts, plan (optionally cascading), impact analysis, `DependsOn`.
+  - `ComponentRetargeting`: exact, reversible swap of references, keeping connections by port id.
+  - `RetargetReferencesCommand`; `PublishDefinitionCommand` gained a description.
+  - `CircuitPackager.ValidateDefinition` reuses the packaging rules for drafts.
+  - New diagnostic code `CircuitReadOnly`.
+- **Rendering**: gate titles show `vN` for versions above 1; the library shows the version.
+- **UI**:
+  - `NavigationBar`: breadcrumbs, mode badge, Up / Edit / Save Version / Discard; discarding unsaved edits
+    takes a second click to confirm.
+  - `ContextMenuView`: items for the node, wire or empty space.
+  - `VersionSaveDialog`: impact summary; keep references, update the main circuit, or update everywhere;
+    validation messages.
+  - Inspector: mode section with Edit, Save, Discard and Back; "Open Internal Circuit"; fields disabled when
+    read-only.
+  - Toolbar: "Inspect" button.
+  - Status bar: transient notifications and an Inspecting/Editing prefix.
+
+### Decisions
+- **Inspection shows a specific instance.** An inspected gate is drawn from the shared definition but
+  coloured by the parent simulation's nets for that instance path, so users follow real signals inside nested
+  gates. No second simulation is created for inspection.
+- **Drafts simulate alone.** A draft is not the gate in context: it gets its own session with free inputs, so
+  edits can be tested before saving without disturbing the main circuit.
+- **One draft at a time, saved to the root history.** This keeps undo understandable. Saving is one composite
+  step on the main circuit's history; the draft's own edit history ends with it.
+- **Discard returns to inspecting the published version** instead of jumping to the parent.
+- **Port ids carry connections across versions.** Interfaces keep their port ids, so retargeting preserves
+  every connection whose pin still exists; removed pins drop their connections, and the user is told how many.
+
+### Test results
+- EditMode: **232 / 232 passed**.
+  - `NavigationTests` (11): open/refuse cases; nested levels with breadcrumbs back; per-instance live signals;
+    depth limit; circular navigation; layout preserved; draft creation without touching the published version;
+    unsaved-draft guard; discard returns to inspection; stack validation.
+  - `VersioningTests` (11): next version keeps the id; old references stay valid and keep their behaviour;
+    retargeting keeps ids/layout/connections; dropped connections and exact revert; command undo/redo;
+    plan with and without cascade (dependencies first, old versions untouched); impact analysis changes
+    nothing; `DependsOn`; draft validation (no output, self-reference); composite publish undo order.
+- PlayMode: **20 / 20 passed**.
+  - `HierarchyIntegrationTests` (7): open a gate and watch live nested signals (including parent changes);
+    read-only enforcement; breadcrumbs restore views, camera and history; save updating the main circuit
+    (AND behaviour, title "NAND v2", undo/redo); save keeping references; self-containment, invalid and
+    no-change saves refused, discard; draft simulation independent of the main circuit.
+  - `NavigationUiTests` (1): real Main scene – context menu "Open Internal Circuit", breadcrumbs, mode badge,
+    Edit → modify → Save Version dialog (default mode, impact text) → back at root with v2, status message,
+    crumb click.
+- Manual: screenshots of inspection (breadcrumb, live AND/NOT values, inspector), the save dialog, and the
+  main circuit with "NAND v2" after saving.
+
+### Known issues / deferred
+- "Frame content" uses the full screen and ignores the side panels, so content can sit under the inspector.
+  Planned for Phase 9 (polish).
+- Updating references inside *other circuits* is limited to the main circuit and, with "update everywhere",
+  the latest versions of library gates. Per-reference choices across several open projects arrive with
+  persistence in Phase 8.
+- Editing a gate opened from the library panel (without an instance) is not offered yet; open an instance.
+- Edits made while inspecting inside a draft are not possible by design (inspection is read-only); go back
+  to the draft level to edit.

@@ -13,7 +13,7 @@ namespace DigitalLogicSandbox.GateLibrary.Packaging
     /// <summary>Outcome of <see cref="CircuitPackager.Package"/>: the unpublished definition plus every finding.</summary>
     public sealed class PackagingResult
     {
-        internal PackagingResult(CircuitDefinition definition, ValidationReport report)
+        public PackagingResult(CircuitDefinition definition, ValidationReport report)
         {
             Definition = definition;
             Report = report;
@@ -82,6 +82,54 @@ namespace DigitalLogicSandbox.GateLibrary.Packaging
             }
 
             return new PackagingResult(report.HasErrors ? null : definition, report);
+        }
+
+        /// <summary>
+        /// Validates an existing gate definition with the same rules used for packaging (e.g. an edited draft before
+        /// it is saved as a new version): name, structure, at least one connected output, hierarchy.
+        /// </summary>
+        public ValidationReport ValidateDefinition(CircuitDefinition definition)
+        {
+            if (definition == null)
+            {
+                throw new ArgumentNullException(nameof(definition));
+            }
+
+            var report = new ValidationReport();
+            if (string.IsNullOrWhiteSpace(definition.Name))
+            {
+                report.Add(new Diagnostic(DiagnosticSeverity.Error, DiagnosticCode.MissingName,
+                    "The gate needs a name."));
+            }
+
+            new CircuitValidator(_catalog, _options).Validate(definition, report);
+            ValidateDrivenOutputs(definition, report);
+            ValidatePortNames(definition.Inputs, report);
+            ValidatePortNames(definition.Outputs, report);
+            return report;
+        }
+
+        private static void ValidatePortNames(IReadOnlyList<InterfacePort> ports, ValidationReport report)
+        {
+            for (int i = 0; i < ports.Count; i++)
+            {
+                if (string.IsNullOrWhiteSpace(ports[i].Name))
+                {
+                    report.Add(new Diagnostic(DiagnosticSeverity.Error, DiagnosticCode.EmptyPortName,
+                        "Every external port needs a name."));
+                    return;
+                }
+
+                for (int j = 0; j < i; j++)
+                {
+                    if (string.Equals(ports[i].Name.Trim(), ports[j].Name.Trim(), StringComparison.OrdinalIgnoreCase))
+                    {
+                        report.Add(new Diagnostic(DiagnosticSeverity.Error, DiagnosticCode.DuplicatePortName,
+                            "Two external ports are both named '" + ports[i].Name + "'."));
+                        return;
+                    }
+                }
+            }
         }
 
         private void ValidateMetadata(PackagingSpec spec, ValidationReport report)

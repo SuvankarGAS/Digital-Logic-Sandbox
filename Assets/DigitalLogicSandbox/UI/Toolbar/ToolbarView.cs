@@ -22,11 +22,14 @@ namespace DigitalLogicSandbox.UI.Toolbar
         private Button _resetSimulation;
         private TextMeshProUGUI _title;
         private Button _createGate;
+        private Button _inspect;
 
         /// <summary>Raised by the "Create Gate" button.</summary>
         public event System.Action CreateGateRequested;
 
         public Button CreateGateButton => _createGate;
+
+        public Button InspectButton => _inspect;
 
         public Button UndoButton => _undo;
 
@@ -75,6 +78,7 @@ namespace DigitalLogicSandbox.UI.Toolbar
 
             ui.Separator(rect, vertical: true);
             view._createGate = ui.Button("CreateGate", rect, "Create Gate", () => view.CreateGateRequested?.Invoke());
+            view._inspect = ui.Button("Inspect", rect, "Inspect", () => workspace.OpenSelected());
 
             UiFactory.Flexible(rect);
 
@@ -92,7 +96,7 @@ namespace DigitalLogicSandbox.UI.Toolbar
 
             _undo.interactable = _workspace.History.CanUndo;
             _redo.interactable = _workspace.History.CanRedo;
-            _delete.interactable = !_workspace.Selection.IsEmpty;
+            _delete.interactable = !_workspace.Selection.IsEmpty && _workspace.IsEditable;
 
             bool simulating = _workspace.Session.IsSimulating;
             bool running = _workspace.Runner.State == SimulationState.Running;
@@ -100,7 +104,24 @@ namespace DigitalLogicSandbox.UI.Toolbar
             _playPause.interactable = simulating;
             _step.interactable = simulating && !running;
             _resetSimulation.interactable = simulating;
-            _createGate.interactable = _workspace.Circuit != null && _workspace.Circuit.Outputs.Count > 0;
+            _createGate.interactable = _workspace.CanPackage && _workspace.Circuit != null &&
+                _workspace.Circuit.Outputs.Count > 0;
+            _inspect.interactable = SelectedOpenableNode();
+        }
+
+        private bool SelectedOpenableNode()
+        {
+            if (_workspace.Selection.NodeCount != 1)
+            {
+                return false;
+            }
+
+            foreach (Core.Nodes.NodeId node in _workspace.Selection.Nodes)
+            {
+                return _workspace.CanOpenNode(node);
+            }
+
+            return false;
         }
 
         private void OnDestroy()
