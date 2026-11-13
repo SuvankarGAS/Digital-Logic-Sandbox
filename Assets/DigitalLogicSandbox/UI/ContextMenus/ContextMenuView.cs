@@ -32,6 +32,12 @@ namespace DigitalLogicSandbox.UI.ContextMenus
         /// <summary>Raised by "Create Custom Gate..." items (true = from the selection).</summary>
         public event Action<bool> PackageRequested;
 
+        /// <summary>"Generate Truth Table" on empty space (the shown circuit).</summary>
+        public event Action CircuitTruthTableRequested;
+
+        /// <summary>"Truth Table" on a gate.</summary>
+        public event Action<NodeId> NodeTruthTableRequested;
+
         public bool IsOpen => gameObject.activeSelf;
 
         /// <summary>Labels of the items currently shown (tests and accessibility).</summary>
@@ -85,6 +91,12 @@ namespace DigitalLogicSandbox.UI.ContextMenus
                     Add("Open Internal Circuit", () => _workspace.OpenNode(id), _workspace.CanOpenNode(id));
                 }
 
+                if (!node.IsBoundary)
+                {
+                    NodeId gate = request.Node;
+                    Add("Truth Table", () => NodeTruthTableRequested?.Invoke(gate), true);
+                }
+
                 Add("Rotate", () => _workspace.RotateSelection(), editable);
                 Add("Duplicate", () => _workspace.DuplicateSelection(), editable);
                 Add("Delete", () => _workspace.DeleteSelection(), editable);
@@ -105,6 +117,7 @@ namespace DigitalLogicSandbox.UI.ContextMenus
                     Add("Create Custom Gate...", () => PackageRequested?.Invoke(false), circuit.Outputs.Count > 0);
                 }
 
+                Add("Generate Truth Table...", () => CircuitTruthTableRequested?.Invoke(), circuit.Outputs.Count > 0);
                 Add("Select All", _workspace.SelectAll, circuit.Nodes.Count > 0);
                 Add("Frame Content", _workspace.FrameContent, true);
                 if (_workspace.Navigator.CurrentIndex > 0)

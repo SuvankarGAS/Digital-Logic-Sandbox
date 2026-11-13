@@ -1221,6 +1221,12 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             return false;
         }
 
+        /// <summary>Shows a transient message in the status bar (used by panels such as the truth table).</summary>
+        public void PostNotification(string message)
+        {
+            Notify(message);
+        }
+
         private void Notify(string message)
         {
             if (!string.IsNullOrEmpty(message))

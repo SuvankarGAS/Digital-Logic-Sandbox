@@ -40,6 +40,12 @@ namespace DigitalLogicSandbox.UI.Inspector
         /// <summary>Raised by "Save as new version..." while a gate is being edited.</summary>
         public event Action SaveDraftRequested;
 
+        /// <summary>"Generate Truth Table" for the shown circuit.</summary>
+        public event Action CircuitTruthTableRequested;
+
+        /// <summary>"Truth Table" for the selected gate.</summary>
+        public event Action<NodeId> NodeTruthTableRequested;
+
         public string HeaderText => _header.text;
 
         public static InspectorPanel Create(Transform parent, UiFactory ui, WorkspaceController workspace)
@@ -176,6 +182,10 @@ namespace DigitalLogicSandbox.UI.Inspector
 
             BuildInterfaceList(circuit, circuit.Inputs, "Input interface", input: true);
             BuildInterfaceList(circuit, circuit.Outputs, "Output interface", input: false);
+
+            _ui.Caption(_content, "Truth table");
+            _ui.Button("TruthTable", _content, "Generate Truth Table...", () => CircuitTruthTableRequested?.Invoke())
+                .interactable = circuit.Outputs.Count > 0;
 
             if (!_workspace.CanPackage)
             {
@@ -315,6 +325,11 @@ namespace DigitalLogicSandbox.UI.Inspector
             {
                 _ui.Button("Open", _content, "Open Internal Circuit", () => _workspace.OpenNode(id)).interactable =
                     _workspace.CanOpenNode(id);
+            }
+
+            if (!node.IsBoundary)
+            {
+                _ui.Button("NodeTruthTable", _content, "Truth Table", () => NodeTruthTableRequested?.Invoke(id));
             }
 
             if (_workspace.CanPackage)

@@ -23,6 +23,7 @@ namespace DigitalLogicSandbox.UI.Toolbar
         private TextMeshProUGUI _title;
         private Button _createGate;
         private Button _inspect;
+        private Button _truthTable;
 
         /// <summary>Raised by the "Signals" button (signal visualization settings).</summary>
         public event System.Action SignalSettingsRequested;
@@ -30,9 +31,14 @@ namespace DigitalLogicSandbox.UI.Toolbar
         /// <summary>Raised by the "Create Gate" button.</summary>
         public event System.Action CreateGateRequested;
 
+        /// <summary>"Truth Table" button: generate the truth table of the shown circuit.</summary>
+        public event System.Action TruthTableRequested;
+
         public Button CreateGateButton => _createGate;
 
         public Button InspectButton => _inspect;
+
+        public Button TruthTableButton => _truthTable;
 
         public Button UndoButton => _undo;
 
@@ -83,6 +89,7 @@ namespace DigitalLogicSandbox.UI.Toolbar
             ui.Separator(rect, vertical: true);
             view._createGate = ui.Button("CreateGate", rect, "Create Gate", () => view.CreateGateRequested?.Invoke());
             view._inspect = ui.Button("Inspect", rect, "Inspect", () => workspace.OpenSelected());
+            view._truthTable = ui.Button("TruthTable", rect, "Truth Table", () => view.TruthTableRequested?.Invoke());
 
             UiFactory.Flexible(rect);
 

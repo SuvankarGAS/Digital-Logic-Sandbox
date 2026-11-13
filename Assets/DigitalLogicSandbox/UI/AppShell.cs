@@ -2,6 +2,7 @@ using DigitalLogicSandbox.CircuitEditor.Workspace;
 using DigitalLogicSandbox.Components.Abstractions;
 using DigitalLogicSandbox.GateLibrary.Custom;
 using DigitalLogicSandbox.Rendering;
+using DigitalLogicSandbox.TruthTable.Generation;
 using DigitalLogicSandbox.UI.ContextMenus;
 using DigitalLogicSandbox.UI.Dialogs;
 using DigitalLogicSandbox.UI.Inspector;
@@ -44,10 +45,12 @@ namespace DigitalLogicSandbox.UI
 
         public SignalSettingsPanel SignalSettings { get; private set; }
 
+        public TruthTableDialog TruthTable { get; private set; }
+
         public Canvas Canvas => _canvas;
 
         public static AppShell Create(VisualTheme theme, WorkspaceController workspace, ComponentCatalog catalog,
-            DefinitionLibrary library)
+            DefinitionLibrary library, TruthTableLimits truthTableLimits = null)
         {
             var go = new GameObject("UI", typeof(RectTransform));
             go.layer = 5;
@@ -71,6 +74,7 @@ namespace DigitalLogicSandbox.UI
             shell.ContextMenu = ContextMenuView.Create(go.transform, shell.Factory, workspace);
             shell.PackagingDialog = PackagingDialog.Create(go.transform, shell.Factory, workspace);
             shell.VersionSaveDialog = VersionSaveDialog.Create(go.transform, shell.Factory, workspace);
+            shell.TruthTable = TruthTableDialog.Create(go.transform, shell.Factory, workspace, truthTableLimits);
 
             shell.Toolbar.SignalSettingsRequested += shell.SignalSettings.Toggle;
             shell.Toolbar.CreateGateRequested += () => shell.PackagingDialog.Open(selectionOnly: false);
@@ -78,6 +82,11 @@ namespace DigitalLogicSandbox.UI
             shell.ContextMenu.PackageRequested += selectionOnly => shell.PackagingDialog.Open(selectionOnly);
             shell.Inspector.SaveDraftRequested += shell.VersionSaveDialog.Open;
             shell.NavigationBar.SaveRequested += shell.VersionSaveDialog.Open;
+            shell.Toolbar.TruthTableRequested += shell.TruthTable.OpenForCurrentCircuit;
+            shell.Inspector.CircuitTruthTableRequested += shell.TruthTable.OpenForCurrentCircuit;
+            shell.ContextMenu.CircuitTruthTableRequested += shell.TruthTable.OpenForCurrentCircuit;
+            shell.Inspector.NodeTruthTableRequested += node => shell.TruthTable.OpenForNode(node);
+            shell.ContextMenu.NodeTruthTableRequested += node => shell.TruthTable.OpenForNode(node);
             return shell;
         }
 

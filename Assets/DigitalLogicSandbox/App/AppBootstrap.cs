@@ -6,6 +6,7 @@ using DigitalLogicSandbox.Components.Abstractions;
 using DigitalLogicSandbox.Core.Circuit;
 using DigitalLogicSandbox.GateLibrary.Custom;
 using DigitalLogicSandbox.Rendering;
+using DigitalLogicSandbox.TruthTable.Generation;
 using DigitalLogicSandbox.UI;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -29,6 +30,9 @@ namespace DigitalLogicSandbox.App
 
         [Tooltip("Initial signal animation settings (the user can change them at runtime).")]
         [SerializeField] private SignalAnimationSettings _signalAnimation = new SignalAnimationSettings();
+
+        [Tooltip("Truth table limits: maximum inputs and rows, confirmation threshold and per-frame time budget.")]
+        [SerializeField] private TruthTableLimits _truthTableLimits = new TruthTableLimits();
 
         private WorkspaceControls _controls;
 
@@ -84,7 +88,7 @@ namespace DigitalLogicSandbox.App
                 SignalAnimation = _signalAnimation ?? new SignalAnimationSettings(),
             });
 
-            Shell = AppShell.Create(_theme, Workspace, Catalog, Library);
+            Shell = AppShell.Create(_theme, Workspace, Catalog, Library, _truthTableLimits ?? new TruthTableLimits());
             NewCircuit();
         }
 

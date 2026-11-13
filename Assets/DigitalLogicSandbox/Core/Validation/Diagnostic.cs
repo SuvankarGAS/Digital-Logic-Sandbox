@@ -47,6 +47,9 @@ namespace DigitalLogicSandbox.Core.Validation
         DuplicateGateName,
         InterfaceMismatch,
         CircuitReadOnly,
+
+        // Analysis
+        TruthTableTooLarge,
     }
 
     /// <summary>A single validation finding with enough context for the UI to highlight the culprit.</summary>

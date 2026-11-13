@@ -345,15 +345,35 @@ Tick(dt) in WorkspaceController.LateUpdate → CircuitPresenter.ApplyNetSource /
   "Reset visual state" drops pulses and repaints true values.
 - **DOTween** is used for camera easing and UI effects, not for wires.
 
-## 9. Truth table generation *(planned – Phase 7)*
+## 9. Truth table generation *(implemented – Phase 7)*
 
-`TruthTableGenerator` compiles the target definition and creates a **fresh `SimulationContext`** with
-`RecordChanges = false`, so the live context never changes and nothing needs restoring. When the target is
-the currently simulated root, it reuses the already-compiled topology. Rows are enumerated in binary order with input 0 as the
-most significant bit (`00, 01, 10, 11`). Work is time-sliced (rows per frame budget) via an iterator driven
-by the UI, with progress reporting and a `CancellationToken`. Limits (max inputs, max rows) are configurable;
-crossing a warning threshold requires confirmation. Circuits containing sequential components are rejected
-with an explanation. Export: CSV and tab-separated clipboard text.
+`TruthTableDialog → TruthTableGenerator.Plan(definition) → TruthTablePlan → Start → TruthTableJob
+(fresh SimulationContext) ← TruthTableJobDriver.Update (frame budget) → TruthTableData → virtualized rows /
+TruthTableExporter`.
+
+- **Plan.** The generator compiles the target with recording off, so the live context never changes and nothing
+  needs restoring. Columns come from the interface order. It checks the limits (`TruthTableLimits`: max
+  inputs, max rows, confirmation threshold, frame budget; absolute ceiling of 24 inputs), at least one output,
+  and the absence of combinational cycles. Errors and warnings are `Diagnostic`s in the plan's report, and
+  planning evaluates nothing. `Plan(CompiledCircuit)` reuses an existing compiled circuit.
+- **Targets.** The UI asks for the shown circuit at any navigation level, a placed custom gate (its
+  definition), or a primitive. `TruthTableTargets.ForComponent` builds a one-gate harness for a primitive, so
+  every table comes from the engine.
+- **Evaluation.** `TruthTableJob` owns its own `SimulationContext`, which starts in the all-LOW settled state.
+  For each row in binary order (first input = MSB) it sets the inputs, settles and stores the outputs.
+  - Event-driven propagation evaluates only what changed between consecutive rows.
+  - A non-settling row fails the job.
+  - Work is sliced with `Advance(rows)` or `AdvanceFor(ms)` on the main thread; no threads are used.
+  - `Cancel()` and `RunToCompletion(CancellationToken)` stop it, and produced rows stay valid.
+- **Storage.** Inputs are implied by the row index, and outputs are stored as one `Signal` byte per cell.
+- **Sequential circuits.** Circuits with feedback are refused with an explanation. A future sequential analysis
+  mode will need explicit initialization and clock sequences.
+- **UI.**
+  - `TruthTableJobDriver` (TruthTable.UI) is the only per-frame component.
+  - `TruthTableDialog` (UI) has a fixed header and a virtualized list of 40 pooled rows, each one rich-text
+    line with `<pos>` columns, so 65,536 rows cost the same as 4.
+  - Tables above the confirmation threshold wait for "Generate".
+  - Export: CSV written atomically to `persistentDataPath/Exports`; tab-separated text copied to the clipboard.
 
 ## 10. Persistence format *(planned – Phase 8)*
 

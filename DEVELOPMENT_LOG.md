@@ -11,8 +11,8 @@
 | 4 | Custom gate packaging | ✅ Complete (2026-11-14) |
 | 5 | Hierarchical composition & inspection | ✅ Complete (2026-11-14) |
 | 6 | Animated signal visualization | ✅ Complete (2026-11-14) |
-| 7 | Truth table generator | ⏳ Next |
-| 8 | Persistence & undo/redo | — |
+| 7 | Truth table generator | ✅ Complete (2026-11-14) |
+| 8 | Persistence & undo/redo | ⏳ Next |
 | 9 | Polish & optimization | — |
 
 ---
@@ -515,3 +515,93 @@ Delivered – see the Phase 3 section below.
 - Inside an inspected gate, nets are recoloured instantly, not animated, because the animator follows the
   shown level's log.
 - Animation settings are not persisted until Phase 8.
+
+---
+
+## Phase 7 – Truth table generator (2026-11-14)
+
+### Implemented
+- **Generation** (`TruthTable/Generation`, engine-free):
+  - `TruthTableGenerator.Plan(definition | compiled)`: compiles the circuit, takes columns from the interface
+    order, and checks limits, outputs and feedback. It evaluates nothing.
+  - `Start(plan)` returns a job; `Generate(definition, token)` runs synchronously.
+  - `TruthTablePlan`: report, row count, `CanGenerate`, `RequiresConfirmation`, `FirstError`.
+  - `TruthTableData`: rows in binary order with the first input as the most significant bit. Inputs are derived
+    from the row index and only outputs are stored (one byte per cell). Also `RowOf`, `Symbol` (0/1/X/Z) and
+    `CompletedRows`.
+  - `TruthTableLimits` (serialized on `AppBootstrap`): MaxInputs 16, MaxRows 65,536, ConfirmRows 1,024,
+    frame budget 6 ms, all capped by an absolute ceiling of 24 inputs.
+  - `TruthTableTargets.ForComponent`: a custom gate resolves to its packaged definition. A primitive gets a
+    one-gate harness, so AND and NOT are also tabulated by the engine.
+  - New diagnostic code `TruthTableTooLarge`.
+- **Evaluation** (`TruthTable/Evaluation/TruthTableJob`):
+  - Incremental, on the caller's thread: `Advance(rows)`, `AdvanceFor(ms)`, `RunToCompletion(token)`,
+    `Cancel()`.
+  - Reports status, progress, evaluation count and elapsed time.
+  - Owns a fresh `SimulationContext` with recording off, released when finished (statistics are kept).
+  - A row that does not settle fails the job with an explanation.
+- **Export** (`TruthTable/Export/TruthTableExporter`): RFC 4180 CSV (`ToCsv` / `WriteCsv`), tab-separated text
+  for the clipboard, and a file-system safe `SuggestFileName`. Only completed rows are written.
+- **UI**:
+  - `TruthTableJobDriver` (TruthTable.UI) advances one job per frame within the time budget.
+  - `TruthTableDialog` (UI/Dialogs) shows the title, input/output summary and "2^N = rows". It has a fixed
+    header with inputs and outputs (outputs in accent colour, divider between them).
+  - The row list is virtualized: a pool of 40 rows, each a single rich-text line. HIGH values are bold and
+    coloured, and pending rows show dots.
+  - It shows status, warnings and errors.
+  - Buttons: Regenerate, Copy, Export CSV, Generate (confirmation for large tables), Cancel and Close.
+    Escape cancels a running job, otherwise closes the dialog.
+- **Entry points**:
+  - Toolbar "Truth Table".
+  - Context menu: "Generate Truth Table..." on empty space, "Truth Table" on any gate.
+  - Inspector: a circuit-properties "Generate Truth Table..." button, and a "Truth Table" button for a
+    selected gate, including custom gates.
+  - Works at every navigation level: main circuit, inspected gate and draft.
+- `WorkspaceController.PostNotification` lets panels post status-bar messages.
+
+### Decisions
+- **Isolation by construction, not by snapshot/restore.** The compiled circuit is immutable and each job
+  evaluates it in its own context. The live context, its inputs, change log and evaluation counter are never
+  touched, so nothing needs capturing or restoring. A test proves this even when the job reuses the live
+  runner's compiled circuit.
+- **Main-thread time slicing instead of threads.** The engine is single-threaded and cheap per row. A frame
+  budget keeps the editor responsive without synchronisation, and cancellation is just a flag. This follows
+  CLAUDE.md: no multithreading without profiling evidence.
+- **Fresh compile for UI requests.** The dialog always compiles the shown definition. This works the same for
+  inspected gates, drafts and harnesses, and costs little next to 2^N evaluations. `Plan(CompiledCircuit)`
+  remains available for reuse.
+- **Feedback loops are refused.** A loop can hold state, so a plain truth table would misdescribe it. A
+  sequential analysis mode with explicit initialization and clock sequences belongs to the sequential phase.
+- **Binary order with the first input as the MSB.** It is deterministic and matches the CLAUDE.md examples.
+  Column order follows the interface order, so reordering ports reorders columns.
+- **CSV files go to `persistentDataPath/Exports`**, because the runtime has no native save dialog. The file is
+  written to a temp file and then moved, and the path is shown in the status bar. Copy uses the system
+  clipboard as tab-separated text (pastes into spreadsheets).
+- **The panel lives in the UI assembly.** It needs `UiFactory` and the theme. TruthTable.UI holds only the
+  frame-budget driver, which keeps the documented layering intact.
+
+### Test results
+- EditMode: **258 / 258 passed** (26 new, `TruthTableTests`):
+  - Tables: AND and NOT (engine harness); NAND from AND + NOT; OR from primitives; OR from packaged NANDs;
+    nested wrappers; multiple independent outputs.
+  - Ordering: binary order with the first input as MSB and interface order; reordering ports; zero inputs.
+  - Isolation: live nets, inputs, evaluation count and change log unchanged; definition unchanged.
+  - Limits: input limit, row limit, confirmation threshold, absolute ceiling.
+  - Errors: no outputs; missing gate definition; feedback loop refused.
+  - Cancellation: cancel keeps produced rows; cancellation token.
+  - Performance: time-sliced progress; incremental evaluation (no full re-evaluation per row).
+  - Export: CSV and TSV content, escaping, partial export, file names.
+- PlayMode: **40 / 40 passed** (3 new, `TruthTableUiTests`, real Main scene):
+  - Toolbar → NAND table rows, live simulation and history unchanged, copy, CSV export, close.
+  - Context menu on a custom gate; disabled circuit item and useful error with no outputs; primitive harness.
+  - A 65,536-row table needs confirmation, runs across frames with progress, cancels keeping rows,
+    regenerates, scrolls to the last row through the virtualized list, and keeps a fixed object pool.
+- Manual: play-mode screenshots of the NAND table and of a 3-input, 2-output table (aligned columns, divider,
+  full-width stripes).
+
+### Known issues / deferred
+- Truth table limits are not persisted with the project yet (Phase 8 persistence).
+- Library items have no truth table entry of their own; place the gate, or use the inspector or context menu.
+- No sequential analysis mode yet. It needs clocked components, which arrive with sequential logic.
+- Very wide tables (many long port names) scroll horizontally. Columns are capped at 150 px and names are
+  truncated with an ellipsis.
