@@ -6,8 +6,8 @@
 |---|---|---|
 | 0 | Project foundation | ✅ Complete (2026-11-13) |
 | 1 | Core circuit model | ✅ Complete (2026-11-13) |
-| 2 | Simulation engine | ⏳ Next |
-| 3 | Visual circuit editor | — |
+| 2 | Simulation engine | ✅ Complete (2026-11-13) |
+| 3 | Visual circuit editor | ⏳ Next |
 | 4 | Custom gate packaging | — |
 | 5 | Hierarchical composition & inspection | — |
 | 6 | Animated signal visualization | — |
@@ -152,11 +152,71 @@ Requested by the user before Phase 1.
   sufficient for combinational-only circuits and can be refined with per-definition dependency summaries
   when sequential logic arrives.
 
-### Pending (Phase 2 – Simulation engine)
-- `CircuitCompiler`: hierarchical flattening to CSR topology plus a `HierarchyMap` (instance path → nets),
-  with depth and cycle guards.
-- `SimulationContext`: per-context signal state, preallocated ring-buffer worklist, dirty flags.
-- Event-driven propagation with wave numbers, evaluation budget and oscillation diagnostics.
-- `SignalChangeBuffer` for presentation consumers; play/pause/step/reset controls.
-- Tests: propagation, fan-out, NAND/OR behaviour, independent instances, nested gates, unrelated inputs
-  don't trigger full evaluation, zero allocations per settle.
+Phases 0–1 committed as `e301066`.
+
+---
+
+## Phase 2 – Simulation engine (2026-11-13)
+
+### Implemented
+- **Utilities**: `IntRingQueue`, a circular-array FIFO worklist (deliberately not a priority queue).
+- **Simulation.Engine**:
+  - `CircuitCompiler`: union-find hierarchy flattening, floating net, guards for circularity/depth/missing
+    references, flat-graph cycle warnings.
+  - `CompiledCircuit`: immutable CSR topology plus the root interface mapping.
+  - `CompiledInstance`: the per-instance hierarchy map.
+  - `CompileResult`, `SimulationOptions`.
+  - `SimulationRunner`: Play / Pause / Step / Reset / Load with inputs preserved by port id, SetInput,
+    ToggleInput, and `Loaded` / `StateChanged` events.
+- **Simulation.Context**: `SimulationContext`, the allocation-free event-driven propagation with waves, an
+  evaluation budget, and one-wave stepping.
+- **Simulation.Propagation**: `SignalChange`, `SignalChangeLog` (capped, drained by consumers),
+  `SettleResult`/`SettleStatus`.
+- **Simulation.Diagnostics**: `SimulationDiagnostics`, which turns oscillations into actionable errors
+  naming the gates involved.
+
+### Decisions
+1. **Union-find flattening** instead of resolving boundary aliases in expansion order. It is
+   order-independent, handles pass-through wires and feedback through custom gates, and stays linear-time.
+2. **Single shared floating net (index 0)** for unconnected inputs: never driven, reads LOW, and no per-pin
+   special cases in the hot loop.
+3. **FIFO worklist = wave scheduler.** The queue order alone yields propagation depth, so the animation
+   layer gets logical ordering for free. There is no timing model and no priority queue.
+4. **Feedback compiles with a warning; oscillation is a runtime status.** This keeps the editor usable while
+   a loop is half-built and prepares for latches. The budget is `max(10 000, 64 × gates)`.
+5. **Reset and Load are full refreshes:** the change log is cleared so views snap instead of animating.
+6. **Contexts are cheap and independent.** Truth tables will create their own context over the same
+   compiled topology instead of snapshotting and restoring the live state.
+7. **Editing recompiles the whole circuit** (about 10 ms for 5,000 gates) and the runner carries inputs over.
+   Incremental compilation is deferred until profiling shows a need (CLAUDE.md §15.12).
+
+### Test results
+- EditMode: **157 / 157 passed** (42 new):
+  - SimulationEngineTests: AND/NOT/NAND/OR tables, OR from packaged NAND, packaged OR used as a gate,
+    11-level nesting, independent instances (distinct nets and values), hierarchy map inner signals,
+    fan-out, floating inputs (gate and custom-gate pins), pass-through custom gate, unrelated inputs evaluate
+    nothing else, same-value no-op, propagation stops at masked gates, change log wave ordering, fan-out
+    same wave, recording disabled, StepWave, odd NOT ring detected as oscillation without hanging plus
+    diagnostic, reset, independent contexts, compile failures (missing, circular, too deep).
+  - SimulationRunnerTests: running vs paused, step, play flush, toggle, reset, reload preserves inputs by
+    port id, events, guard without a loaded circuit.
+  - SimulationPerformanceTests: zero GC allocation for toggle+settle and StepWave (constraint verified
+    to detect allocations); random 500- and 5,000-gate circuits match an independent reference evaluator;
+    300 nested OR instances (1,800 gates).
+  - IntRingQueueTests.
+- Measured: 5,000-gate random circuit compiles in about 10 ms; about 54 evaluations per toggle on average.
+- PlayMode: **1 / 1 passed**. Console: 0 errors, 0 warnings.
+
+### Known issues
+- Unity editor restart still pending for the Input System native backend (needed in Phase 3).
+- Runtime evaluation budget is per settle; a slowly oscillating loop that happens to stabilise within the
+  budget is reported as stable (correct behaviour for combinational semantics).
+
+### Pending (Phase 3 – Visual circuit editor)
+- Scene composition root (`App`), `InputActionAsset` with the Workspace action map, EventSystem with
+  `InputSystemUIInputModule`.
+- Workspace camera (pan/zoom with DOTween easing), grid rendering, grid snapping.
+- Pooled gate/pin/wire views driven by `CircuitDefinition.Changed` and the live `SimulationRunner`.
+- Placement from the library, selection (single/multi/rectangle), drag-move, wire creation with preview,
+  compatible-pin highlighting via `ConnectionRules`, orthogonal routing, deletion.
+- Input switches and output indicators; recompile on edit through `SimulationRunner.Load`.

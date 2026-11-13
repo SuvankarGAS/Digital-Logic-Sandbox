@@ -1,6 +1,6 @@
 # Architecture – Digital Logic Sandbox
 
-Status: **Phase 1 (core circuit model) complete.** Sections marked *(planned)* describe the committed design for
+Status: **Phase 2 (simulation engine) complete.** Sections marked *(planned)* describe the committed design for
 later phases; they become *(implemented)* as each phase lands. Changing a committed decision requires a
 strong technical reason recorded in `DEVELOPMENT_LOG.md`.
 
@@ -167,29 +167,62 @@ separate `ISequentialComponent` with `Commit()`, keeping combinational evaluatio
 insertion, and never replaces them. It exposes the latest version and the next version number, and raises
 `DefinitionAdded` so the library panel can refresh.
 
-## 5. Simulation lifecycle *(planned – Phase 2)*
+## 5. Simulation lifecycle *(implemented – Phase 2)*
 
-1. **Compile.** `CircuitCompiler` walks the root definition, recursively expanding custom nodes into a
-   flat `CompiledCircuit`: arrays of primitive instances, net indices, fan-out adjacency (CSR arrays), and
-   a `HierarchyMap` from instance path (`rootNode/childNode/...`) to net indices. Every placed custom gate
-   is expanded separately, so **instances never share state**. Expansion enforces a depth limit and
-   detects definition cycles (DFS colouring), producing diagnostics instead of recursing forever.
-   Combinational loops are found statically with Tarjan SCC on the flat graph.
-2. **Context.** `SimulationContext` holds the mutable state (net signal array, dirty flags, worklist)
-   for one compiled circuit. Topology is immutable and shareable; state is per-context. The live editor
-   and each truth-table run own separate contexts.
-3. **Propagate (event-driven).** Setting an input marks its fan-out dirty. A preallocated ring-buffer
-   worklist (no `PriorityQueue`, no LINQ, no per-step allocation) pops primitives, evaluates them and
-   enqueues fan-out only for nets whose value actually changed. Each change carries a *wave number*
-   (propagation depth). A configurable evaluation budget stops oscillation and reports the nets involved.
-4. **Events.** Changes are appended to a reusable `SignalChangeBuffer` (net, old, new, wave). Consumers
-   (animation, inspector, bottom panel) read it after `Settle()`; the engine never waits on them.
-5. **Controls.** Play = settle on every input change; Pause = queue input changes; Step = process one wave;
-   Reset = all nets to initial state. A future clock phase runs *after* combinational settle
-   (`Settle → Commit sequential → Settle`), so sequential logic slots in without rewriting the engine.
+```
+CircuitDefinition ──CircuitCompiler──► CompiledCircuit (immutable, shareable)
+   (+ ComponentCatalog)                   │  CSR arrays: gate inputs/outputs, net readers, net drivers
+                                          │  CompiledInstance tree (hierarchy map)
+                                          ▼
+                     SimulationContext (per consumer: live editor, truth table, tests)
+                        Signal[] nets · bool[] queued · IntRingQueue worklist · SignalChangeLog
+                                          ▲
+                     SimulationRunner (Play / Pause / Step / Reset / Load / SetInput / ToggleInput)
+```
 
-Signals at any hierarchy level are read from the single flat context via `HierarchyMap`, which is what lets
-an opened custom gate show live values for *that specific instance*.
+1. **Compile** (`Simulation.Engine.CircuitCompiler`). Expands the hierarchy recursively. Every output pin in
+   every expanded scope gets a raw net id. Custom-gate boundaries add no logic: they are resolved with
+   **union-find**. An inner input boundary is unioned with the net feeding the custom node's input pin, and
+   the custom node's output pin is unioned with the net feeding the inner output boundary. Raw ids are then
+   compacted into dense nets, and net 0 is the shared **floating** (constant LOW) net that every unconnected
+   input reads. Because of union-find, expansion order doesn't matter, pass-through wiring works, and
+   feedback through custom gates compiles.
+   - Each placed custom gate is expanded separately: **instances never share nets/state**. Definitions are
+     shared by reference.
+   - Guards: circular references (by `DefinitionId` on the current path), `MaxHierarchyDepth`, missing
+     definitions/primitives → `CompileResult` fails with diagnostics; nothing recurses unboundedly.
+   - Feedback loops in the flat gate graph are found with `CycleFinder` and reported as **warnings**
+     (`CompiledCircuit.CombinationalCycles`); the engine guards them at runtime.
+2. **Context** (`Simulation.Context.SimulationContext`). Holds the net values, dirty flags, the ring-buffer
+   worklist and scratch spans, all sized from the compiled topology at construction. `Reset()` sets all nets
+   LOW, evaluates every gate once and settles (so NOT outputs start HIGH). This is the only whole-circuit
+   evaluation.
+3. **Propagate (event-driven).** `SetInput` writes the net and schedules only its readers. `Settle()` pops
+   gates FIFO, evaluates them through `IPrimitiveComponent.Evaluate(span, span)`, and schedules fan-out only
+   for outputs whose value changed. FIFO order naturally groups work into **waves**. An evaluation budget
+   (`max(10 000, 64 × gates)`) turns oscillation into `SettleStatus.Oscillating`, clears the pending work
+   and keeps the gates still switching for `SimulationDiagnostics`. `StepWave()` processes exactly one wave.
+4. **Events.** Every net change is appended to `SignalChangeLog` as `SignalChange(net, previous, current,
+   wave)`: wave 0 is the input change, wave *n* the outputs of the *n*-th gate layer reached. Consumers drain
+   it and call `Clear()`. It is capped: if nobody drains it, `Overflowed` asks for a full refresh. Contexts
+   used for analysis set `RecordChanges = false`. The engine never waits for a consumer.
+5. **Controls** (`SimulationRunner`). Running = settle on each input change. Paused = apply inputs, defer
+   propagation. Step = one wave. Play = resume and flush. Reset = all LOW. `Load(compiled)` swaps in a
+   recompiled circuit after an edit and **carries input values over by stable `PortId`**. A reload clears the
+   change log, because it is a full refresh, not an animation.
+6. **Sequential extension point.** `Settle()` is the combinational phase. A future clock step will run
+   `Settle → commit ISequentialComponent state → Settle` around it without changing the propagation loop.
+
+**Hierarchy map.** `CompiledInstance` mirrors the expanded scopes (root → child per custom node id) and maps
+each scope's output pins to dense nets. `GetInputPinNet` resolves an input pin through its connection, or to
+the floating net. Opening a custom gate in the editor will look up the instance for that exact placement and
+colour its internal wires from the same live context. `CompiledCircuit.DescribeGate(g)` gives paths like
+`Main/N3:OR/N2:NAND/N4(AND)` for diagnostics.
+
+**Measured (EditMode, 2026-11-13):** a 5,000-gate random AND/NOT network compiles in about 10 ms. A single
+input toggle evaluates **about 54 gates on average** (not 5,000), and results match an independent
+topological reference evaluator on every vector. Toggling, settling and stepping allocate **0 bytes**
+(verified with Unity's `AllocatingGCMemory` constraint).
 
 ## 6. Custom gate packaging *(planned – Phase 4)*
 
@@ -226,8 +259,9 @@ colour **and** in thickness/dash pattern for colour-blind accessibility.
 
 ## 9. Truth table generation *(planned – Phase 7)*
 
-`TruthTableGenerator` compiles the target definition and creates a **fresh `SimulationContext`**, so the live
-context never changes and nothing needs restoring. Rows are enumerated in binary order with input 0 as the
+`TruthTableGenerator` compiles the target definition and creates a **fresh `SimulationContext`** with
+`RecordChanges = false`, so the live context never changes and nothing needs restoring. When the target is
+the currently simulated root, it reuses the already-compiled topology. Rows are enumerated in binary order with input 0 as the
 most significant bit (`00, 01, 10, 11`). Work is time-sliced (rows per frame budget) via an iterator driven
 by the UI, with progress reporting and a `CancellationToken`. Limits (max inputs, max rows) are configurable;
 crossing a warning threshold requires confirmation. Circuits containing sequential components are rejected
