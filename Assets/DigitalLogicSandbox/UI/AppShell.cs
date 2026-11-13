@@ -2,6 +2,8 @@ using DigitalLogicSandbox.CircuitEditor.Workspace;
 using DigitalLogicSandbox.Components.Abstractions;
 using DigitalLogicSandbox.GateLibrary.Custom;
 using DigitalLogicSandbox.Rendering;
+using DigitalLogicSandbox.UI.Dialogs;
+using DigitalLogicSandbox.UI.Inspector;
 using DigitalLogicSandbox.UI.Panels;
 using DigitalLogicSandbox.UI.Toolbar;
 using TMPro;
@@ -28,6 +30,10 @@ namespace DigitalLogicSandbox.UI
 
         public StatusBarView StatusBar { get; private set; }
 
+        public InspectorPanel Inspector { get; private set; }
+
+        public PackagingDialog PackagingDialog { get; private set; }
+
         public Canvas Canvas => _canvas;
 
         public static AppShell Create(VisualTheme theme, WorkspaceController workspace, ComponentCatalog catalog,
@@ -49,6 +55,11 @@ namespace DigitalLogicSandbox.UI
             shell.Library = LibraryPanel.Create(go.transform, shell.Factory, workspace, catalog, library);
             shell.Toolbar = ToolbarView.Create(go.transform, shell.Factory, workspace);
             shell.StatusBar = StatusBarView.Create(go.transform, shell.Factory, workspace);
+            shell.Inspector = InspectorPanel.Create(go.transform, shell.Factory, workspace);
+            shell.PackagingDialog = PackagingDialog.Create(go.transform, shell.Factory, workspace);
+
+            shell.Toolbar.CreateGateRequested += () => shell.PackagingDialog.Open(selectionOnly: false);
+            shell.Inspector.PackageRequested += selectionOnly => shell.PackagingDialog.Open(selectionOnly);
             return shell;
         }
 

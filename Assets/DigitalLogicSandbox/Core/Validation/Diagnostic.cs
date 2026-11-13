@@ -39,6 +39,13 @@ namespace DigitalLogicSandbox.Core.Validation
         CombinationalCycle,
         CircularReference,
         HierarchyTooDeep,
+
+        // Packaging
+        MissingName,
+        ExternalConnection,
+        NoInputs,
+        DuplicateGateName,
+        InterfaceMismatch,
     }
 
     /// <summary>A single validation finding with enough context for the UI to highlight the culprit.</summary>

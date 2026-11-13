@@ -20,8 +20,6 @@ namespace DigitalLogicSandbox.App
     [DefaultExecutionOrder(-100)]
     public sealed class AppBootstrap : MonoBehaviour
     {
-        public const string DefaultCircuitName = "Main Circuit";
-
         [SerializeField] private VisualTheme _theme;
         [SerializeField] private Camera _camera;
 
@@ -73,6 +71,7 @@ namespace DigitalLogicSandbox.App
             Workspace.Initialize(new WorkspaceSetup
             {
                 Catalog = Catalog,
+                Library = Library,
                 Theme = _theme,
                 Camera = _camera,
                 Controls = _controls,
@@ -87,7 +86,7 @@ namespace DigitalLogicSandbox.App
         /// <summary>Starts an empty main circuit.</summary>
         public void NewCircuit()
         {
-            Workspace.LoadCircuit(new CircuitDefinition(DefinitionId.New(), DefaultCircuitName));
+            Workspace.LoadCircuit(new CircuitDefinition(DefinitionId.New(), WorkspaceController.DefaultCircuitName));
             Workspace.ResetCamera();
         }
 

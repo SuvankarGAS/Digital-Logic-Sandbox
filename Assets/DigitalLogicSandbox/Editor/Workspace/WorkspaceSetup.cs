@@ -1,6 +1,7 @@
 using System;
 using DigitalLogicSandbox.CircuitEditor.Interaction;
 using DigitalLogicSandbox.Components.Abstractions;
+using DigitalLogicSandbox.GateLibrary.Custom;
 using DigitalLogicSandbox.Rendering;
 using DigitalLogicSandbox.Simulation.Engine;
 using UnityEngine;
@@ -11,6 +12,9 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
     public sealed class WorkspaceSetup
     {
         public ComponentCatalog Catalog { get; set; }
+
+        /// <summary>Library that packaged gates are published to (must be the one behind <see cref="Catalog"/>).</summary>
+        public DefinitionLibrary Library { get; set; }
 
         public VisualTheme Theme { get; set; }
 

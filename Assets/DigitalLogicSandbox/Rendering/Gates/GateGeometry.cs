@@ -11,8 +11,11 @@ namespace DigitalLogicSandbox.Rendering.Gates
     public sealed class GateGeometry
     {
         public GateGeometry(ComponentKind kind, string title, string subtitle, Vector2 size, Rotation rotation,
-            PortId[] inputPorts, Vector2[] inputPins, PortId[] outputPorts, Vector2[] outputPins)
+            PortId[] inputPorts, Vector2[] inputPins, PortId[] outputPorts, Vector2[] outputPins,
+            string[] inputNames = null, string[] outputNames = null)
         {
+            InputNames = inputNames ?? System.Array.Empty<string>();
+            OutputNames = outputNames ?? System.Array.Empty<string>();
             Kind = kind;
             Title = title ?? string.Empty;
             Subtitle = subtitle ?? string.Empty;
@@ -25,6 +28,13 @@ namespace DigitalLogicSandbox.Rendering.Gates
         }
 
         public ComponentKind Kind { get; }
+
+        /// <summary>Pin labels drawn inside the body (custom gates only; empty for primitives and boundaries).</summary>
+        public string[] InputNames { get; }
+
+        public string[] OutputNames { get; }
+
+        public bool HasPinLabels => InputNames.Length > 0 || OutputNames.Length > 0;
 
         public string Title { get; }
 

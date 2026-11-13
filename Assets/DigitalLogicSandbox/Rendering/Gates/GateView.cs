@@ -19,6 +19,8 @@ namespace DigitalLogicSandbox.Rendering.Gates
         private readonly List<SpriteRenderer> _outputRings = new List<SpriteRenderer>();
         private readonly List<Signal> _inputSignals = new List<Signal>();
         private readonly List<Signal> _outputSignals = new List<Signal>();
+        private readonly List<TextMeshPro> _inputLabels = new List<TextMeshPro>();
+        private readonly List<TextMeshPro> _outputLabels = new List<TextMeshPro>();
 
         private VisualTheme _theme;
         private SpriteRenderer _outline;
@@ -116,6 +118,8 @@ namespace DigitalLogicSandbox.Rendering.Gates
 
             ConfigurePins(_inputPins, _inputRings, _inputSignals, geometry.InputPins, "In");
             ConfigurePins(_outputPins, _outputRings, _outputSignals, geometry.OutputPins, "Out");
+            ConfigureLabels(_inputLabels, geometry.InputNames, geometry.InputPins, "InLabel");
+            ConfigureLabels(_outputLabels, geometry.OutputNames, geometry.OutputPins, "OutLabel");
 
             ApplyOutline();
             ApplyState();
@@ -266,6 +270,44 @@ namespace DigitalLogicSandbox.Rendering.Gates
             }
         }
 
+        private void ConfigureLabels(List<TextMeshPro> labels, string[] names, Vector2[] pins, string prefix)
+        {
+            while (labels.Count < names.Length)
+            {
+                TextMeshPro label = CreateText(transform, prefix, 2.4f, FontStyles.Normal);
+                label.rectTransform.sizeDelta = new Vector2(3f, 0.6f);
+                labels.Add(label);
+            }
+
+            for (int i = 0; i < labels.Count; i++)
+            {
+                bool active = i < names.Length;
+                labels[i].gameObject.SetActive(active);
+                if (!active)
+                {
+                    continue;
+                }
+
+                // Place the label just inside the body, next to its pin, aligned towards the pin.
+                Vector2 pin = pins[i];
+                Vector2 inward = Mathf.Abs(pin.x) >= Mathf.Abs(pin.y)
+                    ? new Vector2(-Mathf.Sign(pin.x), 0f)
+                    : new Vector2(0f, -Mathf.Sign(pin.y));
+                TextMeshPro label = labels[i];
+                label.text = names[i];
+                label.color = Tint(_theme.GateSubtext);
+                label.sortingOrder = _title.sortingOrder;
+                bool horizontal = inward.y == 0f;
+                label.alignment = !horizontal
+                    ? TextAlignmentOptions.Center
+                    : inward.x > 0f ? TextAlignmentOptions.MidlineLeft : TextAlignmentOptions.MidlineRight;
+                label.rectTransform.pivot = !horizontal
+                    ? new Vector2(0.5f, 0.5f)
+                    : inward.x > 0f ? new Vector2(0f, 0.5f) : new Vector2(1f, 0.5f);
+                label.transform.localPosition = pin + inward * (horizontal ? 0.18f : 0.3f);
+            }
+        }
+
         private void ApplyOutline()
         {
             if (_geometry == null)
@@ -321,6 +363,17 @@ namespace DigitalLogicSandbox.Rendering.Gates
             _fill.color = Tint(fill);
             _title.color = Tint(_theme.GateText);
             _subtitle.color = Tint(_theme.GateSubtext);
+            for (int i = 0; i < _inputLabels.Count; i++)
+            {
+                _inputLabels[i].color = Tint(_theme.GateSubtext);
+                _inputLabels[i].sortingOrder = _title.sortingOrder;
+            }
+
+            for (int i = 0; i < _outputLabels.Count; i++)
+            {
+                _outputLabels[i].color = Tint(_theme.GateSubtext);
+                _outputLabels[i].sortingOrder = _title.sortingOrder;
+            }
             ApplyState();
             for (int i = 0; i < _inputPins.Count; i++)
             {

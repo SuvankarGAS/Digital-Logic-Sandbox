@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using DigitalLogicSandbox.Core.Circuit;
+using DigitalLogicSandbox.Core.Nodes;
 
 namespace DigitalLogicSandbox.GateLibrary.Custom
 {
@@ -18,6 +19,9 @@ namespace DigitalLogicSandbox.GateLibrary.Custom
 
         /// <summary>Raised after a definition version is published.</summary>
         public event Action<CircuitDefinition> DefinitionAdded;
+
+        /// <summary>Raised after a definition version is withdrawn (only when undoing its publication).</summary>
+        public event Action<CircuitDefinition> DefinitionRemoved;
 
         /// <summary>Every published version in insertion order.</summary>
         public IReadOnlyList<CircuitDefinition> AllVersions => _all;
@@ -51,6 +55,75 @@ namespace DigitalLogicSandbox.GateLibrary.Custom
             versions.Add(definition.Version, definition);
             _all.Add(definition);
             DefinitionAdded?.Invoke(definition);
+        }
+
+        /// <summary>
+        /// Withdraws a published version. This exists only to undo a publication. It is refused while another
+        /// published definition still references the version, so it can never leave a dangling reference inside
+        /// the library. Circuits outside the library are the caller's responsibility (the undo history removes
+        /// later instances first).
+        /// </summary>
+        public bool Remove(DefinitionRef reference)
+        {
+            if (!_versions.TryGetValue(reference.Id, out SortedList<int, CircuitDefinition> versions) ||
+                !versions.TryGetValue(reference.Version, out CircuitDefinition definition))
+            {
+                return false;
+            }
+
+            if (FindReferencingDefinition(reference) != null)
+            {
+                throw new InvalidOperationException("Definition " + reference + " ('" + definition.Name +
+                    "') is used by another custom gate and cannot be removed.");
+            }
+
+            versions.Remove(reference.Version);
+            if (versions.Count == 0)
+            {
+                _versions.Remove(reference.Id);
+            }
+
+            _all.Remove(definition);
+            DefinitionRemoved?.Invoke(definition);
+            return true;
+        }
+
+        /// <summary>First published definition that directly contains an instance of <paramref name="reference"/>, or null.</summary>
+        public CircuitDefinition FindReferencingDefinition(DefinitionRef reference)
+        {
+            for (int i = 0; i < _all.Count; i++)
+            {
+                IReadOnlyList<NodeDefinition> nodes = _all[i].Nodes;
+                for (int n = 0; n < nodes.Count; n++)
+                {
+                    if (nodes[n].Component.Kind == ComponentKind.Custom && nodes[n].Component.Definition == reference)
+                    {
+                        return _all[i];
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>True when a definition with this display name (case-insensitive) is already published.</summary>
+        public bool ContainsName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return false;
+            }
+
+            string trimmed = name.Trim();
+            for (int i = 0; i < _all.Count; i++)
+            {
+                if (string.Equals(_all[i].Name?.Trim(), trimmed, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         public bool Contains(DefinitionRef reference)

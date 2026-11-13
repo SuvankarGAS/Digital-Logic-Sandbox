@@ -21,6 +21,12 @@ namespace DigitalLogicSandbox.UI.Toolbar
         private Button _step;
         private Button _resetSimulation;
         private TextMeshProUGUI _title;
+        private Button _createGate;
+
+        /// <summary>Raised by the "Create Gate" button.</summary>
+        public event System.Action CreateGateRequested;
+
+        public Button CreateGateButton => _createGate;
 
         public Button UndoButton => _undo;
 
@@ -67,6 +73,9 @@ namespace DigitalLogicSandbox.UI.Toolbar
             view._step = ui.Button("Step", rect, "Step", () => workspace.Step());
             view._resetSimulation = ui.Button("ResetSimulation", rect, "Reset Sim", workspace.ResetSimulation);
 
+            ui.Separator(rect, vertical: true);
+            view._createGate = ui.Button("CreateGate", rect, "Create Gate", () => view.CreateGateRequested?.Invoke());
+
             UiFactory.Flexible(rect);
 
             workspace.StatusChanged += view.Refresh;
@@ -91,6 +100,7 @@ namespace DigitalLogicSandbox.UI.Toolbar
             _playPause.interactable = simulating;
             _step.interactable = simulating && !running;
             _resetSimulation.interactable = simulating;
+            _createGate.interactable = _workspace.Circuit != null && _workspace.Circuit.Outputs.Count > 0;
         }
 
         private void OnDestroy()

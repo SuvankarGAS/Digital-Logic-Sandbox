@@ -8,8 +8,8 @@
 | 1 | Core circuit model | ✅ Complete (2026-11-13) |
 | 2 | Simulation engine | ✅ Complete (2026-11-13) |
 | 3 | Visual circuit editor | ✅ Complete (2026-11-13) |
-| 4 | Custom gate packaging | ⏳ Next |
-| 5 | Hierarchical composition & inspection | — |
+| 4 | Custom gate packaging | ✅ Complete (2026-11-14) |
+| 5 | Hierarchical composition & inspection | ⏳ Next |
 | 6 | Animated signal visualization | — |
 | 7 | Truth table generator | — |
 | 8 | Persistence & undo/redo | — |
@@ -276,8 +276,89 @@ Delivered – see the Phase 3 section below.
 - Manual: a NAND circuit built in play mode renders correctly (screenshot verified); console clean.
 
 ### Known issues / deferred
-- Right panel (properties inspector): Phase 4, together with packaging options.
+- ~~Right panel (properties inspector)~~: delivered in Phase 4.
 - Context menus: Phase 9 (right button currently pans / cancels).
 - Toolbar project actions (New/Open/Save/Save As): Phase 8. Truth Table / Inspect / Circuit Properties:
   Phases 4–7. Buttons are added when their systems exist (no dead buttons).
 - Signal travel animation: Phase 6 (views currently switch to the new value immediately).
+
+---
+
+## Phase 4 – Custom gate packaging (2026-11-14)
+
+### Implemented
+- **Packaging engine** (`GateLibrary/Packaging`, engine-free):
+  - `PackagingSpec`: name, description, category, icon, ordered and named external inputs/outputs, optional
+    node subset (the selection).
+  - `CircuitPackager.Package(source, spec)`: builds a *new* definition (new `DefinitionId`, version 1) by
+    copying the nodes, internal connections and layout with their ids. Interface order and names come from
+    the spec, and port ids are kept, so the mapping to internal boundaries is stable. It then validates and
+    returns a `PackagingResult` (definition + report).
+  - The source circuit is never modified.
+- **Validation** (packaging adds these on top of `CircuitValidator` and `HierarchyValidator`):
+  - Errors: missing name; every boundary in scope mapped exactly once, to a port of the right direction;
+    empty or duplicate port names; at least one *connected* output; missing components or definitions;
+    combinational feedback; circular references; depth limit.
+  - Warnings: unused inputs, wires cut by a partial selection, no inputs (constant gate), and a name that
+    duplicates an existing gate (allowed, because behaviour never depends on the name).
+  - New diagnostic codes: `MissingName`, `ExternalConnection`, `NoInputs`, `DuplicateGateName`,
+    `InterfaceMismatch`.
+- **Library**: `DefinitionLibrary.Remove` (only to undo a publication; refused while another definition
+  references the version), `DefinitionRemoved` event, `FindReferencingDefinition`, `ContainsName`.
+- **Commands**: `PublishDefinitionCommand` (undo withdraws the gate), `RenameInterfacePortCommand`,
+  `MoveInterfacePortCommand`, `SetCircuitPropertiesCommand`. "Package and clear workspace" is one
+  `CompositeCommand` (publish + remove packaged nodes), so a single undo restores everything.
+- **Editor**:
+  - `WorkspaceController` packaging API: `CreatePackagingSpec`, `PreviewPackaging`, `PackageCustomGate`.
+  - `RenameInterfacePort` and `SetCircuitProperties`.
+  - `InputSuspended` blocks workspace input while a modal is open.
+  - Library add/remove triggers a recompile.
+- **Rendering**: custom gates draw pin labels (external port names) inside the body; their width accounts
+  for the labels.
+- **UI**:
+  - `PackagingDialog` (modal): scope toggle for selection vs whole circuit, metadata fields, input/output
+    name editing and reordering, live validation messages from the real packager, an optional "remove
+    packaged parts" checkbox, Enter/Esc, and an undoable result.
+  - `InspectorPanel` (right panel):
+    - Circuit view: name, description and category (undoable edits); input/output interface with rename
+      and live values; gate/wire counts; Create Custom Gate.
+    - Gate view: type, pins, position, rotation, node id, boundary port name and order, live value, and
+      custom gate details (definition, version, category, internal size, versions, description).
+    - Wire view: source, destination, live signal, delete.
+    - Multi-selection view: summary and Create Custom Gate from selection.
+  - Toolbar: "Create Gate". Library panel refreshes on publish and on undo.
+  - `UiFactory` gained Toggle, Caption, Property, FieldRow, Column and DestroyChildren helpers.
+
+### Decisions
+- **Packaging copies, nesting references.** The packaged graph is a deep copy of the source circuit, so
+  later edits to the scratch circuit never affect the gate. Custom gates *inside* it are stored as
+  `DefinitionRef`s to the shared definitions, never duplicated.
+- **No "replace selection with instance" yet.** CLAUDE.md lets users keep the original circuit (default) or
+  explicitly replace it. Phase 4 offers "remove the packaged parts" instead. Automatic rewiring of an instance
+  in place of a partial selection is deferred to Phase 9; exposing cut wires needs explicit boundaries anyway.
+- **The dialog validates live** by running the same packager that commits, so what the user sees is exactly
+  what will be checked.
+- **Undoing a publication is allowed** because instances placed afterwards are later in the history and are
+  undone first; the library still refuses removals that would break another definition.
+
+### Test results
+- EditMode: **210 / 210 passed** (new `PackagingTests`, 21 cases):
+  - NAND from AND+NOT; OR from packaged NAND (nested references); OR from primitives.
+  - Original circuit unchanged; port names, order and id stability; layout and metadata preserved.
+  - Multiple independent instances; partial-selection packaging.
+  - Every validation error and warning listed above; circular-reference rejection.
+  - Publish undo/redo; library removal guard; interface/property command undo; default spec.
+- PlayMode: **12 / 12 passed**:
+  - `PackagingIntegrationTests`: build NAND in the workspace → package → place an instance → full truth
+    table through views. Compose OR from three NAND instances and package it (nested). Undo of
+    package-and-clear restores circuit, views and simulation. Invalid packaging publishes nothing.
+  - `PackagingDialogTests`: real Main-scene dialog – name required, input suspended while open, gate
+    appears in the library, inspector headers.
+- Manual: screenshots verified the dialog, library entry, labelled NAND instance and inspector details.
+
+### Known issues / deferred
+- Opening a custom gate to see its internals, breadcrumbs, edit mode and versioning: Phase 5.
+- Truth table buttons in the inspector and dialog: Phase 7.
+- Custom gates live only for the session until persistence lands in Phase 8.
+- The icon is stored and shown nowhere yet except the inspector metadata; it will be used for the
+  library/gate badge in Phase 9.

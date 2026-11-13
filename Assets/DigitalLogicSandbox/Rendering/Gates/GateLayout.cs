@@ -43,6 +43,12 @@ namespace DigitalLogicSandbox.Rendering.Gates
             {
                 int rows = Mathf.Max(inputs.Count, outputs.Count);
                 float width = Mathf.Max(MinGateWidth, Mathf.Ceil((title?.Length ?? 0) * 0.32f + 1.6f));
+                if (kind == ComponentKind.Custom)
+                {
+                    // Room for pin labels on both sides of the title.
+                    float labels = (LongestName(inputs) + LongestName(outputs)) * PinLabelCharWidth;
+                    width = Mathf.Max(width, Mathf.Ceil((title?.Length ?? 0) * 0.32f + labels + 1.2f));
+                }
                 float height = Mathf.Max(MinGateHeight, rows * PinSpacing);
                 size = new Vector2(width, height);
                 float edge = width * 0.5f;
@@ -80,7 +86,16 @@ namespace DigitalLogicSandbox.Rendering.Gates
             string subtitle = kind == ComponentKind.Custom || kind == ComponentKind.Primitive
                 ? inputs.Count + " in / " + outputs.Count + " out"
                 : string.Empty;
-            return new GateGeometry(kind, title, subtitle, size, rotation, inputPorts, inputPins, outputPorts, outputPins);
+            string[] inputNames = null;
+            string[] outputNames = null;
+            if (kind == ComponentKind.Custom)
+            {
+                inputNames = Names(inputs);
+                outputNames = Names(outputs);
+            }
+
+            return new GateGeometry(kind, title, subtitle, size, rotation, inputPorts, inputPins, outputPorts, outputPins,
+                inputNames, outputNames);
         }
 
         /// <summary>Rotates an offset counter-clockwise in 90° steps.</summary>
@@ -97,6 +112,31 @@ namespace DigitalLogicSandbox.Rendering.Gates
                 default:
                     return offset;
             }
+        }
+
+        /// <summary>Approximate world width of one pin-label character.</summary>
+        public const float PinLabelCharWidth = 0.24f;
+
+        private static int LongestName(IReadOnlyList<PortDescriptor> ports)
+        {
+            int longest = 0;
+            for (int i = 0; i < ports.Count; i++)
+            {
+                longest = Mathf.Max(longest, ports[i].Name?.Length ?? 0);
+            }
+
+            return longest;
+        }
+
+        private static string[] Names(IReadOnlyList<PortDescriptor> ports)
+        {
+            var names = new string[ports.Count];
+            for (int i = 0; i < names.Length; i++)
+            {
+                names[i] = ports[i].Name ?? string.Empty;
+            }
+
+            return names;
         }
 
         public static Rotation Next(Rotation rotation)

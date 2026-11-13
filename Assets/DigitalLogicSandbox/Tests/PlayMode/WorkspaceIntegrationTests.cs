@@ -44,6 +44,7 @@ namespace DigitalLogicSandbox.Tests.PlayMode
             _workspace.Initialize(new WorkspaceSetup
             {
                 Catalog = catalog,
+                Library = _library,
                 Theme = VisualTheme.CreateRuntimeDefault(),
                 Camera = camera,
                 IsPointerOverUi = () => false,

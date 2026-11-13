@@ -224,15 +224,43 @@ input toggle evaluates **about 54 gates on average** (not 5,000), and results ma
 topological reference evaluator on every vector. Toggling, settling and stepping allocate **0 bytes**
 (verified with Unity's `AllocatingGCMemory` constraint).
 
-## 6. Custom gate packaging *(planned – Phase 4)*
+## 6. Custom gate packaging *(implemented – Phase 4)*
 
-`Packager` takes the current circuit (or a selection), the user-specified name/description/category/icon and
-the ordered boundary nodes, then validates: ≥1 output, unique port IDs/names, all references resolvable, no
-definition cycle (the new definition must not, transitively, contain itself), no unsupported combinational
-feedback (Tarjan), depth within limit. Unused inputs → warning. On success a new `DefinitionId` (v1) is
-added to the `DefinitionLibrary` with a **deep copy** of the graph; the source circuit is untouched unless
-the user opts to replace the selection with an instance of the new gate. Nested definitions are stored by
-reference, never duplicated.
+```
+PackagingDialog ──edits──► PackagingSpec (name, desc, category, icon, ordered/named ports, node subset)
+       │ live preview                               │
+       ▼                                            ▼
+WorkspaceController.PreviewPackaging / PackageCustomGate ──► CircuitPackager.Package(source, spec)
+                                                                   │  copy nodes/connections/layout (ids kept)
+                                                                   │  interface from spec (port ids kept)
+                                                                   │  validate (CircuitValidator + packaging rules)
+                                                                   ▼
+                                                     PackagingResult(definition | null, report)
+                                                                   │ success
+                                                                   ▼
+                            CommandHistory ◄── PublishDefinitionCommand (+ optional RemoveNodesCommand)
+                                                                   │
+                                                     DefinitionLibrary.Add → frozen, DefinitionAdded
+                                                                   │
+                                     LibraryPanel refresh · session recompile · instances placeable
+```
+
+- **Identity.** Each packaged gate gets a fresh `DefinitionId` at version 1. Instances reference
+  `DefinitionRef(id, version)`; the gate's behaviour is its graph, never its name.
+- **Copy vs reference.** The packaged graph is a deep copy of the scratch circuit; the source circuit is
+  untouched. Custom gates inside the packaged graph stay references to shared definitions, so nesting never
+  duplicates graphs.
+- **Interface.** External ports are the circuit's boundary nodes, ordered and renamed by the spec. Port ids
+  are kept, which keeps instance connections stable across renames and reorders.
+- **Validation.**
+  - Errors: name; complete one-to-one boundary mapping with matching directions; port names non-empty and
+    unique; at least one connected output; all components and definitions resolvable; no combinational
+    feedback; no circular hierarchy; depth limit.
+  - Warnings: unused inputs, cut wires (partial selection), no inputs, duplicate gate name.
+- **Undo.** Publishing is a command. The library only allows withdrawing a version that no other
+  definition references. Package-and-clear is a composite, undone as one step.
+- **Instancing.** The compiler expands each instance into its own gates and nets (Phase 2), so instances
+  never share state. Custom gates show only their external pins, labelled with the interface names.
 
 ## 7. Hierarchy, inspection and versioning *(planned – Phase 5)*
 

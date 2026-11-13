@@ -5,6 +5,7 @@ using DigitalLogicSandbox.CircuitEditor.Interaction;
 using DigitalLogicSandbox.CircuitEditor.Placement;
 using DigitalLogicSandbox.CircuitEditor.Selection;
 using DigitalLogicSandbox.Commands.Circuit;
+using DigitalLogicSandbox.Commands.Library;
 using DigitalLogicSandbox.Commands.UndoRedo;
 using DigitalLogicSandbox.Components.Abstractions;
 using DigitalLogicSandbox.Core.Circuit;
@@ -13,6 +14,8 @@ using DigitalLogicSandbox.Core.Nodes;
 using DigitalLogicSandbox.Core.Ports;
 using DigitalLogicSandbox.Core.Signals;
 using DigitalLogicSandbox.Core.Validation;
+using DigitalLogicSandbox.GateLibrary.Custom;
+using DigitalLogicSandbox.GateLibrary.Packaging;
 using DigitalLogicSandbox.Rendering;
 using DigitalLogicSandbox.Rendering.Gates;
 using DigitalLogicSandbox.Simulation.Engine;
@@ -35,6 +38,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
     public sealed class WorkspaceController : MonoBehaviour
     {
         public const float DuplicateOffset = 1f;
+        public const string DefaultCircuitName = "Main Circuit";
 
         private readonly CommandHistory _history = new CommandHistory();
         private readonly SelectionModel _selection = new SelectionModel();
@@ -42,6 +46,8 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
 
         private WorkspaceSetup _setup;
         private ComponentCatalog _catalog;
+        private DefinitionLibrary _library;
+        private CircuitPackager _packager;
         private CircuitSession _session;
         private CircuitGeometry _geometry;
         private CircuitPresenter _presenter;
@@ -54,6 +60,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
         private GateGeometry _placementGeometry;
         private bool _placementFromDrag;
         private bool _statusDirty;
+        private bool _inputSuspended;
 
         /// <summary>Raised (at most once per frame) when anything shown in status or toolbar UI may have changed.</summary>
         public event Action StatusChanged;
@@ -84,6 +91,27 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
         public VisualTheme Theme => _setup?.Theme;
 
         public ComponentCatalog Catalog => _catalog;
+
+        public DefinitionLibrary Library => _library;
+
+        /// <summary>
+        /// While true (e.g. a modal dialog is open), workspace pointer and keyboard input is ignored and any gesture
+        /// in progress is cancelled. The public API keeps working.
+        /// </summary>
+        public bool InputSuspended
+        {
+            get => _inputSuspended;
+            set
+            {
+                if (value && !_inputSuspended && IsInitialized)
+                {
+                    CancelInteraction();
+                    _presenter.SetHover(NodeId.None, null);
+                }
+
+                _inputSuspended = value;
+            }
+        }
 
         public SelectionRectView SelectionRect => _selectionRect;
 
@@ -120,6 +148,10 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
 
             _setup = setup ?? throw new ArgumentNullException(nameof(setup));
             _catalog = setup.Catalog ?? throw new ArgumentException("A component catalog is required.", nameof(setup));
+            _library = setup.Library ?? throw new ArgumentException("A definition library is required.", nameof(setup));
+            _packager = new CircuitPackager(_catalog, _library);
+            _library.DefinitionAdded += OnLibraryChanged;
+            _library.DefinitionRemoved += OnLibraryChanged;
             if (setup.Theme == null)
             {
                 throw new ArgumentException("A visual theme is required.", nameof(setup));
@@ -169,7 +201,10 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
 
         private void Update()
         {
-            _interaction?.Tick();
+            if (!_inputSuspended)
+            {
+                _interaction?.Tick();
+            }
         }
 
         private void LateUpdate()
@@ -192,6 +227,12 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             if (_setup?.Controls != null)
             {
                 _setup.Controls.Disable();
+            }
+
+            if (_library != null)
+            {
+                _library.DefinitionAdded -= OnLibraryChanged;
+                _library.DefinitionRemoved -= OnLibraryChanged;
             }
 
             if (_camera != null && _camera.Camera != null)
@@ -456,6 +497,98 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             return redone;
         }
 
+        /// <summary>Renames an external input/output of the current circuit (undoable).</summary>
+        public void RenameInterfacePort(PortId port, string name)
+        {
+            EnsureCircuit();
+            if (Circuit.TryGetInterfacePort(port, out InterfacePort existing) &&
+                !string.Equals(existing.Name, name, StringComparison.Ordinal))
+            {
+                _history.Execute(new RenameInterfacePortCommand(Circuit, port, name));
+            }
+        }
+
+        /// <summary>Changes name, description and category of the current circuit (undoable).</summary>
+        public void SetCircuitProperties(string name, string description, string category)
+        {
+            EnsureCircuit();
+            if (Circuit.Name == name && Circuit.Description == description && Circuit.Category == category)
+            {
+                return;
+            }
+
+            _history.Execute(new SetCircuitPropertiesCommand(Circuit, name, description, category));
+            MarkStatusDirty();
+        }
+
+        // ------------------------------------------------------------------------------------------------
+        // Custom gate packaging
+        // ------------------------------------------------------------------------------------------------
+
+        /// <summary>
+        /// Default packaging spec: the selected nodes when <paramref name="selectionOnly"/> and something is
+        /// selected, otherwise the whole circuit. The gate name is prefilled from the circuit name unless that is
+        /// still the default.
+        /// </summary>
+        public PackagingSpec CreatePackagingSpec(bool selectionOnly)
+        {
+            EnsureCircuit();
+            PackagingSpec spec = selectionOnly && _selection.NodeCount > 0
+                ? PackagingSpec.FromCircuit(Circuit, _selection.Nodes)
+                : PackagingSpec.FromCircuit(Circuit);
+            spec.Name = Circuit.Name == DefaultCircuitName ? string.Empty : Circuit.Name;
+            spec.Description = Circuit.Description;
+            spec.Category = Circuit.Category;
+            return spec;
+        }
+
+        /// <summary>Validates a spec without publishing anything (live feedback in the packaging dialog).</summary>
+        public PackagingResult PreviewPackaging(PackagingSpec spec)
+        {
+            EnsureCircuit();
+            return _packager.Package(Circuit, spec);
+        }
+
+        /// <summary>
+        /// Packages the circuit (or selection) as a new custom gate and publishes it to the library as one undoable
+        /// step. The original circuit is unchanged unless <paramref name="clearWorkspace"/> asks to remove the
+        /// packaged nodes afterwards (undone together with the publication).
+        /// </summary>
+        public PackagingResult PackageCustomGate(PackagingSpec spec, bool clearWorkspace = false)
+        {
+            EnsureCircuit();
+            PackagingResult result = _packager.Package(Circuit, spec);
+            if (!result.Succeeded)
+            {
+                return result;
+            }
+
+            var publish = new PublishDefinitionCommand(_library, result.Definition);
+            if (!clearWorkspace)
+            {
+                _history.Execute(publish);
+                return result;
+            }
+
+            _scratchNodes.Clear();
+            IReadOnlyList<NodeDefinition> nodes = Circuit.Nodes;
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                if (spec.Contains(nodes[i].Id))
+                {
+                    _scratchNodes.Add(nodes[i].Id);
+                }
+            }
+
+            _history.Execute(new CompositeCommand(publish.Description, new ICommand[]
+            {
+                publish,
+                new RemoveNodesCommand(Circuit, _scratchNodes.ToArray()),
+            }));
+            _selection.Prune(Circuit);
+            return result;
+        }
+
         // ------------------------------------------------------------------------------------------------
         // Placement
         // ------------------------------------------------------------------------------------------------
@@ -656,6 +789,13 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
         {
             _interaction?.Cancel();
             CancelPlacement();
+        }
+
+        private void OnLibraryChanged(CircuitDefinition definition)
+        {
+            // Instances may have become resolvable (redo) or unresolvable (undo of a publication).
+            _session?.MarkDirty();
+            MarkStatusDirty();
         }
 
         private void OnHistoryChanged()

@@ -4,6 +4,7 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.UI;
+using Object = UnityEngine.Object;
 
 namespace DigitalLogicSandbox.UI
 {
@@ -212,6 +213,111 @@ namespace DigitalLogicSandbox.UI
             layout.childForceExpandWidth = false;
             layout.childForceExpandHeight = false;
             return layout;
+        }
+
+        /// <summary>Checkbox with a label; returns the toggle.</summary>
+        public Toggle Toggle(string name, Transform parent, string label, bool isOn, UnityAction<bool> onChanged)
+        {
+            RectTransform row = CreateRect(name, parent);
+            Row(row, 8f, new RectOffset(0, 0, 2, 2));
+            var rowLayout = row.gameObject.AddComponent<LayoutElement>();
+            rowLayout.preferredHeight = 24f;
+            rowLayout.minHeight = 24f;
+
+            Image box = Panel("Box", row, Theme.ButtonNormal, rounded: true);
+            var boxLayout = box.gameObject.AddComponent<LayoutElement>();
+            boxLayout.preferredWidth = 18f;
+            boxLayout.preferredHeight = 18f;
+            boxLayout.minWidth = 18f;
+            boxLayout.minHeight = 18f;
+            Image check = Panel("Check", box.transform, Theme.Accent, rounded: true);
+            Stretch(check.rectTransform, 4f, 4f, 4f, 4f);
+            check.raycastTarget = false;
+
+            TextMeshProUGUI text = Text("Label", row, label, 13f, Theme.TextPrimary);
+            text.gameObject.AddComponent<LayoutElement>().flexibleWidth = 1f;
+            text.raycastTarget = true; // clicking the label toggles too
+
+            var toggle = row.gameObject.AddComponent<Toggle>();
+            toggle.targetGraphic = box;
+            toggle.graphic = check;
+            toggle.navigation = new Navigation { mode = Navigation.Mode.None };
+            toggle.isOn = isOn;
+            if (onChanged != null)
+            {
+                toggle.onValueChanged.AddListener(onChanged);
+            }
+
+            return toggle;
+        }
+
+        /// <summary>Small upper-case section caption.</summary>
+        public TextMeshProUGUI Caption(Transform parent, string text)
+        {
+            TextMeshProUGUI caption = Text("Caption " + text, parent, text.ToUpperInvariant(), 11f, Theme.Accent,
+                TextAlignmentOptions.BottomLeft, FontStyles.Bold);
+            caption.gameObject.AddComponent<LayoutElement>().preferredHeight = 24f;
+            return caption;
+        }
+
+        /// <summary>"Label  value" row; returns the value text so callers can update it.</summary>
+        public TextMeshProUGUI Property(Transform parent, string label, string value, float labelWidth = 92f)
+        {
+            RectTransform row = CreateRect("Property " + label, parent);
+            Row(row, 6f, new RectOffset(0, 0, 0, 0));
+            row.gameObject.AddComponent<LayoutElement>().preferredHeight = 22f;
+            TextMeshProUGUI name = Text("Label", row, label, 12.5f, Theme.TextSecondary);
+            var nameLayout = name.gameObject.AddComponent<LayoutElement>();
+            nameLayout.preferredWidth = labelWidth;
+            nameLayout.minWidth = labelWidth;
+            TextMeshProUGUI text = Text("Value", row, value, 12.5f, Theme.TextPrimary);
+            text.gameObject.AddComponent<LayoutElement>().flexibleWidth = 1f;
+            return text;
+        }
+
+        /// <summary>Labelled single-line input field row; the field commits through <paramref name="onCommit"/> on end edit.</summary>
+        public TMP_InputField FieldRow(Transform parent, string label, string value, UnityAction<string> onCommit,
+            float labelWidth = 92f)
+        {
+            RectTransform row = CreateRect("Field " + label, parent);
+            Row(row, 6f, new RectOffset(0, 0, 0, 0));
+            row.gameObject.AddComponent<LayoutElement>().preferredHeight = 30f;
+            TextMeshProUGUI name = Text("Label", row, label, 12.5f, Theme.TextSecondary);
+            var nameLayout = name.gameObject.AddComponent<LayoutElement>();
+            nameLayout.preferredWidth = labelWidth;
+            nameLayout.minWidth = labelWidth;
+            TMP_InputField field = InputField("Input", row, label);
+            field.SetTextWithoutNotify(value ?? string.Empty);
+            if (onCommit != null)
+            {
+                field.onEndEdit.AddListener(onCommit);
+            }
+
+            return field;
+        }
+
+        /// <summary>Vertical stack (layout group) for building panels.</summary>
+        public static RectTransform Column(string name, Transform parent, float spacing, RectOffset padding)
+        {
+            RectTransform rect = CreateRect(name, parent);
+            var layout = rect.gameObject.AddComponent<VerticalLayoutGroup>();
+            layout.spacing = spacing;
+            layout.padding = padding;
+            layout.childControlWidth = true;
+            layout.childControlHeight = true;
+            layout.childForceExpandWidth = true;
+            layout.childForceExpandHeight = false;
+            return rect;
+        }
+
+        public static void DestroyChildren(Transform parent)
+        {
+            for (int i = parent.childCount - 1; i >= 0; i--)
+            {
+                GameObject child = parent.GetChild(i).gameObject;
+                child.SetActive(false);
+                Object.Destroy(child);
+            }
         }
 
         public static LayoutElement Flexible(Transform parent)
