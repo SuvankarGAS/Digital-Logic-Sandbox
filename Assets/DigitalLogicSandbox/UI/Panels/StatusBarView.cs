@@ -117,6 +117,10 @@ namespace DigitalLogicSandbox.UI.Panels
                 {
                     SetStatus("Oscillating", _ui.Theme.Warning);
                 }
+                else if (runner.Context.ContentionCount > 0)
+                {
+                    SetStatus("Bus contention", _ui.Theme.Warning);
+                }
                 else if (runner.State == SimulationState.Paused)
                 {
                     SetStatus(runner.HasPendingWork ? "Paused (pending)" : "Paused", _ui.Theme.Warning);
@@ -153,6 +157,19 @@ namespace DigitalLogicSandbox.UI.Panels
                 _message.text = _notification;
                 _message.color = _ui.Theme.Accent;
                 return;
+            }
+
+            if (session.IsSimulating && !report.HasErrors && session.Runner.Context.ContentionCount > 0)
+            {
+                // Runtime problem (not a structural one): explain it until the drivers stop conflicting.
+                var runtime = new ValidationReport();
+                DigitalLogicSandbox.Simulation.Diagnostics.SimulationDiagnostics.ReportContention(session.Runner.Context, runtime);
+                if (runtime.Diagnostics.Count > 0)
+                {
+                    _message.text = runtime.Diagnostics[0].Message;
+                    _message.color = _ui.Theme.Warning;
+                    return;
+                }
             }
 
             DescribeFirstProblem(report);
@@ -217,13 +234,20 @@ namespace DigitalLogicSandbox.UI.Panels
                     continue;
                 }
 
-                Signal value = input ? session.GetInputValue(node) : session.GetOutputValue(node);
                 if (i > 0)
                 {
                     _builder.Append(' ');
                 }
 
-                _builder.Append(ports[i].Name).Append('=').Append(value.ToDisplayChar());
+                _builder.Append(ports[i].Name).Append('=');
+                if (ports[i].Width > 1)
+                {
+                    _builder.Append(session.FormatBoundaryValue(node));
+                    continue;
+                }
+
+                Signal value = input ? session.GetInputValue(node) : session.GetOutputValue(node);
+                _builder.Append(value.ToDisplayChar());
             }
 
             if (ports.Count > MaxListedPorts)

@@ -60,6 +60,16 @@ namespace DigitalLogicSandbox.Core.Validation
 
         /// <summary>A combinational-only analysis was requested for a circuit with state or a clock.</summary>
         SequentialCircuit,
+
+        // Multi-bit logic (Phase C)
+        /// <summary>A connection joins pins of different bit widths.</summary>
+        WidthMismatch,
+
+        /// <summary>Two or more active drivers put conflicting values on one shared bus.</summary>
+        BusContention,
+
+        /// <summary>A bus join connects a circuit input or the clock to other drivers.</summary>
+        InvalidBusJoin,
     }
 
     /// <summary>A single validation finding with enough context for the UI to highlight the culprit.</summary>

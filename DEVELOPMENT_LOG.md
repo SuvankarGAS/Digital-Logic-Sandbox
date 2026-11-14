@@ -15,6 +15,7 @@
 | 8 | Persistence & undo/redo | ✅ Complete (2026-11-14) |
 | 9 | Polish & optimization | ✅ Complete (2026-11-14) |
 | B | Sequential logic (future-expansion phase B) | ✅ Complete (2026-11-14) |
+| C | Multi-bit logic: buses, tri-state, contention (future-expansion phase C) | ✅ Complete (2026-11-14) |
 
 ---
 
@@ -880,4 +881,123 @@ like the input and output boundaries.
 - The sequence analysis panel shows up to 256 steps (`MaxDisplaySteps`). The analyzer's own limit is 1 024.
 - While a draft is being edited only the draft's clock ticks. The main circuit's clock waits until you
   return to it.
+---
+
+## Phase C – Multi-bit logic (2026-11-14)
+
+Buses, bus splitting and merging, tri-state drivers and bus contention detection. The built-in gate library
+is still exactly AND and NOT; every bus component is a circuit utility, like the boundaries and the clock.
+
+### Implemented
+- **Widths in the model.**
+  - `PortDescriptor.Width` and `InterfacePort.Width` (1–32 bits, `PortDescriptor.MaxWidth`).
+  - Parameterised utilities carry `Width` and `Arity` on `ComponentRef`, so a node's signature is a pure
+    function of its reference (`BoundarySignatures.ForUtility`, cached).
+  - `CircuitDefinition.AddInputBoundary/AddOutputBoundary(name, position, width)`.
+  - Custom gate signatures include port widths, so packaged gates expose bus pins.
+- **New utility kinds** (`ComponentKind` 5–8):
+  - `Splitter(w)`: a w-bit bus in, one pin per bit out (bit 0 = least significant).
+  - `Merger(w)`: the reverse.
+  - `BusJoin(w, n)`: 2–8 drivers of w bits onto one shared bus.
+  - `TriState(w)`: data D (w bits), enable EN, output OUT. EN=0 outputs Z.
+  - `ComponentRef.IsWiring` and `IsUtility` cover them. `TriStateBuffer` is the per-bit evaluator and is
+    deliberately **not** registered as a primitive.
+- **Validation.**
+  - `ConnectionRules` rejects connections between pins of different widths (`ConnectionError.WidthMismatch`).
+  - `CircuitValidator` reports width mismatches already in a circuit (`DiagnosticCode.WidthMismatch`).
+  - The editor explains the rejection: "Cannot connect a 4-bit pin to a 1-bit pin. Use a splitter or merger…".
+- **Compiler.**
+  - Every output pin gets one raw net per bit.
+  - Splitters, mergers and bus joins are compiled away with union-find. They add no gates and no delay.
+  - Primitives and tri-state drivers with bus pins are bit-sliced: one gate per bit, with single-bit pins
+    such as EN shared by all slices.
+  - Unions with the floating net are deferred until all drivers are known. An unconnected bus-join input
+    therefore contributes nothing instead of pulling the bus LOW.
+  - Nets with more than one gate driver (only possible through a bus join) get CSR arrays of their driving
+    output slots.
+  - Joining a root input or the clock to another driver is a compile error (`InvalidBusJoin`).
+- **Compiled interface flattened to bits.**
+  - `InputCount` and `OutputCount` count bits. `GetInputBit`, `IndexOfInput(port, bit)` and `GetInputWidth`
+    address individual bits.
+  - `IndexOfInput(port)` is bit 0, so single-bit circuits behave exactly as before.
+- **Shared-bus resolution** (`SimulationContext`).
+  - The last value of each driver is kept per output slot. The bus is resolved once per wave: all Z → Z,
+    any X → X, HIGH and LOW together → X plus contention, otherwise the agreed value.
+  - `ContentionCount` and `IsContended(net)` expose contention, and `SimulationDiagnostics.ReportContention`
+    produces a `BusContention` warning.
+  - `TryGetInputValue`, `TryGetOutputValue` and `SetInputValue(port, ulong)` read and write whole ports.
+  - Circuits without bus joins allocate no slot buffers and skip all of this.
+- **Runner and session.**
+  - `SimulationRunner.Load` carries input values over per bit, so a resized bus keeps the bits both
+    versions have. `SetInputValue(port, ulong)` sets a whole port.
+  - `CircuitSession` gained `GetInputBits`, `SetInputBits`, `GetBoundaryBit`, `TryGetOutputBits` and
+    `FormatBoundaryValue` ("10 (1010)", or "? (1X10)" when a bit is not binary).
+- **Undo.**
+  - `SetInputValueCommand` stores whole values. Each bit flip and each typed value is one undo step.
+  - Add, duplicate and delete snapshots keep boundary widths, and packaging keeps port widths.
+- **Truth tables and sequence analysis.**
+  - One column per bit, most significant first, named "A[3]"…"A[0]" (`TruthTableColumn.FromPorts`).
+  - Columns map to compiled bit indices, so row order still counts in binary across all columns.
+  - The sequence dialog shows one pattern field per bit.
+- **Persistence (schema v3).**
+  - Nodes have an optional `width` (omitted when 1) and `arity`, and there are new node kinds `splitter`,
+    `merger`, `busjoin` and `tristate`.
+  - Input values stay "Low"/"High" for 0/1 and are decimal otherwise, so v2 files read unchanged.
+  - `AddBusSupportMigration` (v2→v3) is a no-op step.
+- **Editor.**
+  - The library has a "Buses" section with *Bus width* and *Join inputs* fields. Its entries are Bus Input,
+    Bus Output, Splitter, Merger, Bus Join, Tri-state, and Tri-state (1-bit).
+  - Bus boundaries show "NAME = value" above a row of bit cells, most significant bit on the left. Clicking
+    a cell toggles that bit.
+  - Splitters and mergers are narrow labelled bars. JOIN and TRI blocks have pin labels, and bus pins are
+    labelled with their width ("D[4]").
+  - Bus wires are drawn 1.9× thicker and show the aggregate state of their bits: X if any bit is X, HIGH if
+    any bit is HIGH, Z if all bits float, otherwise LOW.
+  - The presenter maps each bus pin or wire to all of its nets and recomputes the aggregate when any bit
+    changes. Bus lamps update per bit.
+  - Inspector: width, live value, a "Set value" field for bus inputs, and the bus component types.
+  - Status bar: bus values ("A=10 (1010)") and a "Bus contention" status with an explanation.
+
+### Decisions
+- **Tri-state is a utility, not a gate.** CLAUDE.md requires the built-in library to stay AND/NOT, and the
+  acceptance tests check `PrimitiveRegistry.CreateDefault().All.Count == 2`. A tri-state driver cannot be
+  built from AND/NOT (they cannot produce Z), so it is offered as bus wiring alongside splitters and joins.
+- **Flatten buses to bits in the compiler** instead of introducing multi-bit net values. The engine,
+  animation, truth tables and sequence analysis keep working on single-bit nets. Widths exist only in the
+  model and the views. This is the simplest scalable option and adds no per-bit cost to existing circuits.
+- **Shared buses only through an explicit bus join.** One driver per net remains the normal rule, so
+  accidental multi-driver wiring stays impossible and contention is always a visible design decision.
+- **Width parameters on `ComponentRef`.** Signatures stay pure functions of the reference, so validation,
+  layout, the compiler and persistence need no node-level side data.
+- **Deferred floating ties** keep compilation order-independent while letting unconnected join inputs
+  float instead of driving LOW.
+
+### Test results
+- EditMode: **335 / 335 passed** (16 new):
+  - `BusLogicTests` (13): flattened interface, splitter/merger compile-away and 4-bit inversion, bit-sliced
+    tri-state, the tri-state truth table, a shared bus with the enabled driver, contention and its diagnostic,
+    an unconnected join input, `InvalidBusJoin`, width mismatch in rules and validation, bus ports through
+    custom gates, per-bit input carry-over in the runner, bus truth-table columns, and width-1 circuits
+    unchanged.
+  - `BusPersistenceTests` (3): v3 round trip of widths, kinds and values (and the loaded circuit simulates),
+    single-bit files omit `width` and keep "High", and v2→v3 migration.
+- PlayMode: **61 / 61 passed** (6 new, `BusWorkspaceTests`):
+  - Library bus entries follow the width setting, and built-in gates are still exactly 2.
+  - A bus inverter with bit cells, thick wires, readouts, undo and typed values.
+  - Bit-cell hit testing.
+  - Width-mismatch rejection with its explanation.
+  - A shared bus with tri-state drivers, contention, and the status bar message.
+  - A bus project survives Save, New Project and Open.
+- Manual: play-mode screenshots of a 4-bit inverter (thick bus wire, splitter/merger bars, "A = 10" /
+  "OUT = 5"), TRI and JOIN blocks, and an 8-bit input showing 165 = 10100101 with the inspector bus fields.
+
+### Known issues / deferred
+- A bus join's driver count and a component's width are fixed when it is placed. To change one, place a new
+  component (the library fields set the size).
+- Signal animation runs per bit net. On a bus wire the travelling front uses the changed bit's colours and
+  settles to the aggregate state on arrival.
+- Gates have no bus pins (AND/NOT stay single-bit); use splitters and mergers, or package bit-sliced custom
+  gates. Primitive bit-slicing is in the compiler for future multi-bit primitives.
+- Bus widths up to 32 bits. Truth tables of bus circuits count each bit as an input, so the normal limits
+  apply.
 

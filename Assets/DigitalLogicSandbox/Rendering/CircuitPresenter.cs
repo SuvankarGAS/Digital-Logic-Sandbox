@@ -30,6 +30,7 @@ namespace DigitalLogicSandbox.Rendering
         private readonly Dictionary<NodeId, GateView> _gates = new Dictionary<NodeId, GateView>();
         private readonly Dictionary<PinRef, WireView> _wires = new Dictionary<PinRef, WireView>();
         private readonly Dictionary<int, List<NetTarget>> _netTargets = new Dictionary<int, List<NetTarget>>();
+        private readonly Dictionary<PinRef, int[]> _busWireNets = new Dictionary<PinRef, int[]>();
         private readonly HashSet<NodeId> _selectedNodes = new HashSet<NodeId>();
         private readonly List<ConnectionDefinition> _scratchConnections = new List<ConnectionDefinition>();
         private readonly List<PinRef> _highlightedPins = new List<PinRef>();
@@ -213,6 +214,7 @@ namespace DigitalLogicSandbox.Rendering
             WireView view = _wirePool.Get();
             view.ResetState();
             view.Destination = destination;
+            view.IsBus = _geometry.GetConnectionWidth(destination) > 1;
             view.SetPath(_geometry.GetWirePath(destination));
             view.name = "Wire -> " + destination;
             _wires[destination] = view;
@@ -254,6 +256,7 @@ namespace DigitalLogicSandbox.Rendering
             _gates.Clear();
             _wires.Clear();
             _netTargets.Clear();
+            _busWireNets.Clear();
             _selectedNodes.Clear();
             _highlightedPins.Clear();
             _selectedWire = null;
@@ -284,6 +287,7 @@ namespace DigitalLogicSandbox.Rendering
             _context = null;
             _scope = null;
             _netTargets.Clear();
+            _busWireNets.Clear();
             RefreshAllSignals();
         }
 
@@ -321,26 +325,27 @@ namespace DigitalLogicSandbox.Rendering
             for (int i = 0; i < targets.Count; i++)
             {
                 NetTarget target = targets[i];
+                Signal value = target.Bus != null ? Aggregate(target.Bus) : signal;
                 switch (target.Kind)
                 {
                     case NetTargetKind.Wire:
                         if (_wires.TryGetValue(target.Wire, out WireView wire))
                         {
-                            wire.SetSignal(signal);
+                            wire.SetSignal(value);
                         }
 
                         break;
                     case NetTargetKind.InputPin:
                         if (_gates.TryGetValue(target.Node, out GateView inputGate))
                         {
-                            inputGate.SetInputSignal(target.Index, signal);
+                            inputGate.SetInputSignal(target.Index, value);
                         }
 
                         break;
                     case NetTargetKind.OutputPin:
                         if (_gates.TryGetValue(target.Node, out GateView outputGate))
                         {
-                            outputGate.SetOutputSignal(target.Index, signal);
+                            outputGate.SetOutputSignal(target.Index, value);
                         }
 
                         break;
@@ -352,8 +357,54 @@ namespace DigitalLogicSandbox.Rendering
                         }
 
                         break;
+                    case NetTargetKind.BitState:
+                    case NetTargetKind.LampBit:
+                        if (_gates.TryGetValue(target.Node, out GateView bus))
+                        {
+                            bus.SetBitSignal(target.Index, signal);
+                        }
+
+                        break;
                 }
             }
+        }
+
+        /// <summary>
+        /// One state summarising the bits of a bus for drawing: UNKNOWN if any bit is unknown, HIGH if any bit is
+        /// high, high impedance if every bit floats, otherwise LOW.
+        /// </summary>
+        private Signal Aggregate(int[] nets)
+        {
+            if (_context == null)
+            {
+                return Signal.Low;
+            }
+
+            bool high = false;
+            bool floating = true;
+            for (int i = 0; i < nets.Length; i++)
+            {
+                switch (_context.GetNet(nets[i]))
+                {
+                    case Signal.Unknown:
+                        return Signal.Unknown;
+                    case Signal.High:
+                        high = true;
+                        floating = false;
+                        break;
+                    case Signal.Low:
+                        floating = false;
+                        break;
+                }
+            }
+
+            return high ? Signal.High : floating ? Signal.HighImpedance : Signal.Low;
+        }
+
+        /// <summary>Aggregate state of a bus wire (by destination), or null for single-bit wires.</summary>
+        public Signal? GetBusWireSignal(PinRef destination)
+        {
+            return _busWireNets.TryGetValue(destination, out int[] nets) ? Aggregate(nets) : (Signal?)null;
         }
 
         /// <summary>Net bound to a wire (by destination pin), or -1 when not simulated.</summary>
@@ -380,27 +431,47 @@ namespace DigitalLogicSandbox.Rendering
             {
                 NodeDefinition node = nodes[i];
                 GateGeometry geometry = _geometry.GetGate(node.Id);
+                bool busBoundary = geometry.IsBusBoundary;
                 for (int p = 0; p < geometry.InputPorts.Length; p++)
                 {
-                    int net = _scope.GetInputPinNet(new PinRef(node.Id, geometry.InputPorts[p]));
-                    AddTarget(net, new NetTarget(NetTargetKind.InputPin, node.Id, p, default));
-                    if (node.Component.Kind == ComponentKind.OutputBoundary)
+                    var pin = new PinRef(node.Id, geometry.InputPorts[p]);
+                    int[] bus = InputPinNets(pin);
+                    AddTargets(bus, new NetTarget(NetTargetKind.InputPin, node.Id, p, default, bus));
+                    if (node.Component.Kind == ComponentKind.OutputBoundary && !busBoundary)
                     {
-                        AddTarget(net, new NetTarget(NetTargetKind.LampState, node.Id, 0, default));
+                        AddTarget(_scope.GetInputPinNet(pin), new NetTarget(NetTargetKind.LampState, node.Id, 0, default));
+                    }
+                }
+
+                if (node.Component.Kind == ComponentKind.OutputBoundary && busBoundary)
+                {
+                    var pin = new PinRef(node.Id, BoundarySignatures.Pin);
+                    for (int bit = 0; bit < geometry.BitCells.Length; bit++)
+                    {
+                        AddTarget(_scope.GetInputPinNet(pin, bit), new NetTarget(NetTargetKind.LampBit, node.Id, bit, default));
                     }
                 }
 
                 for (int p = 0; p < geometry.OutputPorts.Length; p++)
                 {
-                    if (!_scope.TryGetOutputPinNet(new PinRef(node.Id, geometry.OutputPorts[p]), out int net))
+                    var pin = new PinRef(node.Id, geometry.OutputPorts[p]);
+                    int[] bus = OutputPinNets(pin);
+                    if (bus == null)
                     {
                         continue;
                     }
 
-                    AddTarget(net, new NetTarget(NetTargetKind.OutputPin, node.Id, p, default));
-                    if (node.Component.Kind == ComponentKind.InputBoundary || node.Component.Kind == ComponentKind.Clock)
+                    AddTargets(bus, new NetTarget(NetTargetKind.OutputPin, node.Id, p, default, bus));
+                    if (busBoundary)
                     {
-                        AddTarget(net, new NetTarget(NetTargetKind.BoundaryState, node.Id, 0, default));
+                        for (int bit = 0; bit < bus.Length; bit++)
+                        {
+                            AddTarget(bus[bit], new NetTarget(NetTargetKind.BitState, node.Id, bit, default));
+                        }
+                    }
+                    else if (node.Component.Kind == ComponentKind.InputBoundary || node.Component.Kind == ComponentKind.Clock)
+                    {
+                        AddTarget(bus[0], new NetTarget(NetTargetKind.BoundaryState, node.Id, 0, default));
                     }
                 }
             }
@@ -408,9 +479,73 @@ namespace DigitalLogicSandbox.Rendering
             IReadOnlyList<ConnectionDefinition> connections = _circuit.Connections;
             for (int i = 0; i < connections.Count; i++)
             {
-                if (_scope.TryGetOutputPinNet(connections[i].Source, out int net))
+                int[] bus = OutputPinNets(connections[i].Source);
+                if (bus == null)
                 {
-                    AddTarget(net, new NetTarget(NetTargetKind.Wire, default, 0, connections[i].Destination));
+                    continue;
+                }
+
+                AddTargets(bus, new NetTarget(NetTargetKind.Wire, default, 0, connections[i].Destination, bus));
+                if (bus.Length > 1)
+                {
+                    _busWireNets[connections[i].Destination] = bus;
+                }
+            }
+        }
+
+        /// <summary>Nets of every bit of an output pin, or null when the pin is not simulated.</summary>
+        private int[] OutputPinNets(PinRef pin)
+        {
+            int width = _scope.GetOutputPinWidth(pin);
+            if (width == 0)
+            {
+                return null;
+            }
+
+            var nets = new int[width];
+            for (int bit = 0; bit < width; bit++)
+            {
+                _scope.TryGetOutputPinNet(pin, bit, out nets[bit]);
+            }
+
+            return nets;
+        }
+
+        private int[] InputPinNets(PinRef pin)
+        {
+            int width = _scope.GetInputPinWidth(pin);
+            var nets = new int[width];
+            for (int bit = 0; bit < width; bit++)
+            {
+                nets[bit] = _scope.GetInputPinNet(pin, bit);
+            }
+
+            return nets;
+        }
+
+        /// <summary>
+        /// Registers <paramref name="target"/> under every net of a pin or wire. Single-bit targets keep no bus array
+        /// (they show the net's own value); bus targets recompute their aggregate whenever any bit changes.
+        /// </summary>
+        private void AddTargets(int[] nets, NetTarget target)
+        {
+            if (nets.Length == 1)
+            {
+                AddTarget(nets[0], new NetTarget(target.Kind, target.Node, target.Index, target.Wire));
+                return;
+            }
+
+            for (int bit = 0; bit < nets.Length; bit++)
+            {
+                bool duplicate = false;
+                for (int j = 0; j < bit; j++)
+                {
+                    duplicate |= nets[j] == nets[bit];
+                }
+
+                if (!duplicate)
+                {
+                    AddTarget(nets[bit], target);
                 }
             }
         }
@@ -480,11 +615,15 @@ namespace DigitalLogicSandbox.Rendering
                 NetTarget target = targets[i];
                 if (target.Kind == NetTargetKind.OutputPin && _gates.TryGetValue(target.Node, out GateView gate))
                 {
-                    gate.SetOutputSignal(target.Index, signal);
+                    gate.SetOutputSignal(target.Index, target.Bus != null ? Aggregate(target.Bus) : signal);
                 }
                 else if (target.Kind == NetTargetKind.BoundaryState && _gates.TryGetValue(target.Node, out GateView source))
                 {
                     source.SetStateSignal(signal);
+                }
+                else if (target.Kind == NetTargetKind.BitState && _gates.TryGetValue(target.Node, out GateView bus))
+                {
+                    bus.SetBitSignal(target.Index, signal);
                 }
             }
         }
@@ -495,6 +634,19 @@ namespace DigitalLogicSandbox.Rendering
         /// </summary>
         public void ApplyWireArrival(PinRef destination, Signal signal)
         {
+            if (_busWireNets.TryGetValue(destination, out int[] busNets))
+            {
+                // A bus wire shows its aggregate; a bus lamp shows every bit (all are final in the model).
+                signal = Aggregate(busNets);
+                if (_gates.TryGetValue(destination.Node, out GateView lamp) && lamp.Geometry.IsBusBoundary)
+                {
+                    for (int bit = 0; bit < busNets.Length && bit < lamp.BitCount; bit++)
+                    {
+                        lamp.SetBitSignal(bit, _context.GetNet(busNets[bit]));
+                    }
+                }
+            }
+
             if (_wires.TryGetValue(destination, out WireView wire))
             {
                 wire.SetSignal(signal);
@@ -515,7 +667,7 @@ namespace DigitalLogicSandbox.Rendering
                 }
             }
 
-            if (gate.Geometry.Kind == ComponentKind.OutputBoundary)
+            if (gate.Geometry.Kind == ComponentKind.OutputBoundary && !gate.Geometry.IsBusBoundary)
             {
                 gate.SetStateSignal(signal);
             }
@@ -545,6 +697,10 @@ namespace DigitalLogicSandbox.Rendering
                     }
 
                     gate.SetStateSignal(Signal.Low);
+                    for (int bit = 0; bit < gate.BitCount; bit++)
+                    {
+                        gate.SetBitSignal(bit, Signal.Low);
+                    }
                 }
 
                 foreach (WireView wire in _wires.Values)
@@ -571,14 +727,35 @@ namespace DigitalLogicSandbox.Rendering
             GateGeometry geometry = view.Geometry;
             for (int p = 0; p < geometry.InputPorts.Length; p++)
             {
-                view.SetInputSignal(p, _context.GetNet(_scope.GetInputPinNet(new PinRef(node, geometry.InputPorts[p]))));
+                view.SetInputSignal(p, Aggregate(InputPinNets(new PinRef(node, geometry.InputPorts[p]))));
             }
 
             for (int p = 0; p < geometry.OutputPorts.Length; p++)
             {
-                if (_scope.TryGetOutputPinNet(new PinRef(node, geometry.OutputPorts[p]), out int net))
+                int[] nets = OutputPinNets(new PinRef(node, geometry.OutputPorts[p]));
+                if (nets != null)
                 {
-                    view.SetOutputSignal(p, _context.GetNet(net));
+                    view.SetOutputSignal(p, Aggregate(nets));
+                }
+            }
+
+            if (geometry.IsBusBoundary)
+            {
+                var pin = new PinRef(node, BoundarySignatures.Pin);
+                bool input = geometry.Kind == ComponentKind.InputBoundary;
+                for (int bit = 0; bit < view.BitCount; bit++)
+                {
+                    int net;
+                    if (input)
+                    {
+                        _scope.TryGetOutputPinNet(pin, bit, out net);
+                    }
+                    else
+                    {
+                        net = _scope.GetInputPinNet(pin, bit);
+                    }
+
+                    view.SetBitSignal(bit, _context.GetNet(net));
                 }
             }
         }
@@ -751,17 +928,27 @@ namespace DigitalLogicSandbox.Rendering
 
             /// <summary>State of an output lamp (receiving side of its net).</summary>
             LampState,
+
+            /// <summary>One bit cell of a bus input (driving side); <c>Index</c> is the bit.</summary>
+            BitState,
+
+            /// <summary>One bit cell of a bus output (receiving side); <c>Index</c> is the bit.</summary>
+            LampBit,
         }
 
         private readonly struct NetTarget
         {
-            public NetTarget(NetTargetKind kind, NodeId node, int index, PinRef wire)
+            public NetTarget(NetTargetKind kind, NodeId node, int index, PinRef wire, int[] bus = null)
             {
                 Kind = kind;
                 Node = node;
                 Index = index;
                 Wire = wire;
+                Bus = bus;
             }
+
+            /// <summary>All nets of a multi-bit pin or wire (shown as their aggregate); null for single bits.</summary>
+            public int[] Bus { get; }
 
             public NetTargetKind Kind { get; }
 

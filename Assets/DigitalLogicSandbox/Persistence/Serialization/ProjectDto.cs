@@ -30,6 +30,8 @@ namespace DigitalLogicSandbox.Persistence.Serialization
     internal sealed class InputValueDto
     {
         public int Port;
+
+        /// <summary>"Low"/"High" for 0/1 (as in schema 1-2), otherwise the decimal value of a bus input.</summary>
         public string Value;
     }
 
@@ -68,6 +70,10 @@ namespace DigitalLogicSandbox.Persistence.Serialization
         public const string KindInput = "input";
         public const string KindOutput = "output";
         public const string KindClock = "clock";
+        public const string KindSplitter = "splitter";
+        public const string KindMerger = "merger";
+        public const string KindBusJoin = "busjoin";
+        public const string KindTriState = "tristate";
 
         public int Id;
         public string Kind;
@@ -84,6 +90,14 @@ namespace DigitalLogicSandbox.Persistence.Serialization
         /// <summary>Interface port of a boundary node.</summary>
         [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
         public int? Port;
+
+        /// <summary>Bit width of a bus boundary, splitter, merger, bus join or tri-state driver (omitted when 1).</summary>
+        [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+        public int? Width;
+
+        /// <summary>Number of driver inputs of a bus join.</summary>
+        [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+        public int? Arity;
 
         public float X;
         public float Y;

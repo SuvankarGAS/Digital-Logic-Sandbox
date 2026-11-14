@@ -137,6 +137,123 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             return true;
         }
 
+        /// <summary>Bit width of a boundary node (1 for anything else or an unknown node).</summary>
+        public int GetBoundaryWidth(NodeId boundary)
+        {
+            return Circuit != null && Circuit.TryGetNode(boundary, out NodeDefinition node) ? node.Component.Width : 1;
+        }
+
+        /// <summary>All bits of an input boundary as an unsigned value (bit 0 = least significant); 0 when not simulated.</summary>
+        public ulong GetInputBits(NodeId boundary)
+        {
+            int index = IndexOfInputBoundary(boundary);
+            if (index < 0)
+            {
+                return 0;
+            }
+
+            ulong value = 0;
+            int width = GetBoundaryWidth(boundary);
+            for (int b = 0; b < width; b++)
+            {
+                if (_runner.Context.GetInput(index + b) == Signal.High)
+                {
+                    value |= 1UL << b;
+                }
+            }
+
+            return value;
+        }
+
+        /// <summary>Sets all bits of an input boundary. Returns false if the node is not a simulated input.</summary>
+        public bool SetInputBits(NodeId boundary, ulong value)
+        {
+            int index = IndexOfInputBoundary(boundary);
+            if (index < 0)
+            {
+                return false;
+            }
+
+            int width = GetBoundaryWidth(boundary);
+            for (int b = 0; b < width; b++)
+            {
+                _runner.SetInput(index + b, ((value >> b) & 1UL) != 0 ? Signal.High : Signal.Low);
+            }
+
+            return true;
+        }
+
+        /// <summary>One bit of an input or output boundary, or LOW when not simulated.</summary>
+        public Signal GetBoundaryBit(NodeId boundary, int bit)
+        {
+            if (!IsSimulating || Circuit == null || !Circuit.TryGetNode(boundary, out NodeDefinition node) ||
+                bit < 0 || bit >= node.Component.Width)
+            {
+                return Signal.Low;
+            }
+
+            int index;
+            switch (node.Component.Kind)
+            {
+                case ComponentKind.InputBoundary:
+                    index = Compiled.IndexOfInput(node.InterfacePort, bit);
+                    return index >= 0 ? _runner.Context.GetInput(index) : Signal.Low;
+                case ComponentKind.OutputBoundary:
+                    index = Compiled.IndexOfOutput(node.InterfacePort, bit);
+                    return index >= 0 ? _runner.Context.GetOutput(index) : Signal.Low;
+                default:
+                    return Signal.Low;
+            }
+        }
+
+        /// <summary>
+        /// All bits of an output boundary as an unsigned value. Returns false when not simulated or when a bit is
+        /// not binary (UNKNOWN or Z).
+        /// </summary>
+        public bool TryGetOutputBits(NodeId boundary, out ulong value)
+        {
+            value = 0;
+            if (!IsSimulating || Circuit == null || !Circuit.TryGetNode(boundary, out NodeDefinition node) ||
+                node.Component.Kind != ComponentKind.OutputBoundary)
+            {
+                return false;
+            }
+
+            return _runner.Context.TryGetOutputValue(node.InterfacePort, out value);
+        }
+
+        /// <summary>
+        /// Display text of a bus boundary: decimal value and bits (most significant first), e.g. "10 (1010)", or
+        /// "? (1X10)" when a bit is not binary. Single-bit boundaries give their signal character.
+        /// </summary>
+        public string FormatBoundaryValue(NodeId boundary)
+        {
+            int width = GetBoundaryWidth(boundary);
+            var bits = new System.Text.StringBuilder(width + 24);
+            ulong value = 0;
+            bool binary = true;
+            for (int bit = width - 1; bit >= 0; bit--)
+            {
+                Signal signal = GetBoundaryBit(boundary, bit);
+                bits.Append(signal.ToDisplayChar());
+                if (signal == Signal.High)
+                {
+                    value |= 1UL << bit;
+                }
+                else if (signal != Signal.Low)
+                {
+                    binary = false;
+                }
+            }
+
+            if (width == 1)
+            {
+                return bits.ToString();
+            }
+
+            return (binary ? value.ToString(System.Globalization.CultureInfo.InvariantCulture) : "?") + " (" + bits + ")";
+        }
+
         /// <summary>Value at an output boundary, or LOW when not simulated.</summary>
         public Signal GetOutputValue(NodeId boundary)
         {

@@ -61,12 +61,31 @@ namespace DigitalLogicSandbox.Core.Validation
                 return ConnectionError.InvalidDestinationPort;
             }
 
+            if (WidthOf(sourceSignature.Outputs, source.Port) != WidthOf(destinationSignature.Inputs, destination.Port))
+            {
+                return ConnectionError.WidthMismatch;
+            }
+
             if (circuit.IsDriven(destination))
             {
                 return ConnectionError.DestinationAlreadyDriven;
             }
 
             return ConnectionError.None;
+        }
+
+        /// <summary>Bit width of the pin <paramref name="port"/> among <paramref name="pins"/> (1 when absent).</summary>
+        public static int WidthOf(System.Collections.Generic.IReadOnlyList<PortDescriptor> pins, PortId port)
+        {
+            for (int i = 0; i < pins.Count; i++)
+            {
+                if (pins[i].Id == port)
+                {
+                    return pins[i].Width;
+                }
+            }
+
+            return 1;
         }
 
         /// <summary>Checks and, if valid, connects. Returns the failure reason otherwise.</summary>

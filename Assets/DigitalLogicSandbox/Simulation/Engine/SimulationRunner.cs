@@ -120,7 +120,8 @@ namespace DigitalLogicSandbox.Simulation.Engine
                 CompiledCircuit old = previous.Circuit;
                 for (int i = 0; i < old.InputCount; i++)
                 {
-                    int index = circuit.IndexOfInput(old.GetInputPort(i));
+                    // Carried over per bit: a bus that changed width keeps the bits both versions have.
+                    int index = circuit.IndexOfInput(old.GetInputPort(i), old.GetInputBit(i));
                     if (index >= 0)
                     {
                         next.SetInput(index, previous.GetInput(i));
@@ -262,6 +263,19 @@ namespace DigitalLogicSandbox.Simulation.Engine
             }
 
             return SetInput(index, value);
+        }
+
+        /// <summary>Sets every bit of a (bus) input port from an unsigned value, bit 0 = least significant.</summary>
+        public bool SetInputValue(PortId port, ulong value)
+        {
+            EnsureLoaded();
+            bool changed = Context.SetInputValue(port, value);
+            if (changed && State == SimulationState.Running)
+            {
+                Context.Settle();
+            }
+
+            return changed;
         }
 
         /// <summary>Flips a binary input (anything non-HIGH becomes HIGH).</summary>

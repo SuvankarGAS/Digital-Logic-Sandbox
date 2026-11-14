@@ -59,7 +59,7 @@ namespace DigitalLogicSandbox.TruthTable.Generation
             if (!compiled.Succeeded)
             {
                 return new TruthTablePlan(title ?? definition.Name, null, Columns(definition.Inputs),
-                    Columns(definition.Outputs), TruthTableLimits.RowsFor(definition.Inputs.Count), false,
+                    Columns(definition.Outputs), TruthTableLimits.RowsFor(Columns(definition.Inputs).Length), false,
                     compiled.Report);
             }
 
@@ -165,13 +165,7 @@ namespace DigitalLogicSandbox.TruthTable.Generation
 
         private static TruthTableColumn[] Columns(IReadOnlyList<InterfacePort> ports)
         {
-            var columns = new TruthTableColumn[ports.Count];
-            for (int i = 0; i < ports.Count; i++)
-            {
-                columns[i] = new TruthTableColumn(ports[i].Id, ports[i].Name);
-            }
-
-            return columns;
+            return TruthTableColumn.FromPorts(ports);
         }
 
         /// <summary>"65,536" style (invariant culture).</summary>

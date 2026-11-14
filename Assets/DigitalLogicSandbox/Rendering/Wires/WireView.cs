@@ -42,6 +42,25 @@ namespace DigitalLogicSandbox.Rendering.Wires
 
         public PinRef Destination { get; set; }
 
+        /// <summary>Multi-bit connection: drawn thicker, showing the aggregate state of its bits.</summary>
+        public bool IsBus
+        {
+            get => _isBus;
+            set
+            {
+                if (_isBus != value)
+                {
+                    _isBus = value;
+                    Apply();
+                }
+            }
+        }
+
+        private bool _isBus;
+
+        /// <summary>Width factor of bus wires relative to single-bit wires.</summary>
+        public const float BusWidthFactor = 1.9f;
+
         public LineRenderer Line => _line;
 
         /// <summary>The settled signal shown (during a transition: the state being left).</summary>
@@ -97,6 +116,7 @@ namespace DigitalLogicSandbox.Rendering.Wires
             _hovered = false;
             _isPreview = false;
             _inTransition = false;
+            _isBus = false;
             Destination = default;
             _line.sortingOrder = SortingOrders.Wire;
             Apply();
@@ -247,7 +267,7 @@ namespace DigitalLogicSandbox.Rendering.Wires
             _line.widthCurve = ConstantWidth;
             _line.startColor = color;
             _line.endColor = color;
-            _line.widthMultiplier = width;
+            _line.widthMultiplier = _isBus && !_isPreview ? width * BusWidthFactor : width;
         }
 
         private void ApplyTransition()
@@ -278,7 +298,7 @@ namespace DigitalLogicSandbox.Rendering.Wires
             _widthKeys[3] = new Keyframe(1f, fromWidth / max, 0f, 0f);
             _widthCurve.keys = _widthKeys;
             _line.widthCurve = _widthCurve;
-            _line.widthMultiplier = max;
+            _line.widthMultiplier = _isBus ? max * BusWidthFactor : max;
         }
     }
 }

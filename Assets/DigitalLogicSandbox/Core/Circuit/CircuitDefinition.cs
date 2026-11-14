@@ -255,19 +255,19 @@ namespace DigitalLogicSandbox.Core.Circuit
         }
 
         /// <summary>Adds an external input (interface port + boundary node) at the end of the input order.</summary>
-        public NodeDefinition AddInputBoundary(string name, CircuitPoint position)
+        public NodeDefinition AddInputBoundary(string name, CircuitPoint position, int width = 1)
         {
             EnsureMutable();
             return InsertBoundary(AllocateNodeId(), AllocatePortId(), PortDirection.Input, name, position,
-                Rotation.R0, null, -1);
+                Rotation.R0, null, -1, width);
         }
 
         /// <summary>Adds an external output (interface port + boundary node) at the end of the output order.</summary>
-        public NodeDefinition AddOutputBoundary(string name, CircuitPoint position)
+        public NodeDefinition AddOutputBoundary(string name, CircuitPoint position, int width = 1)
         {
             EnsureMutable();
             return InsertBoundary(AllocateNodeId(), AllocatePortId(), PortDirection.Output, name, position,
-                Rotation.R0, null, -1);
+                Rotation.R0, null, -1, width);
         }
 
         /// <summary>
@@ -294,12 +294,12 @@ namespace DigitalLogicSandbox.Core.Circuit
         /// -1 appends; otherwise the port is inserted at that interface position.
         /// </summary>
         public NodeDefinition RestoreBoundary(NodeId nodeId, PortId portId, PortDirection direction, string name,
-            CircuitPoint position, Rotation rotation, string label, int portIndex = -1)
+            CircuitPoint position, Rotation rotation, string label, int portIndex = -1, int width = 1)
         {
             EnsureMutable();
             ReserveNodeId(nodeId);
             ReservePortId(portId);
-            return InsertBoundary(nodeId, portId, direction, name, position, rotation, label, portIndex);
+            return InsertBoundary(nodeId, portId, direction, name, position, rotation, label, portIndex, width);
         }
 
         /// <summary>Removes a node and every connection touching it. Removing a boundary removes its port.</summary>
@@ -625,13 +625,13 @@ namespace DigitalLogicSandbox.Core.Circuit
             var inputs = new PortDescriptor[_inputs.Count];
             for (int i = 0; i < inputs.Length; i++)
             {
-                inputs[i] = new PortDescriptor(_inputs[i].Id, _inputs[i].Name);
+                inputs[i] = new PortDescriptor(_inputs[i].Id, _inputs[i].Name, _inputs[i].Width);
             }
 
             var outputs = new PortDescriptor[_outputs.Count];
             for (int i = 0; i < outputs.Length; i++)
             {
-                outputs[i] = new PortDescriptor(_outputs[i].Id, _outputs[i].Name);
+                outputs[i] = new PortDescriptor(_outputs[i].Id, _outputs[i].Name, _outputs[i].Width);
             }
 
             _signature = new ComponentSignature(inputs, outputs);
@@ -649,15 +649,21 @@ namespace DigitalLogicSandbox.Core.Circuit
         // ------------------------------------------------------------------------------------------------
 
         private NodeDefinition InsertBoundary(NodeId nodeId, PortId portId, PortDirection direction, string name,
-            CircuitPoint position, Rotation rotation, string label, int portIndex)
+            CircuitPoint position, Rotation rotation, string label, int portIndex, int width = 1)
         {
+            if (width < 1 || width > PortDescriptor.MaxWidth)
+            {
+                throw new ArgumentOutOfRangeException(nameof(width), width,
+                    "Port width must be between 1 and " + PortDescriptor.MaxWidth + ".");
+            }
+
             List<InterfacePort> ports = direction == PortDirection.Input ? _inputs : _outputs;
             if (portIndex > ports.Count)
             {
                 throw new ArgumentOutOfRangeException(nameof(portIndex), portIndex, "Port index out of range.");
             }
 
-            var port = new InterfacePort(portId, direction, name);
+            var port = new InterfacePort(portId, direction, name, width);
             if (portIndex < 0)
             {
                 ports.Add(port);
@@ -668,8 +674,8 @@ namespace DigitalLogicSandbox.Core.Circuit
             }
 
             ComponentRef component = direction == PortDirection.Input
-                ? ComponentRef.InputBoundary
-                : ComponentRef.OutputBoundary;
+                ? ComponentRef.InputBus(width)
+                : ComponentRef.OutputBus(width);
             var node = new NodeDefinition(nodeId, component, position, rotation, portId, label);
             _boundaryNodeByPort.Add(portId, nodeId);
             _signature = null;

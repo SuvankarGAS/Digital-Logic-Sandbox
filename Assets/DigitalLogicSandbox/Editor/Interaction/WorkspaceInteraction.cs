@@ -405,7 +405,15 @@ namespace DigitalLogicSandbox.CircuitEditor.Interaction
                 }
                 else if (IsInputBoundary(_pressNode) && _workspace.CanToggleInputs)
                 {
-                    _workspace.ToggleInput(_pressNode);
+                    int bit = PressedBit(_pressNode, _pressWorld);
+                    if (bit >= 0)
+                    {
+                        _workspace.ToggleInput(_pressNode, bit);
+                    }
+                    else
+                    {
+                        _workspace.Selection.Select(_pressNode); // a bus input outside its bit cells
+                    }
                 }
                 else if (IsClock(_pressNode) && _workspace.CanToggleInputs)
                 {
@@ -697,6 +705,21 @@ namespace DigitalLogicSandbox.CircuitEditor.Interaction
         {
             return Circuit.TryGetNode(node, out NodeDefinition definition) &&
                 definition.Component.Kind == ComponentKind.Clock;
+        }
+
+        /// <summary>
+        /// Bit toggled by a click on an input switch: 0 for single-bit inputs, the bit cell under the pointer for
+        /// bus inputs, or -1 when a bus input is clicked outside its cells.
+        /// </summary>
+        private int PressedBit(NodeId node, Vector2 world)
+        {
+            GateGeometry geometry = _workspace.Geometry.GetGate(node);
+            if (!geometry.IsBusBoundary)
+            {
+                return 0;
+            }
+
+            return geometry.BitAt(world - _workspace.Geometry.GetPosition(node));
         }
 
         private bool IsInputBoundary(NodeId node)

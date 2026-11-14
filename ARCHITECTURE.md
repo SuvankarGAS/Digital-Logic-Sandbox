@@ -381,7 +381,7 @@ TruthTableExporter`.
 
 ```json
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "format": "DigitalLogicSandbox.Project",
   "app": { "name": "Digital Logic Sandbox", "version": "0.1.0" },
   "name": "My project",
@@ -404,7 +404,9 @@ TruthTableExporter`.
 - DTOs are separate from domain types; no Unity types are serialized. A node is `primitive`, `custom`
   (definition id and version), `input` or `output` (interface port), or `clock`.
 - **Schema history:** v1 is the initial release. v2 (Phase B) adds `clock` nodes and `settings.simulation`,
-  and `AddSimulationSettingsMigration` fills in the defaults when opening v1 files.
+  and `AddSimulationSettingsMigration` fills in the defaults when opening v1 files. v3 (Phase C) adds optional
+  node `width`/`arity`, the bus node kinds and decimal bus input values (`AddBusSupportMigration`, no-op).
+  See section 16.
 - Each `(id, version)` is written once, regardless of instance count. Instances reference definitions by id
   and version, so old versions stay pinned exactly as in memory.
 - **Loading:**
@@ -501,8 +503,9 @@ UI panels (toolbar, library) --> WorkspaceController --> CommandHistory --> Circ
 | New primitives (only if ever needed) | Implement `IPrimitiveComponent`, register it |
 | Sequential logic / clocks | Done (Phase B): gate-level feedback, unit delay, global clock net (section 15) |
 | Multiple clock domains | Named clocks: one compiled net per clock name instead of the single `ClockNet` |
-| Buses / multi-bit | `PortDefinition.Width`; net values become spans of `Signal` |
-| Tri-state, contention | `Signal.HighImpedance` + net resolver replacing the single-driver rule |
+| Buses / multi-bit | Done (Phase C): pin widths, splitter/merger, buses flattened to bit nets (section 16) |
+| Tri-state, contention | Done (Phase C): tri-state utility, bus join, shared-net resolver (section 16) |
+| Multi-bit primitives | Signatures with wide pins are bit-sliced by the compiler automatically |
 | Displays (LED, 7-seg) | Output-side utility components with custom views; no logic change |
 | New file schema | Add an `IMigration` |
 
@@ -565,3 +568,56 @@ latches, and so on. The engine has no sequential primitive. What makes this well
 - **Settings.** `ClockFrequency`, `ClockEnabled` and `PowerOnState` are project settings, stored in
   `settings.simulation` (schema v2). The main and draft sessions share them through one `SimulationOptions`
   instance and the navigator.
+
+## 16. Multi-bit logic *(implemented – Phase C)*
+
+- **Model.** Widths live on pins (`PortDescriptor.Width`, `InterfacePort.Width`, 1–32 bits) and on the
+  parameterised utility references (`ComponentRef.Width`, `ComponentRef.Arity`). A node's signature is a
+  pure function of its reference (`BoundarySignatures.ForUtility`), so layout, validation, the compiler and
+  persistence all agree.
+
+  | Kind | Pins | Behaviour |
+  |---|---|---|
+  | Input / Output boundary (width w) | one w-bit pin | bus interface port |
+  | `Splitter(w)` | `Pin` (w bits) → `BitPin(0..w-1)` | wiring, compiled away |
+  | `Merger(w)` | `BitPin(0..w-1)` → `Pin` (w bits) | wiring, compiled away |
+  | `BusJoin(w, n)` | `BitPin(0..n-1)` (w bits each) → `Pin` | shared bus, resolved at runtime |
+  | `TriState(w)` | D (w), EN (1) → OUT (w) | EN=0 → Z; bit-sliced `TriStateBuffer` |
+
+  Bit 0 is the least significant bit. `BitPin(i)` has port id `i + 1`. All of these are utilities: the
+  built-in gate library stays AND and NOT.
+- **Validation.** Connected pins must have equal widths (`ConnectionError.WidthMismatch`,
+  `DiagnosticCode.WidthMismatch`). Width changes go through splitters and mergers.
+- **Compilation.** Buses are flattened to single-bit nets, so the engine never sees a bus:
+  1. Every output pin allocates one raw net per bit. Splitters, mergers and joins union bits (no gates).
+  2. Gates with bus pins are sliced into one gate per bit. Single-bit pins feed every slice.
+  3. Floating ties are deferred. A class with a real driver (a gate, a root input or the clock) ignores
+     them, so an unconnected join input floats instead of driving LOW.
+  4. Nets with several gate drivers (created only by bus joins) get CSR driver lists
+     (`NetSharedOffsets`, `NetSharedSlots`). Root inputs or the clock on a shared bus are rejected
+     (`InvalidBusJoin`).
+  5. The root interface is flattened to bits in port order, bit 0 first (`InputBits`, `OutputBits`).
+- **Runtime.** For shared nets the context stores each driver's last output per slot and resolves the bus
+  when a driver changes, once per wave:
+
+  | Drivers | Bus |
+  |---|---|
+  | all Z | Z |
+  | any X | X |
+  | HIGH and LOW | X, contended (`ContentionCount`, `BusContention` warning) |
+  | otherwise | the agreed value |
+
+  Circuits without joins allocate nothing extra. Whole-port helpers: `SetInputValue(port, ulong)`,
+  `TryGetInputValue`, `TryGetOutputValue`.
+- **Presentation.**
+  - Bus pins and wires register under every bit net and show an aggregate: X if any bit is X, HIGH if any
+    bit is HIGH, Z if all bits float, otherwise LOW.
+  - Bus wires are drawn thicker (`WireView.IsBus`).
+  - Bus boundaries show bit cells (`GateGeometry.BitCells`, most significant bit on the left) and a
+    "NAME = value" readout. Clicking a cell toggles that bit with an undo step.
+- **Analysis.** Truth tables and sequence analysis use one column per bit, MSB first, named `A[3]`…`A[0]`.
+  `TruthTableColumn.Index` maps each column to its compiled bit.
+- **Persistence (schema v3).**
+  - Optional node `width` and `arity`, and node kinds `splitter`, `merger`, `busjoin` and `tristate`.
+  - Input values are "Low"/"High" for 0/1 and decimal otherwise, e.g.
+    `{ "kind": "input", "port": 1, "width": 8 }` and `{ "port": 1, "value": "165" }`.

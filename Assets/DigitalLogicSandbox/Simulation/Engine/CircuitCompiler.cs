@@ -33,11 +33,12 @@ namespace DigitalLogicSandbox.Simulation.Engine
         private readonly SimulationOptions _options;
 
         private readonly List<int> _parent = new List<int>();
+        private readonly List<int> _floatingTies = new List<int>();
         private readonly List<GateBuild> _gates = new List<GateBuild>();
         private readonly List<CompiledInstance> _instances = new List<CompiledInstance>();
         private readonly HashSet<DefinitionId> _path = new HashSet<DefinitionId>();
-        private readonly Dictionary<PortId, int> _rootInputs = new Dictionary<PortId, int>();
-        private readonly Dictionary<PortId, int> _rootOutputs = new Dictionary<PortId, int>();
+        private readonly Dictionary<PortId, int[]> _rootInputs = new Dictionary<PortId, int[]>();
+        private readonly Dictionary<PortId, int[]> _rootOutputs = new Dictionary<PortId, int[]>();
         private ValidationReport _report;
         private int _maxDepth;
         private bool _depthReported;
@@ -58,6 +59,7 @@ namespace DigitalLogicSandbox.Simulation.Engine
 
             _report = new ValidationReport();
             _parent.Clear();
+            _floatingTies.Clear();
             _gates.Clear();
             _instances.Clear();
             _path.Clear();
@@ -89,10 +91,10 @@ namespace DigitalLogicSandbox.Simulation.Engine
         // Expansion
         // ------------------------------------------------------------------------------------------------
 
-        /// <param name="boundInputs">For nested scopes: raw net feeding each interface input. Null for the root.</param>
-        /// <param name="boundOutputs">For nested scopes: raw net of the custom node's output pins. Null for the root.</param>
-        private void ExpandScope(CompiledInstance scope, Dictionary<PortId, int> boundInputs,
-            Dictionary<PortId, int> boundOutputs)
+        /// <param name="boundInputs">For nested scopes: raw nets (per bit) feeding each interface input. Null for the root.</param>
+        /// <param name="boundOutputs">For nested scopes: raw nets (per bit) of the custom node's output pins. Null for the root.</param>
+        private void ExpandScope(CompiledInstance scope, Dictionary<PortId, int[]> boundInputs,
+            Dictionary<PortId, int[]> boundOutputs)
         {
             CircuitDefinition definition = scope.Definition;
             IReadOnlyList<NodeDefinition> nodes = definition.Nodes;
@@ -104,7 +106,7 @@ namespace DigitalLogicSandbox.Simulation.Engine
 
             var signatures = new ComponentSignature[nodes.Count];
 
-            // Pass 1: allocate a raw net for every output pin in this scope.
+            // Pass 1: allocate one raw net per bit of every output pin in this scope.
             for (int i = 0; i < nodes.Count; i++)
             {
                 NodeDefinition node = nodes[i];
@@ -117,36 +119,37 @@ namespace DigitalLogicSandbox.Simulation.Engine
                 }
 
                 signatures[i] = signature;
+                IReadOnlyList<PortDescriptor> outputs = signature.Outputs;
+                for (int p = 0; p < outputs.Count; p++)
+                {
+                    scope.SetRawOutputPinNets(new PinRef(node.Id, outputs[p].Id), NewNets(outputs[p].Width));
+                }
+
                 switch (node.Component.Kind)
                 {
                     case ComponentKind.InputBoundary:
                     {
-                        int raw = NewNet();
-                        scope.SetRawOutputPinNet(new PinRef(node.Id, BoundarySignatures.Pin), raw);
+                        int[] raw = scope.GetRawOutputPinNets(new PinRef(node.Id, BoundarySignatures.Pin));
                         if (isRoot)
                         {
                             _rootInputs[node.InterfacePort] = raw;
                         }
-                        else if (boundInputs.TryGetValue(node.InterfacePort, out int outer))
+                        else if (boundInputs.TryGetValue(node.InterfacePort, out int[] outer))
                         {
-                            Union(raw, outer);
+                            UnionBits(raw, outer);
                         }
                         else
                         {
-                            Union(raw, RawFloating);
+                            UnionBits(raw, null);
                         }
 
                         break;
                     }
 
-                    case ComponentKind.OutputBoundary:
-                        break;
-
                     case ComponentKind.Clock:
                     {
                         // Every clock node, in every scope, carries the one global clock: union them into one net.
-                        int raw = NewNet();
-                        scope.SetRawOutputPinNet(new PinRef(node.Id, BoundarySignatures.Pin), raw);
+                        int raw = scope.GetRawOutputPinNets(new PinRef(node.Id, BoundarySignatures.Pin))[0];
                         if (_rawClock < 0)
                         {
                             _rawClock = raw;
@@ -158,21 +161,10 @@ namespace DigitalLogicSandbox.Simulation.Engine
 
                         break;
                     }
-
-                    default:
-                    {
-                        IReadOnlyList<PortDescriptor> outputs = signature.Outputs;
-                        for (int p = 0; p < outputs.Count; p++)
-                        {
-                            scope.SetRawOutputPinNet(new PinRef(node.Id, outputs[p].Id), NewNet());
-                        }
-
-                        break;
-                    }
                 }
             }
 
-            // Pass 2: wire gates, bind outputs, and expand custom gates.
+            // Pass 2: wire gates and bus utilities, bind outputs, and expand custom gates.
             for (int i = 0; i < nodes.Count; i++)
             {
                 NodeDefinition node = nodes[i];
@@ -185,19 +177,70 @@ namespace DigitalLogicSandbox.Simulation.Engine
                 switch (node.Component.Kind)
                 {
                     case ComponentKind.Primitive:
-                        AddGate(scope, node, signature);
+                    case ComponentKind.TriState:
+                        AddGates(scope, node, signature);
                         break;
 
                     case ComponentKind.OutputBoundary:
                     {
-                        int raw = ReadRaw(scope, new PinRef(node.Id, BoundarySignatures.Pin));
+                        int width = signature.Inputs[0].Width;
+                        int[] raw = ReadRawBits(scope, new PinRef(node.Id, BoundarySignatures.Pin), width);
                         if (isRoot)
                         {
                             _rootOutputs[node.InterfacePort] = raw;
                         }
-                        else if (boundOutputs.TryGetValue(node.InterfacePort, out int outer))
+                        else if (boundOutputs.TryGetValue(node.InterfacePort, out int[] outer))
                         {
-                            Union(outer, raw);
+                            UnionBits(outer, raw);
+                        }
+
+                        break;
+                    }
+
+                    case ComponentKind.Splitter:
+                    {
+                        // Pure wiring: each single-bit output is the same net as one bit of the bus.
+                        int width = node.Component.Width;
+                        int[] bus = ReadRawBits(scope, new PinRef(node.Id, BoundarySignatures.Pin), width);
+                        for (int b = 0; b < width; b++)
+                        {
+                            Union(scope.GetRawOutputPinNets(new PinRef(node.Id, BoundarySignatures.BitPin(b)))[0], bus[b]);
+                        }
+
+                        break;
+                    }
+
+                    case ComponentKind.Merger:
+                    {
+                        int[] bus = scope.GetRawOutputPinNets(new PinRef(node.Id, BoundarySignatures.Pin));
+                        for (int b = 0; b < bus.Length; b++)
+                        {
+                            Union(bus[b], ReadRawBits(scope, new PinRef(node.Id, BoundarySignatures.BitPin(b)), 1)[0]);
+                        }
+
+                        break;
+                    }
+
+                    case ComponentKind.BusJoin:
+                    {
+                        // All connected drivers share the joined nets; unconnected inputs contribute nothing.
+                        int[] bus = scope.GetRawOutputPinNets(new PinRef(node.Id, BoundarySignatures.Pin));
+                        for (int d = 0; d < node.Component.Arity; d++)
+                        {
+                            var pin = new PinRef(node.Id, BoundarySignatures.BitPin(d));
+                            if (!scope.Definition.IsDriven(pin))
+                            {
+                                continue;
+                            }
+
+                            int[] driver = ReadRawBits(scope, pin, bus.Length);
+                            for (int b = 0; b < bus.Length; b++)
+                            {
+                                if (driver[b] != RawFloating)
+                                {
+                                    Union(bus[b], driver[b]);
+                                }
+                            }
                         }
 
                         break;
@@ -210,7 +253,11 @@ namespace DigitalLogicSandbox.Simulation.Engine
             }
         }
 
-        private void AddGate(CompiledInstance scope, NodeDefinition node, ComponentSignature signature)
+        /// <summary>
+        /// Adds the evaluators of a primitive or tri-state node. Bus pins are sliced: a node whose widest pin has
+        /// <c>w</c> bits becomes <c>w</c> one-bit gates; single-bit pins (such as an enable) feed every slice.
+        /// </summary>
+        private void AddGates(CompiledInstance scope, NodeDefinition node, ComponentSignature signature)
         {
             if (!_catalog.TryGetPrimitive(node.Component, out IPrimitiveComponent primitive))
             {
@@ -221,19 +268,39 @@ namespace DigitalLogicSandbox.Simulation.Engine
 
             IReadOnlyList<PortDescriptor> inputs = signature.Inputs;
             IReadOnlyList<PortDescriptor> outputs = signature.Outputs;
-            var rawInputs = new int[inputs.Count];
-            var rawOutputs = new int[outputs.Count];
+            int slices = 1;
+            var inputBits = new int[inputs.Count][];
+            var outputBits = new int[outputs.Count][];
             for (int p = 0; p < inputs.Count; p++)
             {
-                rawInputs[p] = ReadRaw(scope, new PinRef(node.Id, inputs[p].Id));
+                inputBits[p] = ReadRawBits(scope, new PinRef(node.Id, inputs[p].Id), inputs[p].Width);
+                slices = Math.Max(slices, inputs[p].Width);
             }
 
             for (int p = 0; p < outputs.Count; p++)
             {
-                scope.TryGetOutputPinNet(new PinRef(node.Id, outputs[p].Id), out rawOutputs[p]);
+                outputBits[p] = scope.GetRawOutputPinNets(new PinRef(node.Id, outputs[p].Id));
+                slices = Math.Max(slices, outputs[p].Width);
             }
 
-            _gates.Add(new GateBuild(primitive, rawInputs, rawOutputs, scope, node.Id));
+            for (int b = 0; b < slices; b++)
+            {
+                var rawInputs = new int[inputs.Count];
+                var rawOutputs = new int[outputs.Count];
+                for (int p = 0; p < inputs.Count; p++)
+                {
+                    int[] bits = inputBits[p];
+                    rawInputs[p] = bits.Length > 1 ? bits[b] : bits[0];
+                }
+
+                for (int p = 0; p < outputs.Count; p++)
+                {
+                    int[] bits = outputBits[p];
+                    rawOutputs[p] = bits.Length > 1 ? bits[b] : bits[0];
+                }
+
+                _gates.Add(new GateBuild(primitive, rawInputs, rawOutputs, scope, node.Id));
+            }
         }
 
         private void ExpandCustom(CompiledInstance scope, NodeDefinition node, ComponentSignature signature)
@@ -268,19 +335,18 @@ namespace DigitalLogicSandbox.Simulation.Engine
                 return;
             }
 
-            var boundInputs = new Dictionary<PortId, int>(signature.InputCount);
+            var boundInputs = new Dictionary<PortId, int[]>(signature.InputCount);
             IReadOnlyList<PortDescriptor> inputs = signature.Inputs;
             for (int p = 0; p < inputs.Count; p++)
             {
-                boundInputs[inputs[p].Id] = ReadRaw(scope, new PinRef(node.Id, inputs[p].Id));
+                boundInputs[inputs[p].Id] = ReadRawBits(scope, new PinRef(node.Id, inputs[p].Id), inputs[p].Width);
             }
 
-            var boundOutputs = new Dictionary<PortId, int>(signature.OutputCount);
+            var boundOutputs = new Dictionary<PortId, int[]>(signature.OutputCount);
             IReadOnlyList<PortDescriptor> outputs = signature.Outputs;
             for (int p = 0; p < outputs.Count; p++)
             {
-                scope.TryGetOutputPinNet(new PinRef(node.Id, outputs[p].Id), out int raw);
-                boundOutputs[outputs[p].Id] = raw;
+                boundOutputs[outputs[p].Id] = scope.GetRawOutputPinNets(new PinRef(node.Id, outputs[p].Id));
             }
 
             var instance = new CompiledInstance(child, scope, node.Id);
@@ -292,23 +358,44 @@ namespace DigitalLogicSandbox.Simulation.Engine
             _path.Remove(reference.Id);
         }
 
-        /// <summary>Raw net read by an input pin in <paramref name="scope"/>: its driver's net, or floating.</summary>
-        private int ReadRaw(CompiledInstance scope, PinRef inputPin)
+        /// <summary>
+        /// Raw nets read by the <paramref name="width"/> bits of an input pin in <paramref name="scope"/>: its
+        /// driver's nets, or floating. Bits the driver does not provide (a width mismatch, reported by validation)
+        /// read floating.
+        /// </summary>
+        private int[] ReadRawBits(CompiledInstance scope, PinRef inputPin, int width)
         {
+            var bits = new int[width]; // RawFloating (0) by default
             if (!scope.Definition.TryGetConnectionTo(inputPin, out ConnectionDefinition connection))
             {
-                return RawFloating;
+                return bits;
             }
 
-            if (scope.TryGetOutputPinNet(connection.Source, out int raw))
+            int[] source = scope.GetRawOutputPinNets(connection.Source);
+            if (source == null)
             {
-                return raw;
+                _report.Add(new Diagnostic(DiagnosticSeverity.Warning, DiagnosticCode.InvalidSourcePort,
+                    "Connection " + connection + " in '" + scope.Path + "' starts at an unknown output pin; treated as unconnected.",
+                    scope.Parent == null ? connection.Destination.Node : scope.RootNode(), connection.Destination));
+                return bits;
             }
 
-            _report.Add(new Diagnostic(DiagnosticSeverity.Warning, DiagnosticCode.InvalidSourcePort,
-                "Connection " + connection + " in '" + scope.Path + "' starts at an unknown output pin; treated as unconnected.",
-                scope.Parent == null ? connection.Destination.Node : scope.RootNode(), connection.Destination));
-            return RawFloating;
+            int shared = Math.Min(width, source.Length);
+            for (int b = 0; b < shared; b++)
+            {
+                bits[b] = source[b];
+            }
+
+            return bits;
+        }
+
+        /// <summary>Unions bit by bit; a null or shorter <paramref name="b"/> ties the remaining bits to floating.</summary>
+        private void UnionBits(int[] a, int[] b)
+        {
+            for (int i = 0; i < a.Length; i++)
+            {
+                Union(a[i], b != null && i < b.Length ? b[i] : RawFloating);
+            }
         }
 
         // ------------------------------------------------------------------------------------------------
@@ -317,6 +404,8 @@ namespace DigitalLogicSandbox.Simulation.Engine
 
         private CompiledCircuit Build(CircuitDefinition rootDefinition, CompiledInstance rootInstance, ValidationReport report)
         {
+            ApplyFloatingTies();
+
             // Compact union-find classes into dense net indices; the floating class is always net 0.
             int rawCount = _parent.Count;
             var denseOfRoot = new int[rawCount];
@@ -354,6 +443,7 @@ namespace DigitalLogicSandbox.Simulation.Engine
             var inputNets = new int[inputOffsets[gateCount]];
             var outputNets = new int[outputOffsets[gateCount]];
             var driver = new int[netCount];
+            var driverCount = new int[netCount];
             for (int n = 0; n < netCount; n++)
             {
                 driver[n] = -1;
@@ -374,51 +464,80 @@ namespace DigitalLogicSandbox.Simulation.Engine
                 {
                     int net = rawToDense[gate.Outputs[p]];
                     outputNets[outputOffsets[g] + p] = net;
-                    if (net == CompiledCircuit.FloatingNet || driver[net] >= 0)
+                    if (net == CompiledCircuit.FloatingNet)
                     {
                         report.Add(new Diagnostic(DiagnosticSeverity.Error, DiagnosticCode.MultipleDrivers,
-                            "Internal error: net " + net + " has more than one driver (" + gate.Instance.Path + "/" +
-                            gate.Node + ")."));
+                            "Internal error: a gate output was merged with the floating net (" + gate.Instance.Path +
+                            "/" + gate.Node + ")."));
                         continue;
                     }
 
-                    driver[net] = g;
+                    if (driver[net] < 0)
+                    {
+                        driver[net] = g;
+                    }
+
+                    driverCount[net]++;
                 }
             }
 
-            // Root interface.
+            // Shared buses (nets joined by a bus join): every driving output slot, resolved at runtime.
+            var sharedOffsets = new int[netCount + 1];
+            for (int n = 0; n < netCount; n++)
+            {
+                sharedOffsets[n + 1] = sharedOffsets[n] + (driverCount[n] > 1 ? driverCount[n] : 0);
+            }
+
+            var sharedSlots = new int[sharedOffsets[netCount]];
+            var sharedFill = new int[netCount];
+            for (int slot = 0; slot < outputNets.Length; slot++)
+            {
+                int net = outputNets[slot];
+                if (net != CompiledCircuit.FloatingNet && driverCount[net] > 1)
+                {
+                    sharedSlots[sharedOffsets[net] + sharedFill[net]++] = slot;
+                }
+            }
+
+            // External sources (root input bits, the clock) must stay the only driver of their net.
+            var externalSource = new string[netCount];
+
+            // Root interface, flattened to bits (bit 0 of each port first).
             IReadOnlyList<InterfacePort> rootPorts = rootDefinition.Inputs;
-            var rootInputNets = new int[rootPorts.Count];
-            var rootInputPorts = new PortId[rootPorts.Count];
+            var rootInputNets = new List<int>();
+            var rootInputPorts = new List<PortId>();
+            var rootInputBits = new List<int>();
             for (int i = 0; i < rootPorts.Count; i++)
             {
-                rootInputPorts[i] = rootPorts[i].Id;
-                rootInputNets[i] = _rootInputs.TryGetValue(rootPorts[i].Id, out int raw)
-                    ? rawToDense[raw]
-                    : CompiledCircuit.FloatingNet;
-                if (rootInputNets[i] != CompiledCircuit.FloatingNet && driver[rootInputNets[i]] >= 0)
+                InterfacePort port = rootPorts[i];
+                _rootInputs.TryGetValue(port.Id, out int[] raw);
+                for (int b = 0; b < port.Width; b++)
                 {
-                    report.Add(new Diagnostic(DiagnosticSeverity.Error, DiagnosticCode.MultipleDrivers,
-                        "Internal error: input '" + rootPorts[i].Name + "' is also driven by a gate."));
+                    int net = raw != null && b < raw.Length ? rawToDense[raw[b]] : CompiledCircuit.FloatingNet;
+                    rootInputNets.Add(net);
+                    rootInputPorts.Add(port.Id);
+                    rootInputBits.Add(b);
+                    ClaimExternal(externalSource, driverCount, net, "input '" + port.Name + "'", report);
                 }
             }
 
             int clockNet = _rawClock >= 0 ? rawToDense[_rawClock] : CompiledCircuit.FloatingNet;
-            if (clockNet != CompiledCircuit.FloatingNet && driver[clockNet] >= 0)
-            {
-                report.Add(new Diagnostic(DiagnosticSeverity.Error, DiagnosticCode.MultipleDrivers,
-                    "Internal error: the clock net is also driven by a gate."));
-            }
+            ClaimExternal(externalSource, driverCount, clockNet, "the clock", report);
 
             rootPorts = rootDefinition.Outputs;
-            var rootOutputNets = new int[rootPorts.Count];
-            var rootOutputPorts = new PortId[rootPorts.Count];
+            var rootOutputNets = new List<int>();
+            var rootOutputPorts = new List<PortId>();
+            var rootOutputBits = new List<int>();
             for (int i = 0; i < rootPorts.Count; i++)
             {
-                rootOutputPorts[i] = rootPorts[i].Id;
-                rootOutputNets[i] = _rootOutputs.TryGetValue(rootPorts[i].Id, out int raw)
-                    ? rawToDense[raw]
-                    : CompiledCircuit.FloatingNet;
+                InterfacePort port = rootPorts[i];
+                _rootOutputs.TryGetValue(port.Id, out int[] raw);
+                for (int b = 0; b < port.Width; b++)
+                {
+                    rootOutputNets.Add(raw != null && b < raw.Length ? rawToDense[raw[b]] : CompiledCircuit.FloatingNet);
+                    rootOutputPorts.Add(port.Id);
+                    rootOutputBits.Add(b);
+                }
             }
 
             // Fan-out (net -> reading gates), each gate listed once per net.
@@ -471,8 +590,10 @@ namespace DigitalLogicSandbox.Simulation.Engine
             List<int[]> cycles = FindGateCycles(gateCount, outputOffsets, outputNets, readerOffsets, readers);
 
             var circuit = new CompiledCircuit(rootDefinition, rootInstance, netCount, components, inputOffsets, inputNets,
-                outputOffsets, outputNets, readerOffsets, readers, driver, gateInstances, gateNodes, rootInputNets,
-                rootInputPorts, rootOutputNets, rootOutputPorts, _maxDepth, cycles, clockNet);
+                outputOffsets, outputNets, readerOffsets, readers, driver, gateInstances, gateNodes,
+                rootInputNets.ToArray(), rootInputPorts.ToArray(), rootInputBits.ToArray(), rootOutputNets.ToArray(),
+                rootOutputPorts.ToArray(), rootOutputBits.ToArray(), _maxDepth, cycles, clockNet, sharedOffsets,
+                sharedSlots);
 
             for (int c = 0; c < cycles.Count; c++)
             {
@@ -501,6 +622,29 @@ namespace DigitalLogicSandbox.Simulation.Engine
             }
 
             return circuit;
+        }
+
+        /// <summary>
+        /// Records that <paramref name="net"/> is driven from outside the gate graph. A bus join that ties such a
+        /// net to gate outputs or to another external source is a user error (the value would be ambiguous).
+        /// </summary>
+        private static void ClaimExternal(string[] externalSource, int[] driverCount, int net, string name,
+            ValidationReport report)
+        {
+            if (net == CompiledCircuit.FloatingNet)
+            {
+                return;
+            }
+
+            if (externalSource[net] != null || driverCount[net] > 0)
+            {
+                report.Add(new Diagnostic(DiagnosticSeverity.Error, DiagnosticCode.InvalidBusJoin,
+                    "A bus join connects " + name + " to " + (externalSource[net] ?? "gate outputs") +
+                    ". Circuit inputs and the clock cannot share a bus; drive the bus through tri-state drivers."));
+                return;
+            }
+
+            externalSource[net] = name;
         }
 
         private static List<int[]> FindGateCycles(int gateCount, int[] outputOffsets, int[] outputNets,
@@ -554,6 +698,17 @@ namespace DigitalLogicSandbox.Simulation.Engine
             return id;
         }
 
+        private int[] NewNets(int width)
+        {
+            var nets = new int[width];
+            for (int i = 0; i < width; i++)
+            {
+                nets[i] = NewNet();
+            }
+
+            return nets;
+        }
+
         private int Find(int x)
         {
             int root = x;
@@ -572,9 +727,68 @@ namespace DigitalLogicSandbox.Simulation.Engine
             return root;
         }
 
-        /// <summary>Merges two classes; the floating class always stays the representative.</summary>
+        /// <summary>
+        /// Ties every undriven class that was asked to float to the floating net. Ties are deferred until all
+        /// unions are known: a class that ends up with a real driver (a gate output, a root input or the clock,
+        /// e.g. through a bus join) ignores them, so an unconnected bus-join input contributes nothing.
+        /// </summary>
+        private void ApplyFloatingTies()
+        {
+            if (_floatingTies.Count == 0)
+            {
+                return;
+            }
+
+            var driven = new bool[_parent.Count];
+            for (int g = 0; g < _gates.Count; g++)
+            {
+                int[] outputs = _gates[g].Outputs;
+                for (int p = 0; p < outputs.Length; p++)
+                {
+                    driven[Find(outputs[p])] = true;
+                }
+            }
+
+            foreach (int[] raw in _rootInputs.Values)
+            {
+                for (int b = 0; b < raw.Length; b++)
+                {
+                    driven[Find(raw[b])] = true;
+                }
+            }
+
+            if (_rawClock >= 0)
+            {
+                driven[Find(_rawClock)] = true;
+            }
+
+            for (int i = 0; i < _floatingTies.Count; i++)
+            {
+                int root = Find(_floatingTies[i]);
+                if (root != RawFloating && !driven[root])
+                {
+                    _parent[root] = RawFloating;
+                }
+            }
+
+            _floatingTies.Clear();
+        }
+
+        /// <summary>
+        /// Merges two classes. A union with the floating net is deferred (see <see cref="ApplyFloatingTies"/>).
+        /// </summary>
         private void Union(int a, int b)
         {
+            if (a == RawFloating || b == RawFloating)
+            {
+                if (a != b)
+                {
+                    _floatingTies.Add(a == RawFloating ? b : a);
+                }
+
+                return;
+            }
+
             int rootA = Find(a);
             int rootB = Find(b);
             if (rootA == rootB)
@@ -582,14 +796,7 @@ namespace DigitalLogicSandbox.Simulation.Engine
                 return;
             }
 
-            if (rootA == RawFloating)
-            {
-                _parent[rootB] = RawFloating;
-            }
-            else
-            {
-                _parent[rootA] = rootB;
-            }
+            _parent[rootA] = rootB;
         }
 
         private void Error(DiagnosticCode code, CompiledInstance scope, string message, NodeId node, DefinitionRef definition)

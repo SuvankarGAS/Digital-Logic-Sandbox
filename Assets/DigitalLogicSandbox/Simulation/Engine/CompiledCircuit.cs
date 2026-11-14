@@ -33,11 +33,15 @@ namespace DigitalLogicSandbox.Simulation.Engine
             NodeId[] gateNodes,
             int[] inputNets,
             PortId[] inputPorts,
+            int[] inputBits,
             int[] outputNets,
             PortId[] outputPorts,
+            int[] outputBits,
             int hierarchyDepth,
             List<int[]> combinationalCycles,
-            int clockNet = FloatingNet)
+            int clockNet,
+            int[] netSharedOffsets,
+            int[] netSharedSlots)
         {
             RootDefinition = rootDefinition;
             Root = root;
@@ -54,8 +58,13 @@ namespace DigitalLogicSandbox.Simulation.Engine
             GateNodes = gateNodes;
             InputNets = inputNets;
             InputPorts = inputPorts;
+            InputBits = inputBits;
             OutputNets = outputNets;
             OutputPorts = outputPorts;
+            OutputBits = outputBits;
+            NetSharedOffsets = netSharedOffsets;
+            NetSharedSlots = netSharedSlots;
+            HasSharedNets = netSharedSlots.Length > 0;
             HierarchyDepth = hierarchyDepth;
             CombinationalCycles = combinationalCycles;
             ClockNet = clockNet;
@@ -88,9 +97,14 @@ namespace DigitalLogicSandbox.Simulation.Engine
         /// <summary>Custom-gate nesting depth (0 = only primitives).</summary>
         public int HierarchyDepth { get; }
 
+        /// <summary>Number of root input <b>bits</b> (a bus port contributes one entry per bit, bit 0 first).</summary>
         public int InputCount => InputNets.Length;
 
+        /// <summary>Number of root output <b>bits</b>.</summary>
         public int OutputCount => OutputNets.Length;
+
+        /// <summary>True when some net is a shared bus driven by several gates (through a bus join).</summary>
+        public bool HasSharedNets { get; }
 
         /// <summary>Gate-index groups forming feedback loops in the flattened graph (empty for combinational circuits).</summary>
         public IReadOnlyList<int[]> CombinationalCycles { get; }
@@ -126,7 +140,7 @@ namespace DigitalLogicSandbox.Simulation.Engine
 
         internal int[] NetReaders { get; }
 
-        /// <summary>Driving gate per net, or -1 for root inputs and the floating net.</summary>
+        /// <summary>Driving gate per net (the first one for shared buses), or -1 for root inputs and the floating net.</summary>
         internal int[] NetDriverGate { get; }
 
         internal CompiledInstance[] GateInstances { get; }
@@ -142,6 +156,90 @@ namespace DigitalLogicSandbox.Simulation.Engine
         internal int[] OutputNets { get; }
 
         internal PortId[] OutputPorts { get; }
+
+        internal int[] InputBits { get; }
+
+        internal int[] OutputBits { get; }
+
+        /// <summary>CSR of shared buses: net -> gate output slots driving it (empty range for ordinary nets).</summary>
+        internal int[] NetSharedOffsets { get; }
+
+        internal int[] NetSharedSlots { get; }
+
+        /// <summary>True when the net is a shared bus whose value is resolved from several drivers.</summary>
+        public bool IsSharedNet(int net)
+        {
+            return NetSharedOffsets[net + 1] > NetSharedOffsets[net];
+        }
+
+        /// <summary>Number of gates driving a shared bus (0 for ordinary nets).</summary>
+        public int GetSharedDriverCount(int net)
+        {
+            return NetSharedOffsets[net + 1] - NetSharedOffsets[net];
+        }
+
+        /// <summary>Bit index (0 = least significant) of a flattened root input within its port.</summary>
+        public int GetInputBit(int index)
+        {
+            return InputBits[index];
+        }
+
+        public int GetOutputBit(int index)
+        {
+            return OutputBits[index];
+        }
+
+        /// <summary>Flattened index of one bit of a root input port, or -1.</summary>
+        public int IndexOfInput(PortId port, int bit)
+        {
+            int first = IndexOfInput(port);
+            if (first < 0 || bit < 0 || first + bit >= InputPorts.Length || InputPorts[first + bit] != port)
+            {
+                return -1;
+            }
+
+            return first + bit;
+        }
+
+        public int IndexOfOutput(PortId port, int bit)
+        {
+            int first = IndexOfOutput(port);
+            if (first < 0 || bit < 0 || first + bit >= OutputPorts.Length || OutputPorts[first + bit] != port)
+            {
+                return -1;
+            }
+
+            return first + bit;
+        }
+
+        /// <summary>Number of bits of a root input port (0 if unknown).</summary>
+        public int GetInputWidth(PortId port)
+        {
+            int count = 0;
+            for (int i = 0; i < InputPorts.Length; i++)
+            {
+                if (InputPorts[i] == port)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        public int GetOutputWidth(PortId port)
+        {
+            int count = 0;
+            for (int i = 0; i < OutputPorts.Length; i++)
+            {
+                if (OutputPorts[i] == port)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
 
         public int GetInputNet(int index)
         {
@@ -163,7 +261,7 @@ namespace DigitalLogicSandbox.Simulation.Engine
             return OutputPorts[index];
         }
 
-        /// <summary>Interface index of a root input port, or -1.</summary>
+        /// <summary>Flattened index of the first bit (bit 0) of a root input port, or -1.</summary>
         public int IndexOfInput(PortId port)
         {
             for (int i = 0; i < InputPorts.Length; i++)
@@ -177,7 +275,7 @@ namespace DigitalLogicSandbox.Simulation.Engine
             return -1;
         }
 
-        /// <summary>Interface index of a root output port, or -1.</summary>
+        /// <summary>Flattened index of the first bit (bit 0) of a root output port, or -1.</summary>
         public int IndexOfOutput(PortId port)
         {
             for (int i = 0; i < OutputPorts.Length; i++)

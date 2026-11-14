@@ -546,15 +546,32 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             {
                 NotifyReadOnly();
             }
+            else if (error == ConnectionError.WidthMismatch)
+            {
+                Notify("Cannot connect a " + PinWidth(source, output: true) + "-bit pin to a " +
+                    PinWidth(destination, output: false) + "-bit pin. Use a splitter or merger to change the width.");
+            }
 
             return error;
         }
 
+        private int PinWidth(PinRef pin, bool output)
+        {
+            if (Circuit == null || !Circuit.TryGetNode(pin.Node, out NodeDefinition node) ||
+                !_catalog.TryGetSignature(node.Component, out ComponentSignature signature))
+            {
+                return 1;
+            }
+
+            return ConnectionRules.WidthOf(output ? signature.Outputs : signature.Inputs, pin.Port);
+        }
+
         /// <summary>
-        /// Flips an input boundary switch as an undoable step ("Change input value"). Returns false when the node
+        /// Flips an input boundary switch as an undoable step ("Change input value"). For a bus input,
+        /// <paramref name="bit"/> selects the bit to flip (bit 0 = least significant). Returns false when the node
         /// is not a simulated input or inputs cannot be changed at this level.
         /// </summary>
-        public bool ToggleInput(NodeId boundary)
+        public bool ToggleInput(NodeId boundary, int bit = 0)
         {
             EnsureInitialized();
             if (!CanToggleInputs)
@@ -570,11 +587,66 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
                 return false;
             }
 
-            Signal next = session.GetInputValue(boundary) == Signal.High ? Signal.Low : Signal.High;
+            if (bit < 0 || bit >= node.Component.Width)
+            {
+                return false;
+            }
+
+            ulong next = session.GetInputBits(boundary) ^ (1UL << bit);
             string name = Circuit.TryGetInterfacePort(node.InterfacePort, out InterfacePort port) ? port.Name : null;
             History.Execute(new SetInputValueCommand(session, boundary, next, name));
             MarkStatusDirty();
             return true;
+        }
+
+        /// <summary>
+        /// Sets every bit of an input switch as an undoable step (e.g. typing a value for a bus input). Bits above
+        /// the input's width are ignored. Returns false when nothing changed or inputs cannot be changed here.
+        /// </summary>
+        public bool SetInputValue(NodeId boundary, ulong value)
+        {
+            EnsureInitialized();
+            if (!CanToggleInputs)
+            {
+                return false;
+            }
+
+            Sync();
+            CircuitSession session = Session;
+            if (!session.IsSimulating || !Circuit.TryGetNode(boundary, out NodeDefinition node) ||
+                node.Component.Kind != ComponentKind.InputBoundary)
+            {
+                return false;
+            }
+
+            int width = node.Component.Width;
+            ulong mask = width >= 64 ? ulong.MaxValue : (1UL << width) - 1;
+            value &= mask;
+            if (session.GetInputBits(boundary) == value)
+            {
+                return false;
+            }
+
+            string name = Circuit.TryGetInterfacePort(node.InterfacePort, out InterfacePort port) ? port.Name : null;
+            History.Execute(new SetInputValueCommand(session, boundary, value, name));
+            MarkStatusDirty();
+            return true;
+        }
+
+        /// <summary>Sets every bit of an input switch directly, without an undo step (loading projects, tools).</summary>
+        public void SetInputBits(NodeId boundary, ulong value)
+        {
+            EnsureInitialized();
+            if (!CanToggleInputs)
+            {
+                return;
+            }
+
+            Sync();
+            if (Session.SetInputBits(boundary, value))
+            {
+                MarkStatusDirty();
+            }
         }
 
         /// <summary>Sets an input switch directly, without an undo step (loading projects, tests, tools).</summary>

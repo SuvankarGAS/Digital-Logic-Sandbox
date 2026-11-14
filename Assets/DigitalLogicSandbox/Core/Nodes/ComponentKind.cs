@@ -19,5 +19,24 @@ namespace DigitalLogicSandbox.Core.Nodes
         /// part of the circuit interface; every clock node in a hierarchy carries the same clock signal.
         /// </summary>
         Clock = 4,
+
+        /// <summary>Wiring utility (Phase C): splits a bus into its single-bit wires. Adds no logic or delay.</summary>
+        Splitter = 5,
+
+        /// <summary>Wiring utility (Phase C): merges single-bit wires into a bus. Adds no logic or delay.</summary>
+        Merger = 6,
+
+        /// <summary>
+        /// Wiring utility (Phase C): joins several drivers onto one shared bus (for tri-state outputs). The joined
+        /// net is resolved from all its drivers; conflicting active drivers are reported as bus contention.
+        /// </summary>
+        BusJoin = 7,
+
+        /// <summary>
+        /// Bus driver utility (Phase C): passes its data input through while EN is HIGH and releases the bus
+        /// (high impedance, Z) while EN is LOW. Z cannot be built from AND/NOT, so this is the one utility with
+        /// behaviour; it is evaluated bit by bit and appears under "Bus", not among the built-in logic gates.
+        /// </summary>
+        TriState = 8,
     }
 }

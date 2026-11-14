@@ -15,16 +15,22 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
     {
         private readonly CircuitSession _session;
         private readonly NodeId _boundary;
-        private readonly Signal _newValue;
-        private Signal _oldValue;
+        private readonly ulong _newValue;
+        private ulong _oldValue;
 
         public SetInputValueCommand(CircuitSession session, NodeId boundary, Signal newValue, string inputName)
+            : this(session, boundary, newValue == Signal.High ? 1UL : 0UL, inputName)
+        {
+        }
+
+        /// <summary>Sets every bit of a (bus) input switch; bit 0 of <paramref name="newValue"/> is the least significant.</summary>
+        public SetInputValueCommand(CircuitSession session, NodeId boundary, ulong newValue, string inputName)
         {
             _session = session ?? throw new ArgumentNullException(nameof(session));
             _boundary = boundary;
             _newValue = newValue;
             Description = "Set input " + (string.IsNullOrEmpty(inputName) ? boundary.ToString() : "'" + inputName + "'") +
-                          " to " + (newValue == Signal.High ? "1" : "0");
+                          " to " + newValue.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 
         public string Description { get; }
@@ -32,14 +38,14 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
         public void Execute()
         {
             _session.RebuildIfDirty();
-            _oldValue = _session.GetInputValue(_boundary);
-            _session.SetInput(_boundary, _newValue);
+            _oldValue = _session.GetInputBits(_boundary);
+            _session.SetInputBits(_boundary, _newValue);
         }
 
         public void Undo()
         {
             _session.RebuildIfDirty();
-            _session.SetInput(_boundary, _oldValue);
+            _session.SetInputBits(_boundary, _oldValue);
         }
     }
 }

@@ -12,8 +12,10 @@ namespace DigitalLogicSandbox.Rendering.Gates
     {
         public GateGeometry(ComponentKind kind, string title, string subtitle, Vector2 size, Rotation rotation,
             PortId[] inputPorts, Vector2[] inputPins, PortId[] outputPorts, Vector2[] outputPins,
-            string[] inputNames = null, string[] outputNames = null)
+            string[] inputNames = null, string[] outputNames = null, Vector2[] bitCells = null, int busWidth = 1)
         {
+            BitCells = bitCells ?? System.Array.Empty<Vector2>();
+            BusWidth = busWidth;
             InputNames = inputNames ?? System.Array.Empty<string>();
             OutputNames = outputNames ?? System.Array.Empty<string>();
             Kind = kind;
@@ -35,6 +37,36 @@ namespace DigitalLogicSandbox.Rendering.Gates
         public string[] OutputNames { get; }
 
         public bool HasPinLabels => InputNames.Length > 0 || OutputNames.Length > 0;
+
+        /// <summary>
+        /// Centre offsets of the per-bit cells of a bus boundary, indexed by bit (0 = least significant); empty for
+        /// everything else.
+        /// </summary>
+        public Vector2[] BitCells { get; }
+
+        /// <summary>True for bus input/output boundaries (drawn with bit cells and a value readout).</summary>
+        public bool IsBusBoundary => BitCells.Length > 0;
+
+        /// <summary>Widest pin of the node in bits (1 for single-bit nodes).</summary>
+        public int BusWidth { get; }
+
+        /// <summary>Bit cell under a node-local point, or -1.</summary>
+        public int BitAt(Vector2 local)
+        {
+            float best = GateLayout.BitCellPitch * 0.6f;
+            int bit = -1;
+            for (int i = 0; i < BitCells.Length; i++)
+            {
+                float distance = Mathf.Max(Mathf.Abs(local.x - BitCells[i].x), Mathf.Abs(local.y - BitCells[i].y));
+                if (distance <= best)
+                {
+                    best = distance;
+                    bit = i;
+                }
+            }
+
+            return bit;
+        }
 
         public string Title { get; }
 

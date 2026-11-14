@@ -150,12 +150,12 @@ namespace DigitalLogicSandbox.Persistence.Deserialization
 
                     var port = new PortId(value.Port);
                     if (document.RootCircuit.IndexOfInput(port) < 0 ||
-                        !ProjectSerializer.TryParseSignal(value.Value, out Signal signal))
+                        !ProjectSerializer.TryParseInputValue(value.Value, out ulong bits))
                     {
                         continue; // stale or invalid switch values are simply dropped
                     }
 
-                    document.InputValues[port] = signal;
+                    document.InputValues[port] = bits;
                 }
             }
 
@@ -292,6 +292,22 @@ namespace DigitalLogicSandbox.Persistence.Deserialization
                 case NodeDto.KindClock:
                     circuit.RestoreNode(id, ComponentRef.Clock, position, rotation, node.Label);
                     break;
+                case NodeDto.KindSplitter:
+                    circuit.RestoreNode(id, ComponentRef.Utility(ComponentKind.Splitter, WidthOf(node)), position,
+                        rotation, node.Label);
+                    break;
+                case NodeDto.KindMerger:
+                    circuit.RestoreNode(id, ComponentRef.Utility(ComponentKind.Merger, WidthOf(node)), position,
+                        rotation, node.Label);
+                    break;
+                case NodeDto.KindBusJoin:
+                    circuit.RestoreNode(id, ComponentRef.Utility(ComponentKind.BusJoin, WidthOf(node), node.Arity ?? 2),
+                        position, rotation, node.Label);
+                    break;
+                case NodeDto.KindTriState:
+                    circuit.RestoreNode(id, ComponentRef.Utility(ComponentKind.TriState, WidthOf(node)), position,
+                        rotation, node.Label);
+                    break;
                 case NodeDto.KindInput:
                 case NodeDto.KindOutput:
                 {
@@ -309,13 +325,19 @@ namespace DigitalLogicSandbox.Persistence.Deserialization
                     }
 
                     circuit.RestoreBoundary(id, new PortId(port), input ? PortDirection.Input : PortDirection.Output,
-                        portName, position, rotation, node.Label);
+                        portName, position, rotation, node.Label, -1, WidthOf(node));
                     break;
                 }
 
                 default:
                     throw new ArgumentException("Unknown node kind '" + node.Kind + "'.");
             }
+        }
+
+        /// <summary>Persisted width, clamped to the supported range (lenient, so a damaged file still loads).</summary>
+        private static int WidthOf(NodeDto node)
+        {
+            return Math.Max(1, Math.Min(PortDescriptor.MaxWidth, node.Width ?? 1));
         }
 
         private static void RestoreInterfaceOrder(CircuitDefinition circuit, List<PortDto> ports, PortDirection direction,

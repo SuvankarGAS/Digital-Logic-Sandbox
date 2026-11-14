@@ -363,7 +363,8 @@ namespace DigitalLogicSandbox.UI.Dialogs
         {
             _patternFields.Clear();
             UiFactory.DestroyChildren(_patternRoot);
-            int count = target.Inputs.Count;
+            TruthTableColumn[] columns = TruthTableColumn.FromPorts(target.Inputs);
+            int count = columns.Length;
             if (count == 0)
             {
                 TextMeshProUGUI none = _ui.Text("No Inputs", _patternRoot,
@@ -375,7 +376,7 @@ namespace DigitalLogicSandbox.UI.Dialogs
 
             for (int i = 0; i < count; i++)
             {
-                TMP_InputField field = _ui.FieldRow(_patternRoot, target.Inputs[i].Name, DefaultPattern(i, count), null);
+                TMP_InputField field = _ui.FieldRow(_patternRoot, columns[i].Name, DefaultPattern(i, count), null);
                 field.characterLimit = MaxDisplaySteps * 2;
                 field.onSubmit.AddListener(_ => Run());
                 _patternFields.Add(field);

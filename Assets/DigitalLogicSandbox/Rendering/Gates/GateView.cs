@@ -21,6 +21,9 @@ namespace DigitalLogicSandbox.Rendering.Gates
         private readonly List<Signal> _outputSignals = new List<Signal>();
         private readonly List<TextMeshPro> _inputLabels = new List<TextMeshPro>();
         private readonly List<TextMeshPro> _outputLabels = new List<TextMeshPro>();
+        private readonly List<SpriteRenderer> _bitCells = new List<SpriteRenderer>();
+        private readonly List<Signal> _bitSignals = new List<Signal>();
+        private readonly System.Text.StringBuilder _busText = new System.Text.StringBuilder(48);
 
         private VisualTheme _theme;
         private SpriteRenderer _outline;
@@ -75,9 +78,10 @@ namespace DigitalLogicSandbox.Rendering.Gates
             bool isInput = geometry.Kind == ComponentKind.InputBoundary;
             bool isOutput = geometry.Kind == ComponentKind.OutputBoundary;
             bool isClock = geometry.Kind == ComponentKind.Clock;
-            bool isBoundary = isInput || isOutput || isClock; // utility box with a state indicator
+            bool isBus = geometry.IsBusBoundary;
+            bool isBoundary = (isInput || isOutput || isClock) && !isBus; // utility box with a state indicator
 
-            _fill.color = isBoundary ? _theme.BoundaryFill : isCustom ? _theme.CustomGateFill : _theme.GateFill;
+            _fill.color = isBoundary || isBus ? _theme.BoundaryFill : isCustom ? _theme.CustomGateFill : _theme.GateFill;
 
             // Boundary state indicator sits at the end away from the pin.
             _state.gameObject.SetActive(isBoundary);
@@ -106,6 +110,13 @@ namespace DigitalLogicSandbox.Rendering.Gates
                     -statePosition.normalized.y * shift, 0f);
                 _title.fontSize = 3.0f;
             }
+            else if (isBus)
+            {
+                // Bus boundary: "NAME = value" above the bit cells.
+                _title.transform.localPosition = new Vector3(0f, 0.36f, 0f);
+                _title.rectTransform.sizeDelta = new Vector2(size.x, 0.6f);
+                _title.fontSize = 2.8f;
+            }
             else
             {
                 _title.transform.localPosition = isCustom ? new Vector3(0f, 0.12f, 0f) : Vector3.zero;
@@ -121,6 +132,7 @@ namespace DigitalLogicSandbox.Rendering.Gates
             ConfigurePins(_outputPins, _outputRings, _outputSignals, geometry.OutputPins, "Out");
             ConfigureLabels(_inputLabels, geometry.InputNames, geometry.InputPins, "InLabel");
             ConfigureLabels(_outputLabels, geometry.OutputNames, geometry.OutputPins, "OutLabel");
+            ConfigureBitCells(geometry.BitCells);
 
             ApplyOutline();
             ApplyState();
@@ -168,6 +180,11 @@ namespace DigitalLogicSandbox.Rendering.Gates
             _subtitle.sortingOrder = SortingOrders.Text + offset;
             SetPinOrder(_inputPins, _inputRings, offset);
             SetPinOrder(_outputPins, _outputRings, offset);
+            for (int i = 0; i < _bitCells.Count; i++)
+            {
+                _bitCells[i].sortingOrder = SortingOrders.GateState + offset;
+            }
+
             ApplyOutline();
             ApplyGhostTint();
         }
@@ -203,6 +220,30 @@ namespace DigitalLogicSandbox.Rendering.Gates
         {
             return _outputSignals[index];
         }
+
+        /// <summary>Number of bit cells (bus boundaries only).</summary>
+        public int BitCount => _geometry != null ? _geometry.BitCells.Length : 0;
+
+        /// <summary>State of one bit cell of a bus boundary; updates the value readout.</summary>
+        public void SetBitSignal(int bit, Signal signal)
+        {
+            if ((uint)bit >= (uint)BitCount || _bitSignals[bit] == signal)
+            {
+                return;
+            }
+
+            _bitSignals[bit] = signal;
+            _bitCells[bit].color = Tint(BitColor(signal));
+            UpdateBusTitle();
+        }
+
+        public Signal GetBitSignal(int bit)
+        {
+            return _bitSignals[bit];
+        }
+
+        /// <summary>The readout shown on a bus boundary, e.g. "A = 10" or "A = ?" when a bit is not binary.</summary>
+        public string BusText => _title.text;
 
         /// <summary>Boundary indicator state (switch value or lamp).</summary>
         public void SetStateSignal(Signal signal)
@@ -271,6 +312,74 @@ namespace DigitalLogicSandbox.Rendering.Gates
             }
         }
 
+        private void ConfigureBitCells(Vector2[] cells)
+        {
+            while (_bitCells.Count < cells.Length)
+            {
+                SpriteRenderer cell = CreateSprite(transform, "Bit", RenderAssets.RoundedRect, _theme, SortingOrders.GateState);
+                cell.drawMode = SpriteDrawMode.Sliced;
+                _bitCells.Add(cell);
+                _bitSignals.Add(Signal.Low);
+            }
+
+            for (int i = 0; i < _bitCells.Count; i++)
+            {
+                bool active = i < cells.Length;
+                _bitCells[i].gameObject.SetActive(active);
+                if (!active)
+                {
+                    continue;
+                }
+
+                _bitCells[i].transform.localPosition = cells[i];
+                _bitCells[i].size = Vector2.one * GateLayout.BitCellSize;
+                _bitSignals[i] = Signal.Low;
+                _bitCells[i].color = Tint(BitColor(Signal.Low));
+            }
+
+            if (cells.Length > 0)
+            {
+                UpdateBusTitle();
+            }
+        }
+
+        private Color BitColor(Signal signal)
+        {
+            // LOW cells use the outline colour so every bit stays visible against the boundary fill.
+            return signal == Signal.Low ? _theme.GateOutline : _theme.SignalColor(signal);
+        }
+
+        private void UpdateBusTitle()
+        {
+            ulong value = 0;
+            bool binary = true;
+            for (int bit = 0; bit < BitCount; bit++)
+            {
+                Signal signal = _bitSignals[bit];
+                if (signal == Signal.High)
+                {
+                    value |= 1UL << bit;
+                }
+                else if (signal != Signal.Low)
+                {
+                    binary = false;
+                }
+            }
+
+            _busText.Clear();
+            _busText.Append(_geometry.Title).Append(" = ");
+            if (binary)
+            {
+                _busText.Append(value);
+            }
+            else
+            {
+                _busText.Append('?');
+            }
+
+            _title.SetText(_busText);
+        }
+
         private void ConfigureLabels(List<TextMeshPro> labels, string[] names, Vector2[] pins, string prefix)
         {
             while (labels.Count < names.Length)
@@ -295,7 +404,7 @@ namespace DigitalLogicSandbox.Rendering.Gates
                     ? new Vector2(-Mathf.Sign(pin.x), 0f)
                     : new Vector2(0f, -Mathf.Sign(pin.y));
                 TextMeshPro label = labels[i];
-                label.text = names[i];
+                label.text = names[i] ?? string.Empty;
                 label.color = Tint(_theme.GateSubtext);
                 label.sortingOrder = _title.sortingOrder;
                 bool horizontal = inward.y == 0f;
@@ -356,6 +465,11 @@ namespace DigitalLogicSandbox.Rendering.Gates
             if (_geometry == null)
             {
                 return;
+            }
+
+            for (int i = 0; i < BitCount; i++)
+            {
+                _bitCells[i].color = Tint(BitColor(_bitSignals[i]));
             }
 
             Color fill = _geometry.Kind == ComponentKind.InputBoundary || _geometry.Kind == ComponentKind.OutputBoundary ||

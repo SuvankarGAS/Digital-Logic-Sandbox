@@ -34,6 +34,11 @@ namespace DigitalLogicSandbox.Simulation.Context
     /// edge is ordinary settling.
     /// </para>
     /// <para>
+    /// <b>Shared buses.</b> A net joined by a bus join has several driving gates. Each driver's last output is kept
+    /// per output slot, and the net is resolved when a driver changes: all Z gives Z, any UNKNOWN gives UNKNOWN,
+    /// HIGH and LOW together give UNKNOWN and mark the net as contended, otherwise the agreed value.
+    /// </para>
+    /// <para>
     /// After construction no method on the propagation path allocates: buffers are preallocated from the compiled
     /// topology. Contexts are fully independent; any number can share one compiled circuit.
     /// </para>
@@ -51,6 +56,9 @@ namespace DigitalLogicSandbox.Simulation.Context
         private readonly SignalChangeLog _changes;
         private readonly List<int> _unstableGates = new List<int>();
         private readonly int _evaluationBudget;
+        private readonly Signal[] _slots;
+        private readonly bool[] _sharedPending;
+        private readonly bool[] _contended;
 
         private int _pendingCount;
         private int _currentWave;
@@ -68,6 +76,12 @@ namespace DigitalLogicSandbox.Simulation.Context
             _outputScratch = new Signal[Math.Max(1, circuit.MaxGateOutputs)];
             _pendingNets = new int[Math.Max(1, circuit.NetCount)];
             _pendingValues = new Signal[Math.Max(1, circuit.NetCount)];
+            if (circuit.HasSharedNets)
+            {
+                _slots = new Signal[circuit.GateOutputNets.Length];
+                _sharedPending = new bool[circuit.NetCount];
+                _contended = new bool[circuit.NetCount];
+            }
             _changes = new SignalChangeLog(256, options.MaxRecordedChanges);
             _evaluationBudget = options.EvaluationBudgetFor(circuit.GateCount);
             RecordChanges = options.RecordChanges;
@@ -102,6 +116,15 @@ namespace DigitalLogicSandbox.Simulation.Context
         /// <summary>Loop nets forced LOW by the last reset (<see cref="PowerOnState.Resolved"/>).</summary>
         public int ResolvedLoopNets { get; private set; }
 
+        /// <summary>Shared buses currently driven HIGH and LOW at the same time (bus contention).</summary>
+        public int ContentionCount { get; private set; }
+
+        /// <summary>True when the shared bus <paramref name="net"/> is currently contended.</summary>
+        public bool IsContended(int net)
+        {
+            return _contended != null && _contended[net];
+        }
+
         // ------------------------------------------------------------------------------------------------
         // State access
         // ------------------------------------------------------------------------------------------------
@@ -119,6 +142,66 @@ namespace DigitalLogicSandbox.Simulation.Context
         public Signal GetOutput(int index)
         {
             return _nets[_circuit.OutputNets[index]];
+        }
+
+        /// <summary>
+        /// Value of a whole root input port as an unsigned integer (bit 0 = least significant). Returns false when
+        /// a bit is not binary or the port is unknown.
+        /// </summary>
+        public bool TryGetInputValue(PortId port, out ulong value)
+        {
+            return TryReadBits(_circuit.InputNets, _circuit.IndexOfInput(port), _circuit.GetInputWidth(port), out value);
+        }
+
+        public bool TryGetOutputValue(PortId port, out ulong value)
+        {
+            return TryReadBits(_circuit.OutputNets, _circuit.IndexOfOutput(port), _circuit.GetOutputWidth(port), out value);
+        }
+
+        /// <summary>
+        /// Sets every bit of a root input port from <paramref name="value"/> (bit 0 = least significant). Does not
+        /// propagate. Returns true if any bit changed.
+        /// </summary>
+        public bool SetInputValue(PortId port, ulong value)
+        {
+            int first = _circuit.IndexOfInput(port);
+            if (first < 0)
+            {
+                throw new ArgumentException("Port " + port + " is not an input of the root circuit.", nameof(port));
+            }
+
+            int width = _circuit.GetInputWidth(port);
+            bool changed = false;
+            for (int b = 0; b < width; b++)
+            {
+                changed |= SetInput(first + b, ((value >> b) & 1UL) != 0 ? Signal.High : Signal.Low);
+            }
+
+            return changed;
+        }
+
+        private bool TryReadBits(int[] nets, int first, int width, out ulong value)
+        {
+            value = 0;
+            if (first < 0)
+            {
+                return false;
+            }
+
+            for (int b = 0; b < width; b++)
+            {
+                Signal signal = _nets[nets[first + b]];
+                if (signal == Signal.High)
+                {
+                    value |= 1UL << b;
+                }
+                else if (signal != Signal.Low)
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         /// <summary>Current value of the global clock (LOW when the circuit has no clock).</summary>
@@ -153,6 +236,18 @@ namespace DigitalLogicSandbox.Simulation.Context
                 {
                     _nets[net] = Signal.Unknown;
                 }
+            }
+
+            if (_slots != null)
+            {
+                for (int i = 0; i < _slots.Length; i++)
+                {
+                    _slots[i] = Signal.Unknown;
+                }
+
+                Array.Clear(_sharedPending, 0, _sharedPending.Length);
+                Array.Clear(_contended, 0, _contended.Length);
+                ContentionCount = 0;
             }
 
             Array.Clear(_queued, 0, _queued.Length);
@@ -331,6 +426,24 @@ namespace DigitalLogicSandbox.Simulation.Context
             {
                 int net = outputNets[outputStart + o];
                 Signal value = _outputScratch[o];
+                if (_slots != null && _circuit.IsSharedNet(net))
+                {
+                    // Shared bus: remember this driver's value; the net is resolved once at commit.
+                    int slot = outputStart + o;
+                    if (_slots[slot] != value)
+                    {
+                        _slots[slot] = value;
+                        if (!_sharedPending[net])
+                        {
+                            _sharedPending[net] = true;
+                            _pendingNets[_pendingCount] = net;
+                            _pendingCount++;
+                        }
+                    }
+
+                    continue;
+                }
+
                 if (_nets[net] != value)
                 {
                     _pendingNets[_pendingCount] = net;
@@ -345,7 +458,17 @@ namespace DigitalLogicSandbox.Simulation.Context
             for (int i = 0; i < _pendingCount; i++)
             {
                 int net = _pendingNets[i];
-                Signal value = _pendingValues[i];
+                Signal value;
+                if (_sharedPending != null && _sharedPending[net])
+                {
+                    _sharedPending[net] = false;
+                    value = ResolveShared(net);
+                }
+                else
+                {
+                    value = _pendingValues[i];
+                }
+
                 Signal previous = _nets[net];
                 if (previous == value)
                 {
@@ -362,6 +485,45 @@ namespace DigitalLogicSandbox.Simulation.Context
             }
 
             _pendingCount = 0;
+        }
+
+        /// <summary>Resolves a shared bus from the last value of each of its drivers (see class remarks).</summary>
+        private Signal ResolveShared(int net)
+        {
+            bool high = false;
+            bool low = false;
+            bool unknown = false;
+            int[] slots = _circuit.NetSharedSlots;
+            int end = _circuit.NetSharedOffsets[net + 1];
+            for (int i = _circuit.NetSharedOffsets[net]; i < end; i++)
+            {
+                switch (_slots[slots[i]])
+                {
+                    case Signal.High:
+                        high = true;
+                        break;
+                    case Signal.Low:
+                        low = true;
+                        break;
+                    case Signal.Unknown:
+                        unknown = true;
+                        break;
+                }
+            }
+
+            bool contended = high && low;
+            if (contended != _contended[net])
+            {
+                _contended[net] = contended;
+                ContentionCount += contended ? 1 : -1;
+            }
+
+            if (unknown || contended)
+            {
+                return Signal.Unknown;
+            }
+
+            return high ? Signal.High : low ? Signal.Low : Signal.HighImpedance;
         }
 
         private void ScheduleReaders(int net)
@@ -401,6 +563,11 @@ namespace DigitalLogicSandbox.Simulation.Context
                 int gate = _unstableGates[i];
                 for (int o = _circuit.GateOutputOffsets[gate]; o < _circuit.GateOutputOffsets[gate + 1]; o++)
                 {
+                    if (_slots != null)
+                    {
+                        _slots[o] = Signal.Unknown;
+                    }
+
                     SetSourceNet(outputNets[o], Signal.Unknown);
                 }
             }
@@ -428,6 +595,11 @@ namespace DigitalLogicSandbox.Simulation.Context
                 {
                     _unstableGates.Add(gate);
                 }
+            }
+
+            if (_sharedPending != null)
+            {
+                Array.Clear(_sharedPending, 0, _sharedPending.Length);
             }
 
             _pendingCount = 0;

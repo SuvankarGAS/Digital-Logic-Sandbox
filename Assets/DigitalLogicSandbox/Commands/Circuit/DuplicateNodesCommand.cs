@@ -66,10 +66,12 @@ namespace DigitalLogicSandbox.Commands.Circuit
                 switch (source.Component.Kind)
                 {
                     case ComponentKind.InputBoundary:
-                        copy = _circuit.AddInputBoundary(BoundaryNames.NextName(_circuit, PortDirection.Input), position);
+                        copy = _circuit.AddInputBoundary(BoundaryNames.NextName(_circuit, PortDirection.Input), position,
+                            source.Component.Width);
                         break;
                     case ComponentKind.OutputBoundary:
-                        copy = _circuit.AddOutputBoundary(BoundaryNames.NextName(_circuit, PortDirection.Output), position);
+                        copy = _circuit.AddOutputBoundary(BoundaryNames.NextName(_circuit, PortDirection.Output), position,
+                            source.Component.Width);
                         break;
                     default:
                         copy = _circuit.AddNode(source.Component, position, source.Rotation, source.Label);

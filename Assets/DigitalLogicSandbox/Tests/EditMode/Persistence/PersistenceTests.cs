@@ -73,7 +73,7 @@ namespace DigitalLogicSandbox.Tests.EditMode.PersistenceTests
         {
             var document = new ProjectDocument { Name = "Test", RootCircuit = root };
             document.Definitions.AddRange(_env.Library.AllVersions);
-            document.InputValues[root.Inputs[0].Id] = Signal.High;
+            document.InputValues[root.Inputs[0].Id] = 1UL;
             document.Settings.GridVisible = false;
             document.Settings.SnapToGrid = false;
             document.Settings.VisualizationMode = "HighContrast";
@@ -220,7 +220,7 @@ namespace DigitalLogicSandbox.Tests.EditMode.PersistenceTests
             Assert.That(settings.Camera.HasValue, Is.True);
             Assert.That(settings.Camera.X, Is.EqualTo(3.5f));
             Assert.That(settings.Camera.Size, Is.EqualTo(14f));
-            Assert.That(document.InputValues[root.Inputs[0].Id], Is.EqualTo(Signal.High));
+            Assert.That(document.InputValues[root.Inputs[0].Id], Is.EqualTo(1UL));
             Assert.That(document.InputValues.Count, Is.EqualTo(1));
         }
 

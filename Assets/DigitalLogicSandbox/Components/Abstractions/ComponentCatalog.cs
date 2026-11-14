@@ -1,4 +1,5 @@
 using System;
+using DigitalLogicSandbox.Components.BuiltIn;
 using DigitalLogicSandbox.Core.Circuit;
 using DigitalLogicSandbox.Core.Nodes;
 using DigitalLogicSandbox.Core.Ports;
@@ -46,17 +47,10 @@ namespace DigitalLogicSandbox.Components.Abstractions
 
                     break;
 
-                case ComponentKind.InputBoundary:
-                    signature = BoundarySignatures.Input;
-                    return true;
-
-                case ComponentKind.OutputBoundary:
-                    signature = BoundarySignatures.Output;
-                    return true;
-
-                case ComponentKind.Clock:
-                    signature = BoundarySignatures.Clock;
-                    return true;
+                default:
+                    // Boundaries, clock and bus wiring: fixed layouts parameterised by width/arity.
+                    signature = BoundarySignatures.ForUtility(component);
+                    return signature != null;
             }
 
             signature = null;
@@ -68,6 +62,13 @@ namespace DigitalLogicSandbox.Components.Abstractions
             if (component.Kind == ComponentKind.Primitive)
             {
                 return _primitives.TryGet(component.PrimitiveId, out primitive);
+            }
+
+            if (component.Kind == ComponentKind.TriState)
+            {
+                // Evaluated bit by bit; the compiler slices bus pins into one evaluator per bit.
+                primitive = TriStateBuffer.Instance;
+                return true;
             }
 
             primitive = null;

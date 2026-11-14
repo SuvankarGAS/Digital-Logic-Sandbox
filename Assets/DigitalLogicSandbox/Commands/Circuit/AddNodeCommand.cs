@@ -44,10 +44,12 @@ namespace DigitalLogicSandbox.Commands.Circuit
             switch (_component.Kind)
             {
                 case ComponentKind.InputBoundary:
-                    node = _circuit.AddInputBoundary(_boundaryName ?? BoundaryNames.NextInputName(_circuit), _position);
+                    node = _circuit.AddInputBoundary(_boundaryName ?? BoundaryNames.NextInputName(_circuit), _position,
+                        _component.Width);
                     break;
                 case ComponentKind.OutputBoundary:
-                    node = _circuit.AddOutputBoundary(_boundaryName ?? BoundaryNames.NextOutputName(_circuit), _position);
+                    node = _circuit.AddOutputBoundary(_boundaryName ?? BoundaryNames.NextOutputName(_circuit), _position,
+                        _component.Width);
                     break;
                 default:
                     node = _circuit.AddNode(_component, _position, _rotation);

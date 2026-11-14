@@ -43,14 +43,14 @@ namespace DigitalLogicSandbox.TruthTable.Generation
             for (int i = 0; i < signature.InputCount; i++)
             {
                 PortDescriptor pin = signature.Inputs[i];
-                NodeDefinition boundary = harness.AddInputBoundary(pin.Name, new CircuitPoint(0f, -i * 2f));
+                NodeDefinition boundary = harness.AddInputBoundary(pin.Name, new CircuitPoint(0f, -i * 2f), pin.Width);
                 harness.Connect(new PinRef(boundary.Id, BoundarySignatures.Pin), new PinRef(node.Id, pin.Id));
             }
 
             for (int i = 0; i < signature.OutputCount; i++)
             {
                 PortDescriptor pin = signature.Outputs[i];
-                NodeDefinition boundary = harness.AddOutputBoundary(pin.Name, new CircuitPoint(8f, -i * 2f));
+                NodeDefinition boundary = harness.AddOutputBoundary(pin.Name, new CircuitPoint(8f, -i * 2f), pin.Width);
                 harness.Connect(new PinRef(node.Id, pin.Id), new PinRef(boundary.Id, BoundarySignatures.Pin));
             }
 

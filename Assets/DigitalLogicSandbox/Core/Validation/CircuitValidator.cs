@@ -180,6 +180,19 @@ namespace DigitalLogicSandbox.Core.Validation
                         ", which is not an input of node " + connection.Destination.Node + ".",
                         connection.Destination.Node, connection.Destination));
                 }
+                else if (sourceSignature != null && destinationSignature != null &&
+                         sourceSignature.HasOutput(connection.Source.Port))
+                {
+                    int sourceWidth = ConnectionRules.WidthOf(sourceSignature.Outputs, connection.Source.Port);
+                    int destinationWidth = ConnectionRules.WidthOf(destinationSignature.Inputs, connection.Destination.Port);
+                    if (sourceWidth != destinationWidth)
+                    {
+                        report.Add(new Diagnostic(DiagnosticSeverity.Error, DiagnosticCode.WidthMismatch,
+                            "Connection " + connection + " joins a " + sourceWidth + "-bit output to a " +
+                            destinationWidth + "-bit input. Use a splitter or merger to change width.",
+                            connection.Destination.Node, connection.Destination));
+                    }
+                }
             }
         }
 

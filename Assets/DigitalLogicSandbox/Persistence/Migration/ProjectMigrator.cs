@@ -64,6 +64,7 @@ namespace DigitalLogicSandbox.Persistence.Migration
             return new ProjectMigrator(ProjectFormat.CurrentSchemaVersion, new IProjectMigration[]
             {
                 new AddSimulationSettingsMigration(),
+                new AddBusSupportMigration(),
             });
         }
 

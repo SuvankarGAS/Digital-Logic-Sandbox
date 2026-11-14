@@ -22,8 +22,11 @@ namespace DigitalLogicSandbox.Persistence
         /// <summary>Published custom gate versions, in publication order (dependencies before dependents).</summary>
         public List<CircuitDefinition> Definitions { get; } = new List<CircuitDefinition>();
 
-        /// <summary>Values of the main circuit's input switches by interface port.</summary>
-        public Dictionary<PortId, Signal> InputValues { get; } = new Dictionary<PortId, Signal>();
+        /// <summary>
+        /// Values of the main circuit's input switches by interface port: 0/1 for single-bit inputs, the unsigned
+        /// value (bit 0 = least significant) for bus inputs.
+        /// </summary>
+        public Dictionary<PortId, ulong> InputValues { get; } = new Dictionary<PortId, ulong>();
 
         public ProjectSettingsData Settings { get; set; } = new ProjectSettingsData();
 

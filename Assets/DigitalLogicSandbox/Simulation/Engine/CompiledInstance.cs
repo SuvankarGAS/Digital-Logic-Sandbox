@@ -14,7 +14,8 @@ namespace DigitalLogicSandbox.Simulation.Engine
     public sealed class CompiledInstance
     {
         private readonly Dictionary<NodeId, CompiledInstance> _children = new Dictionary<NodeId, CompiledInstance>();
-        private Dictionary<PinRef, int> _outputPinNets = new Dictionary<PinRef, int>();
+        // One net per bit of each output pin (bit 0 first). Single-bit pins hold one-element arrays.
+        private Dictionary<PinRef, int[]> _outputPinNets = new Dictionary<PinRef, int[]>();
 
         internal CompiledInstance(CircuitDefinition definition, CompiledInstance parent, NodeId nodeInParent)
         {
@@ -43,25 +44,56 @@ namespace DigitalLogicSandbox.Simulation.Engine
             return _children.TryGetValue(node, out child);
         }
 
-        /// <summary>Net driven by an output pin of a node in this scope (including input-boundary pins).</summary>
+        /// <summary>
+        /// Net driven by an output pin of a node in this scope (including input-boundary pins). For a bus pin this
+        /// is bit 0; use the overload with a bit index or <see cref="GetOutputPinWidth"/> for the others.
+        /// </summary>
         public bool TryGetOutputPinNet(PinRef outputPin, out int net)
         {
-            return _outputPinNets.TryGetValue(outputPin, out net);
+            return TryGetOutputPinNet(outputPin, 0, out net);
+        }
+
+        /// <summary>Net carrying bit <paramref name="bit"/> of an output pin in this scope.</summary>
+        public bool TryGetOutputPinNet(PinRef outputPin, int bit, out int net)
+        {
+            if (_outputPinNets.TryGetValue(outputPin, out int[] nets) && bit >= 0 && bit < nets.Length)
+            {
+                net = nets[bit];
+                return true;
+            }
+
+            net = CompiledCircuit.FloatingNet;
+            return false;
+        }
+
+        /// <summary>Bits of an output pin in this scope (0 when the pin is unknown).</summary>
+        public int GetOutputPinWidth(PinRef outputPin)
+        {
+            return _outputPinNets.TryGetValue(outputPin, out int[] nets) ? nets.Length : 0;
         }
 
         /// <summary>
-        /// Net read by an input pin of a node in this scope: the net of whatever drives it, or the floating
-        /// (constant LOW) net when unconnected.
+        /// Net read by bit <paramref name="bit"/> of an input pin of a node in this scope: the net of whatever
+        /// drives it, or the floating (constant LOW) net when unconnected.
         /// </summary>
-        public int GetInputPinNet(PinRef inputPin)
+        public int GetInputPinNet(PinRef inputPin, int bit = 0)
         {
             if (Definition.TryGetConnectionTo(inputPin, out ConnectionDefinition connection) &&
-                _outputPinNets.TryGetValue(connection.Source, out int net))
+                _outputPinNets.TryGetValue(connection.Source, out int[] nets) && bit >= 0 && bit < nets.Length)
             {
-                return net;
+                return nets[bit];
             }
 
             return CompiledCircuit.FloatingNet;
+        }
+
+        /// <summary>Bits delivered to an input pin by its driver (1 when unconnected).</summary>
+        public int GetInputPinWidth(PinRef inputPin)
+        {
+            return Definition.TryGetConnectionTo(inputPin, out ConnectionDefinition connection) &&
+                   _outputPinNets.TryGetValue(connection.Source, out int[] nets)
+                ? nets.Length
+                : 1;
         }
 
         /// <summary>
@@ -108,18 +140,31 @@ namespace DigitalLogicSandbox.Simulation.Engine
             _children.Add(node, child);
         }
 
-        internal void SetRawOutputPinNet(PinRef pin, int rawNet)
+        internal void SetRawOutputPinNets(PinRef pin, int[] rawNets)
         {
-            _outputPinNets[pin] = rawNet;
+            _outputPinNets[pin] = rawNets;
+        }
+
+        /// <summary>Raw nets of an output pin during compilation (null when unknown).</summary>
+        internal int[] GetRawOutputPinNets(PinRef pin)
+        {
+            return _outputPinNets.TryGetValue(pin, out int[] nets) ? nets : null;
         }
 
         /// <summary>Rewrites raw (pre-union) net ids to compacted net indices after compilation.</summary>
         internal void RemapNets(int[] rawToDense)
         {
-            var remapped = new Dictionary<PinRef, int>(_outputPinNets.Count);
-            foreach (KeyValuePair<PinRef, int> pair in _outputPinNets)
+            var remapped = new Dictionary<PinRef, int[]>(_outputPinNets.Count);
+            foreach (KeyValuePair<PinRef, int[]> pair in _outputPinNets)
             {
-                remapped.Add(pair.Key, rawToDense[pair.Value]);
+                int[] raw = pair.Value;
+                var dense = new int[raw.Length];
+                for (int i = 0; i < raw.Length; i++)
+                {
+                    dense[i] = rawToDense[raw[i]];
+                }
+
+                remapped.Add(pair.Key, dense);
             }
 
             _outputPinNets = remapped;

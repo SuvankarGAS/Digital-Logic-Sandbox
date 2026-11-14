@@ -26,6 +26,19 @@ namespace DigitalLogicSandbox.UI.Panels
         private readonly List<LibraryItemView> _customItems = new List<LibraryItemView>();
         private readonly List<GameObject> _customHeaders = new List<GameObject>();
         private readonly List<CircuitDefinition> _scratchDefinitions = new List<CircuitDefinition>();
+        private readonly List<LibraryItemView> _busItems = new List<LibraryItemView>();
+
+        /// <summary>Default bit width of bus components placed from the library.</summary>
+        public const int DefaultBusWidth = 4;
+
+        /// <summary>Default number of drivers of a bus join placed from the library.</summary>
+        public const int DefaultJoinInputs = 2;
+
+        private RectTransform _busRoot;
+        private TMP_InputField _busWidthField;
+        private TMP_InputField _joinInputsField;
+        private int _busWidth = DefaultBusWidth;
+        private int _joinInputs = DefaultJoinInputs;
 
         private UiFactory _ui;
         private WorkspaceController _workspace;
@@ -40,6 +53,26 @@ namespace DigitalLogicSandbox.UI.Panels
         public IReadOnlyList<LibraryItemView> Items => _items;
 
         public TMP_InputField SearchField => _search;
+
+        /// <summary>Bit width used by the bus entries (Bus Input/Output, Splitter, Merger, Bus Join, Tri-state).</summary>
+        public int BusWidth => _busWidth;
+
+        public int JoinInputs => _joinInputs;
+
+        public TMP_InputField BusWidthField => _busWidthField;
+
+        /// <summary>
+        /// Sets the width (and bus join input count) of the bus entries; values are clamped to the supported range
+        /// and the entries are rebuilt so dragging places the new size.
+        /// </summary>
+        public void SetBusParameters(int width, int joinInputs)
+        {
+            _busWidth = Mathf.Clamp(width, 2, PortDescriptor.MaxWidth);
+            _joinInputs = Mathf.Clamp(joinInputs, 2, ComponentRef.MaxBusJoinInputs);
+            _busWidthField?.SetTextWithoutNotify(_busWidth.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            _joinInputsField?.SetTextWithoutNotify(_joinInputs.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            RebuildBusItems();
+        }
 
         /// <summary>Right-click on an entry (screen position). The shell shows the entry context menu.</summary>
         public event Action<PlacementRequest, Vector2> ItemContextRequested;
@@ -173,6 +206,23 @@ namespace DigitalLogicSandbox.UI.Panels
             AddItem(_content, new PlacementRequest(ComponentRef.OutputBoundary, "Output"), "Output", "indicator");
             AddItem(_content, new PlacementRequest(ComponentRef.Clock, "Clock"), "Clock", "global clock signal");
 
+            Section("Buses");
+            _busWidthField = _ui.FieldRow(_content, "Bus width",
+                _busWidth.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                text => SetBusParameters(ParseOr(text, _busWidth), _joinInputs));
+            _busWidthField.contentType = TMP_InputField.ContentType.IntegerNumber;
+            _joinInputsField = _ui.FieldRow(_content, "Join inputs",
+                _joinInputs.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                text => SetBusParameters(_busWidth, ParseOr(text, _joinInputs)));
+            _joinInputsField.contentType = TMP_InputField.ContentType.IntegerNumber;
+            _busRoot = UiFactory.CreateRect("Bus Components", _content);
+            var busLayout = _busRoot.gameObject.AddComponent<VerticalLayoutGroup>();
+            busLayout.spacing = 4f;
+            busLayout.childControlWidth = true;
+            busLayout.childControlHeight = true;
+            busLayout.childForceExpandHeight = false;
+            RebuildBusItems();
+
             Section("My Custom Gates");
             _customRoot = UiFactory.CreateRect("Custom Gates", _content);
             var customLayout = _customRoot.gameObject.AddComponent<VerticalLayoutGroup>();
@@ -187,6 +237,45 @@ namespace DigitalLogicSandbox.UI.Panels
             _customEmpty.gameObject.AddComponent<LayoutElement>().preferredHeight = 40f;
 
             RefreshCustomGates();
+        }
+
+        private void RebuildBusItems()
+        {
+            if (_busRoot == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < _busItems.Count; i++)
+            {
+                _items.Remove(_busItems[i]);
+                Destroy(_busItems[i].gameObject);
+            }
+
+            _busItems.Clear();
+            string bits = _busWidth.ToString(System.Globalization.CultureInfo.InvariantCulture) + "-bit";
+            AddBusItem(ComponentRef.InputBus(_busWidth), "Bus Input", bits + " switches");
+            AddBusItem(ComponentRef.OutputBus(_busWidth), "Bus Output", bits + " display");
+            AddBusItem(ComponentRef.Splitter(_busWidth), "Splitter", bits + " bus to single bits");
+            AddBusItem(ComponentRef.Merger(_busWidth), "Merger", "single bits to " + bits + " bus");
+            AddBusItem(ComponentRef.BusJoin(_busWidth, _joinInputs), "Bus Join",
+                _joinInputs + " drivers onto one " + bits + " bus");
+            AddBusItem(ComponentRef.TriState(_busWidth), "Tri-state", bits + " driver with enable");
+            AddBusItem(ComponentRef.TriState(1), "Tri-state (1-bit)", "driver with enable");
+            SetFilter(_filter);
+        }
+
+        private void AddBusItem(ComponentRef component, string title, string detail)
+        {
+            LibraryItemView item = AddItem(_busRoot, new PlacementRequest(component, title), title, detail, null,
+                "bus wiring");
+            _busItems.Add(item);
+        }
+
+        private static int ParseOr(string text, int fallback)
+        {
+            return int.TryParse(text, System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out int value) ? value : fallback;
         }
 
         private LibraryItemView AddItem(Transform parent, PlacementRequest request, string title, string detail,

@@ -256,7 +256,7 @@ namespace DigitalLogicSandbox.GateLibrary.Packaging
                 source.TryGetBoundaryNode(ports[i].SourcePort, out NodeId nodeId);
                 NodeDefinition node = source.GetNode(nodeId);
                 definition.RestoreBoundary(node.Id, ports[i].SourcePort, direction, ports[i].Name?.Trim() ?? string.Empty,
-                    node.Position, node.Rotation, node.Label);
+                    node.Position, node.Rotation, node.Label, -1, node.Component.Width);
             }
         }
 

@@ -307,12 +307,32 @@ namespace DigitalLogicSandbox.UI.Inspector
                 field.interactable = _workspace.IsEditable;
                 int index = input ? circuit.IndexOfInput(node.InterfacePort) : circuit.IndexOfOutput(node.InterfacePort);
                 _ui.Property(_content, "Order", (index + 1) + " of " + (input ? circuit.Inputs.Count : circuit.Outputs.Count));
+                if (node.Component.Width > 1)
+                {
+                    _ui.Property(_content, "Width", node.Component.Width + " bits (bit 0 = LSB)");
+                }
+
                 _liveValues.Add(LiveValue.ForBoundary(_ui.Property(_content, "Value", "0"), node.Id, input));
+                if (input && node.Component.Width > 1 && _workspace.CanToggleInputs)
+                {
+                    TMP_InputField value = _ui.FieldRow(_content, "Set value", string.Empty, text =>
+                    {
+                        if (ulong.TryParse(text.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out ulong parsed))
+                        {
+                            _workspace.SetInputValue(node.Id, parsed);
+                        }
+                    });
+                    value.contentType = TMP_InputField.ContentType.IntegerNumber;
+                }
             }
             else
             {
                 _ui.Property(_content, "Inputs", (signature?.Inputs.Count ?? 0).ToString(CultureInfo.InvariantCulture));
                 _ui.Property(_content, "Outputs", (signature?.Outputs.Count ?? 0).ToString(CultureInfo.InvariantCulture));
+                if (node.Component.Width > 1)
+                {
+                    _ui.Property(_content, "Width", node.Component.Width + " bits");
+                }
             }
 
             _ui.Property(_content, "Position", node.Position.X.ToString("0.##", CultureInfo.InvariantCulture) + ", " +
@@ -538,10 +558,17 @@ namespace DigitalLogicSandbox.UI.Inspector
                         continue;
                     }
 
-                    value = session.Runner.Context.GetNet(net);
+                    value = _workspace.Presenter.GetBusWireSignal(live.Wire) ?? session.Runner.Context.GetNet(net);
                 }
                 else
                 {
+                    if (session.GetBoundaryWidth(live.Node) > 1)
+                    {
+                        live.Text.text = session.FormatBoundaryValue(live.Node);
+                        live.Text.color = _ui.Theme.TextPrimary;
+                        continue;
+                    }
+
                     value = live.Input ? session.GetInputValue(live.Node) : session.GetOutputValue(live.Node);
                 }
 
@@ -613,6 +640,14 @@ namespace DigitalLogicSandbox.UI.Inspector
                     return "Circuit input";
                 case ComponentKind.Clock:
                     return "Clock (global)";
+                case ComponentKind.Splitter:
+                    return "Bus splitter";
+                case ComponentKind.Merger:
+                    return "Bus merger";
+                case ComponentKind.BusJoin:
+                    return "Bus join (" + component.Arity + " drivers)";
+                case ComponentKind.TriState:
+                    return "Tri-state driver";
                 default:
                     return "Circuit output";
             }

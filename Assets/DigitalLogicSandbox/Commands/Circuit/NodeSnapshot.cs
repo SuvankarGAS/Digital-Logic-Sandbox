@@ -63,7 +63,8 @@ namespace DigitalLogicSandbox.Commands.Circuit
         {
             if (Component.IsBoundary)
             {
-                circuit.RestoreBoundary(Id, Port, Direction, PortName, Position, Rotation, Label, PortIndex);
+                circuit.RestoreBoundary(Id, Port, Direction, PortName, Position, Rotation, Label, PortIndex,
+                    Component.Width);
             }
             else
             {

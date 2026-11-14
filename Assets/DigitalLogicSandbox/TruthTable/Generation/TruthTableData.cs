@@ -5,18 +5,64 @@ using DigitalLogicSandbox.Core.Signals;
 
 namespace DigitalLogicSandbox.TruthTable.Generation
 {
-    /// <summary>One table column: an external port of the analysed circuit, in interface order.</summary>
+    /// <summary>
+    /// One table column: one bit of an external port of the analysed circuit. Single-bit ports give one column
+    /// named after the port; a bus port gives one column per bit, most significant first, named "A[3]".."A[0]".
+    /// </summary>
     public readonly struct TruthTableColumn
     {
         public TruthTableColumn(PortId port, string name)
+            : this(port, name, 0, -1)
+        {
+        }
+
+        /// <param name="index">Flattened interface index of this bit in the compiled circuit (-1: unknown).</param>
+        public TruthTableColumn(PortId port, string name, int bit, int index)
         {
             Port = port;
             Name = string.IsNullOrEmpty(name) ? port.ToString() : name;
+            Bit = bit;
+            Index = index;
         }
 
         public PortId Port { get; }
 
         public string Name { get; }
+
+        /// <summary>Bit of <see cref="Port"/> this column shows (0 = least significant).</summary>
+        public int Bit { get; }
+
+        /// <summary>Flattened interface index of the bit (see <c>CompiledCircuit.InputCount</c>).</summary>
+        public int Index { get; }
+
+        /// <summary>Columns for an interface (inputs or outputs), bits of a bus most significant first.</summary>
+        public static TruthTableColumn[] FromPorts(IReadOnlyList<InterfacePort> ports)
+        {
+            int count = 0;
+            for (int i = 0; i < ports.Count; i++)
+            {
+                count += ports[i].Width;
+            }
+
+            var columns = new TruthTableColumn[count];
+            int column = 0;
+            int first = 0;
+            for (int i = 0; i < ports.Count; i++)
+            {
+                InterfacePort port = ports[i];
+                for (int b = port.Width - 1; b >= 0; b--)
+                {
+                    string name = port.Width == 1
+                        ? port.Name
+                        : port.Name + "[" + b.ToString(System.Globalization.CultureInfo.InvariantCulture) + "]";
+                    columns[column++] = new TruthTableColumn(port.Id, name, b, first + b);
+                }
+
+                first += port.Width;
+            }
+
+            return columns;
+        }
 
         public override string ToString()
         {

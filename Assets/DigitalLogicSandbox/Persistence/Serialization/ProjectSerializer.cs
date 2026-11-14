@@ -78,7 +78,7 @@ namespace DigitalLogicSandbox.Persistence.Serialization
             ports.Sort();
             for (int i = 0; i < ports.Count; i++)
             {
-                dto.InputValues.Add(new InputValueDto { Port = ports[i].Value, Value = document.InputValues[ports[i]].ToString() });
+                dto.InputValues.Add(new InputValueDto { Port = ports[i].Value, Value = FormatInputValue(document.InputValues[ports[i]]) });
             }
 
             JsonSerializer.Create(Settings).Serialize(writer, dto);
@@ -140,8 +140,26 @@ namespace DigitalLogicSandbox.Persistence.Serialization
                     case ComponentKind.Clock:
                         nodeDto.Kind = NodeDto.KindClock;
                         break;
+                    case ComponentKind.Splitter:
+                        nodeDto.Kind = NodeDto.KindSplitter;
+                        break;
+                    case ComponentKind.Merger:
+                        nodeDto.Kind = NodeDto.KindMerger;
+                        break;
+                    case ComponentKind.BusJoin:
+                        nodeDto.Kind = NodeDto.KindBusJoin;
+                        nodeDto.Arity = node.Component.Arity;
+                        break;
+                    case ComponentKind.TriState:
+                        nodeDto.Kind = NodeDto.KindTriState;
+                        break;
                     default:
                         throw new InvalidOperationException("Unknown component kind " + node.Component.Kind + ".");
+                }
+
+                if (node.Component.Width > 1)
+                {
+                    nodeDto.Width = node.Component.Width;
                 }
 
                 dto.Nodes.Add(nodeDto);
@@ -172,6 +190,26 @@ namespace DigitalLogicSandbox.Persistence.Serialization
             }
 
             return list;
+        }
+
+        /// <summary>Input switch value: "Low"/"High" for 0/1 (readable by older versions), else decimal.</summary>
+        internal static string FormatInputValue(ulong value)
+        {
+            return value == 0 ? nameof(Signal.Low)
+                : value == 1 ? nameof(Signal.High)
+                : value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        internal static bool TryParseInputValue(string text, out ulong value)
+        {
+            if (TryParseSignal(text, out Signal signal))
+            {
+                value = signal == Signal.High ? 1UL : 0UL;
+                return signal == Signal.High || signal == Signal.Low;
+            }
+
+            return ulong.TryParse(text, System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out value);
         }
 
         internal static bool TryParseSignal(string text, out Signal signal)

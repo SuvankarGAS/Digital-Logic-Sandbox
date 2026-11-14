@@ -15,6 +15,7 @@ namespace DigitalLogicSandbox.Simulation.Diagnostics
         /// </summary>
         public static void ReportLastSettle(SimulationContext context, ValidationReport report, int maxGates = 5)
         {
+            ReportContention(context, report);
             SettleResult result = context.LastResult;
             if (result.Status != SettleStatus.Oscillating)
             {
@@ -54,6 +55,50 @@ namespace DigitalLogicSandbox.Simulation.Diagnostics
             Core.Nodes.NodeId rootNode = instance.Parent == null ? node : instance.RootNode();
             report.Add(new Diagnostic(DiagnosticSeverity.Warning, DiagnosticCode.Oscillation, builder.ToString(),
                 rootNode));
+        }
+
+        /// <summary>
+        /// Adds a warning when shared buses are driven HIGH and LOW at the same time (bus contention), naming the
+        /// drivers of the first contended bus. No-op when no bus is contended.
+        /// </summary>
+        public static void ReportContention(SimulationContext context, ValidationReport report)
+        {
+            if (context.ContentionCount == 0)
+            {
+                return;
+            }
+
+            Engine.CompiledCircuit circuit = context.Circuit;
+            for (int net = 0; net < circuit.NetCount; net++)
+            {
+                if (!context.IsContended(net))
+                {
+                    continue;
+                }
+
+                int gate = circuit.NetDriverGate[net];
+                var builder = new StringBuilder();
+                builder.Append(context.ContentionCount).Append(context.ContentionCount == 1 ? " bus bit is" : " bus bits are")
+                    .Append(" driven HIGH and LOW at the same time (bus contention); the value is shown as unknown (X). ")
+                    .Append("Enable only one tri-state driver per bus. First contended bus has ")
+                    .Append(circuit.GetSharedDriverCount(net)).Append(" drivers");
+                if (gate >= 0)
+                {
+                    builder.Append(", e.g. ").Append(circuit.DescribeGate(gate));
+                }
+
+                builder.Append('.');
+                Core.Nodes.NodeId rootNode = default;
+                if (gate >= 0)
+                {
+                    circuit.GetGateOrigin(gate, out Engine.CompiledInstance instance, out Core.Nodes.NodeId node);
+                    rootNode = instance.Parent == null ? node : instance.RootNode();
+                }
+
+                report.Add(new Diagnostic(DiagnosticSeverity.Warning, DiagnosticCode.BusContention, builder.ToString(),
+                    rootNode));
+                return;
+            }
         }
     }
 }

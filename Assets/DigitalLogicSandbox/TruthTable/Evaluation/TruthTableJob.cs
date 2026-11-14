@@ -181,7 +181,7 @@ namespace DigitalLogicSandbox.TruthTable.Evaluation
             int inputCount = table.InputCount;
             for (int i = 0; i < inputCount; i++)
             {
-                _context.SetInput(i, TruthTableData.InputBit(row, i, inputCount) ? Signal.High : Signal.Low);
+                _context.SetInput(table.Inputs[i].Index, TruthTableData.InputBit(row, i, inputCount) ? Signal.High : Signal.Low);
             }
 
             SettleResult result = _context.Settle();
@@ -193,7 +193,7 @@ namespace DigitalLogicSandbox.TruthTable.Evaluation
 
             for (int o = 0; o < table.OutputCount; o++)
             {
-                table.SetOutput(row, o, _context.GetOutput(o));
+                table.SetOutput(row, o, _context.GetOutput(table.Outputs[o].Index));
             }
 
             table.CompletedRows = row + 1;

@@ -299,7 +299,7 @@ namespace DigitalLogicSandbox.App
                 PortId port = root.Inputs[i].Id;
                 if (root.TryGetBoundaryNode(port, out NodeId node))
                 {
-                    document.InputValues[port] = session.GetInputValue(node);
+                    document.InputValues[port] = session.GetInputBits(node);
                 }
             }
 
@@ -353,11 +353,11 @@ namespace DigitalLogicSandbox.App
                 // Power-on mode must be in place before the main circuit is compiled and powered on.
                 ApplySimulationSettings(document.Settings?.Simulation);
                 _workspace.LoadCircuit(document.RootCircuit);
-                foreach (KeyValuePair<PortId, Signal> input in document.InputValues)
+                foreach (KeyValuePair<PortId, ulong> input in document.InputValues)
                 {
                     if (document.RootCircuit.TryGetBoundaryNode(input.Key, out NodeId node))
                     {
-                        _workspace.SetInput(node, input.Value);
+                        _workspace.SetInputBits(node, input.Value);
                     }
                 }
 

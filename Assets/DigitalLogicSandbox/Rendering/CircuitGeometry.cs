@@ -166,6 +166,19 @@ namespace DigitalLogicSandbox.Rendering
             return GateLayout.Rotate(local, GetGate(node).Rotation);
         }
 
+        /// <summary>Bit width carried by the connection into <paramref name="destination"/> (its source pin's width).</summary>
+        public int GetConnectionWidth(PinRef destination)
+        {
+            if (Circuit == null || !Circuit.TryGetConnectionTo(destination, out ConnectionDefinition connection) ||
+                !Circuit.TryGetNode(connection.Source.Node, out NodeDefinition source) ||
+                !_catalog.TryGetSignature(source.Component, out ComponentSignature signature))
+            {
+                return 1;
+            }
+
+            return Core.Validation.ConnectionRules.WidthOf(signature.Outputs, connection.Source.Port);
+        }
+
         /// <summary>Title drawn on clock nodes.</summary>
         public const string ClockTitle = "CLK";
 
@@ -200,6 +213,13 @@ namespace DigitalLogicSandbox.Rendering
                     return "Input";
                 case ComponentKind.Clock:
                     return ClockTitle;
+                case ComponentKind.Splitter:
+                case ComponentKind.Merger:
+                    return string.Empty; // the shape and bit labels say it all
+                case ComponentKind.BusJoin:
+                    return "JOIN";
+                case ComponentKind.TriState:
+                    return "TRI";
                 default:
                     return "Output";
             }

@@ -337,8 +337,10 @@ namespace DigitalLogicSandbox.TruthTable.Generation
             }
 
             bool clocked = spec.PulseClock && circuit.HasClock;
-            var table = new SequenceTable(title ?? definition.Name, Columns(definition.Inputs),
-                Columns(definition.Outputs), clocked, spec.PowerOnState);
+            TruthTableColumn[] inputColumns = Columns(definition.Inputs);
+            TruthTableColumn[] outputColumns = Columns(definition.Outputs);
+            var table = new SequenceTable(title ?? definition.Name, inputColumns, outputColumns, clocked,
+                spec.PowerOnState);
 
             var options = new SimulationOptions
             {
@@ -350,7 +352,7 @@ namespace DigitalLogicSandbox.TruthTable.Generation
                 PowerOnState = spec.PowerOnState,
             };
             var context = new SimulationContext(circuit, options);
-            table.Add(new Signal[circuit.InputCount], ReadOutputs(context), context.LastResult.IsStable);
+            table.Add(new Signal[circuit.InputCount], ReadOutputs(context, outputColumns), context.LastResult.IsStable);
 
             int oscillations = context.LastResult.IsStable ? 0 : 1; // the power-on settle counts too
             for (int step = 0; step < spec.StepCount; step++)
@@ -358,7 +360,7 @@ namespace DigitalLogicSandbox.TruthTable.Generation
                 Signal[] inputs = spec.Steps[step];
                 for (int i = 0; i < inputs.Length; i++)
                 {
-                    context.SetInput(i, inputs[i]);
+                    context.SetInput(inputColumns[i].Index, inputs[i]);
                 }
 
                 bool stable = context.Settle().IsStable;
@@ -375,7 +377,7 @@ namespace DigitalLogicSandbox.TruthTable.Generation
                     oscillations++;
                 }
 
-                table.Add((Signal[])inputs.Clone(), ReadOutputs(context), stable);
+                table.Add((Signal[])inputs.Clone(), ReadOutputs(context, outputColumns), stable);
             }
 
             if (oscillations > 0)
@@ -388,12 +390,12 @@ namespace DigitalLogicSandbox.TruthTable.Generation
             return table;
         }
 
-        private static Signal[] ReadOutputs(SimulationContext context)
+        private static Signal[] ReadOutputs(SimulationContext context, TruthTableColumn[] columns)
         {
-            var outputs = new Signal[context.Circuit.OutputCount];
+            var outputs = new Signal[columns.Length];
             for (int i = 0; i < outputs.Length; i++)
             {
-                outputs[i] = context.GetOutput(i);
+                outputs[i] = context.GetOutput(columns[i].Index);
             }
 
             return outputs;
@@ -401,13 +403,7 @@ namespace DigitalLogicSandbox.TruthTable.Generation
 
         private static TruthTableColumn[] Columns(IReadOnlyList<InterfacePort> ports)
         {
-            var columns = new TruthTableColumn[ports.Count];
-            for (int i = 0; i < ports.Count; i++)
-            {
-                columns[i] = new TruthTableColumn(ports[i].Id, ports[i].Name);
-            }
-
-            return columns;
+            return TruthTableColumn.FromPorts(ports);
         }
     }
 }

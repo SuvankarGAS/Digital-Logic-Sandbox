@@ -14,5 +14,8 @@ namespace DigitalLogicSandbox.Core.Connections
         InvalidSourcePort,
         InvalidDestinationPort,
         DestinationAlreadyDriven,
+
+        /// <summary>The pins carry different numbers of bits (e.g. a 4-bit bus into a 1-bit input).</summary>
+        WidthMismatch,
     }
 }
