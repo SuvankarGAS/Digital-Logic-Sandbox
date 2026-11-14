@@ -90,13 +90,52 @@ namespace DigitalLogicSandbox.CircuitEditor.CameraControl
             MoveTo(Vector2.zero, DefaultSize);
         }
 
-        /// <summary>Fits <paramref name="bounds"/> (world space) into the view with a margin.</summary>
+        /// <summary>Fits <paramref name="bounds"/> (world space) into the whole camera view with a margin.</summary>
         public void Frame(Rect bounds)
         {
-            float aspect = Mathf.Max(0.1f, _camera.aspect);
-            float size = Mathf.Max(bounds.height * 0.5f, bounds.width * 0.5f / aspect) * 1.2f + 1f;
-            MoveTo(bounds.center, size);
+            Frame(bounds, new Rect(0f, 0f, _camera.pixelWidth, _camera.pixelHeight));
         }
+
+        /// <summary>
+        /// Fits <paramref name="bounds"/> (world space) into <paramref name="viewport"/>, the part of the screen (in
+        /// pixels) that is not covered by panels, with a margin. Falls back to the whole view when the viewport is
+        /// degenerate.
+        /// </summary>
+        public void Frame(Rect bounds, Rect viewport)
+        {
+            ComputeFrame(bounds, viewport, _camera.pixelWidth, _camera.pixelHeight, out Vector2 center, out float size);
+            MoveTo(center, size);
+        }
+
+        /// <summary>Camera centre and orthographic size that fit world bounds into a screen viewport.</summary>
+        public static void ComputeFrame(Rect bounds, Rect viewport, int screenWidth, int screenHeight,
+            out Vector2 center, out float size)
+        {
+            screenWidth = Mathf.Max(1, screenWidth);
+            screenHeight = Mathf.Max(1, screenHeight);
+            var screen = new Rect(0f, 0f, screenWidth, screenHeight);
+            viewport = Rect.MinMaxRect(Mathf.Max(screen.xMin, viewport.xMin), Mathf.Max(screen.yMin, viewport.yMin),
+                Mathf.Min(screen.xMax, viewport.xMax), Mathf.Min(screen.yMax, viewport.yMax));
+            if (viewport.width < MinViewportPixels || viewport.height < MinViewportPixels)
+            {
+                viewport = screen;
+            }
+
+            // Margin: 20 % of the content plus one grid unit on each side.
+            float worldWidth = bounds.width * 1.2f + 2f;
+            float worldHeight = bounds.height * 1.2f + 2f;
+            size = 0.5f * Mathf.Max(worldHeight * screenHeight / viewport.height,
+                worldWidth * screenHeight / viewport.width);
+            size = ClampSize(size);
+
+            // Shift the camera so the content centre lands on the viewport centre rather than the screen centre.
+            float worldPerPixel = size * 2f / screenHeight;
+            Vector2 offsetPixels = viewport.center - screen.center;
+            center = bounds.center - offsetPixels * worldPerPixel;
+        }
+
+        /// <summary>Viewports smaller than this (pixels) are ignored when framing.</summary>
+        public const float MinViewportPixels = 64f;
 
         public void MoveTo(Vector2 center, float size)
         {

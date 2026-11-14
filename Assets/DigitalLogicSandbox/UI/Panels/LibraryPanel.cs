@@ -16,7 +16,7 @@ namespace DigitalLogicSandbox.UI.Panels
     /// <summary>
     /// Left panel: built-in gates (listed from the primitive registry, never hardcoded), circuit I/O boundaries,
     /// and the user's custom gates grouped by category. It refreshes automatically when a definition is published
-    /// and supports name search.
+    /// and supports search by name, category and description. Right-clicking an entry opens its context menu.
     /// </summary>
     public sealed class LibraryPanel : MonoBehaviour
     {
@@ -40,6 +40,9 @@ namespace DigitalLogicSandbox.UI.Panels
         public IReadOnlyList<LibraryItemView> Items => _items;
 
         public TMP_InputField SearchField => _search;
+
+        /// <summary>Right-click on an entry (screen position). The shell shows the entry context menu.</summary>
+        public event Action<PlacementRequest, Vector2> ItemContextRequested;
 
         public static LibraryPanel Create(Transform parent, UiFactory ui, WorkspaceController workspace,
             ComponentCatalog catalog, DefinitionLibrary library)
@@ -71,7 +74,7 @@ namespace DigitalLogicSandbox.UI.Panels
             return panel;
         }
 
-        /// <summary>Applies a search filter (case-insensitive substring on the gate name).</summary>
+        /// <summary>Applies a search filter (case-insensitive substring on name, and category/description of custom gates).</summary>
         public void SetFilter(string filter)
         {
             _filter = filter?.Trim() ?? string.Empty;
@@ -120,11 +123,11 @@ namespace DigitalLogicSandbox.UI.Panels
                 }
 
                 ComponentSignature signature = definition.GetSignature();
-                LibraryItemView item = LibraryItemView.Create(_customRoot, _ui, _workspace,
+                LibraryItemView item = AddItem(_customRoot,
                     new PlacementRequest(ComponentRef.Custom(definition.Reference), definition.Name),
-                    definition.Name, Describe(signature) + (definition.Version > 1 ? "  -  v" + definition.Version : string.Empty));
+                    definition.Name, Describe(signature) + (definition.Version > 1 ? "  -  v" + definition.Version : string.Empty),
+                    definition.Icon, category + " " + definition.Description);
                 _customItems.Add(item);
-                _items.Add(item);
             }
 
             SetFilter(_filter);
@@ -161,16 +164,13 @@ namespace DigitalLogicSandbox.UI.Panels
             for (int i = 0; i < primitives.Count; i++)
             {
                 IPrimitiveComponent primitive = primitives[i];
-                _items.Add(LibraryItemView.Create(_content, _ui, _workspace,
-                    new PlacementRequest(ComponentRef.Primitive(primitive.Id), primitive.DisplayName),
-                    primitive.DisplayName, Describe(primitive.Signature)));
+                AddItem(_content, new PlacementRequest(ComponentRef.Primitive(primitive.Id), primitive.DisplayName),
+                    primitive.DisplayName, Describe(primitive.Signature));
             }
 
             Section("Circuit I/O");
-            _items.Add(LibraryItemView.Create(_content, _ui, _workspace,
-                new PlacementRequest(ComponentRef.InputBoundary, "Input"), "Input", "switch"));
-            _items.Add(LibraryItemView.Create(_content, _ui, _workspace,
-                new PlacementRequest(ComponentRef.OutputBoundary, "Output"), "Output", "indicator"));
+            AddItem(_content, new PlacementRequest(ComponentRef.InputBoundary, "Input"), "Input", "switch");
+            AddItem(_content, new PlacementRequest(ComponentRef.OutputBoundary, "Output"), "Output", "indicator");
 
             Section("My Custom Gates");
             _customRoot = UiFactory.CreateRect("Custom Gates", _content);
@@ -186,6 +186,21 @@ namespace DigitalLogicSandbox.UI.Panels
             _customEmpty.gameObject.AddComponent<LayoutElement>().preferredHeight = 40f;
 
             RefreshCustomGates();
+        }
+
+        private LibraryItemView AddItem(Transform parent, PlacementRequest request, string title, string detail,
+            string icon = null, string searchExtra = null)
+        {
+            LibraryItemView item = LibraryItemView.Create(parent, _ui, _workspace, request, title, detail, icon,
+                searchExtra);
+            item.ContextRequested += OnItemContext;
+            _items.Add(item);
+            return item;
+        }
+
+        private void OnItemContext(LibraryItemView item, Vector2 screen)
+        {
+            ItemContextRequested?.Invoke(item.Request, screen);
         }
 
         private void Section(string title)

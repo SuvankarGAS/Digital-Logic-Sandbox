@@ -471,7 +471,23 @@ UI panels (toolbar, library) --> WorkspaceController --> CommandHistory --> Circ
 - **Placement.** Clicking a library item arms placement: a ghost follows the pointer, a click places it, and
   Shift keeps placing. Dragging an item places it on release. Positions snap to a 0.5-unit grid so pins align.
 - **Camera.** Drag and scroll apply immediately. Toolbar zoom/reset/frame use DOTween easing, which is killed
-  on direct manipulation and on destroy.
+  on direct manipulation and on destroy. Framing fits content into the screen area left between the docked
+  panels: the UI supplies it as `WorkspaceController.VisibleScreenArea`, and the math is the pure
+  `WorkspaceCamera.ComputeFrame`.
+- **Wire routing** *(Phase 9)*. `WireRouter` is purely visual and deterministic:
+  - Each pin has an outward normal that follows gate rotation (`CircuitGeometry.GetPinNormal`). The wire
+    leaves the source along its normal and enters the destination against it, with a 0.5-unit stub at
+    each end.
+  - Between the stubs, the router scores a fixed set of orthogonal candidates: L shapes, Z shapes through
+    a free column or row, and five-segment detours. Free coordinates are the midpoint, the outer edges of
+    each endpoint body, the outer edges of both bodies together, and the gap between them.
+  - The cost is length plus bends. Entering an endpoint gate's body, or doubling back over a stub, carries
+    a large penalty.
+  - Scratch buffers are static, so routing allocates nothing.
+  - Only the two endpoint gates are obstacles. Avoiding all gates (A* on a grid) can be added behind the
+    same API, because routes are cached per wire and recomputed only when an endpoint moves.
+- **Diagnostics.** `CircuitPresenter.WireRerouteCount` / `NetSignalUpdateCount` let tests and profiling
+  confirm that only affected views are touched.
 
 ## 13. Extension points
 

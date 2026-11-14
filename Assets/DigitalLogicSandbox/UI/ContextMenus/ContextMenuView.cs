@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using DigitalLogicSandbox.CircuitEditor.Placement;
 using DigitalLogicSandbox.CircuitEditor.Workspace;
 using DigitalLogicSandbox.Core.Circuit;
 using DigitalLogicSandbox.Core.Connections;
@@ -37,6 +38,9 @@ namespace DigitalLogicSandbox.UI.ContextMenus
 
         /// <summary>"Truth Table" on a gate.</summary>
         public event Action<NodeId> NodeTruthTableRequested;
+
+        /// <summary>"Truth Table" on a library entry (a component with no instance in the circuit).</summary>
+        public event Action<ComponentRef, string> ComponentTruthTableRequested;
 
         public bool IsOpen => gameObject.activeSelf;
 
@@ -134,6 +138,26 @@ namespace DigitalLogicSandbox.UI.ContextMenus
             gameObject.SetActive(true);
             transform.SetAsLastSibling();
             Position(request.Screen);
+        }
+
+        /// <summary>Menu for a gate library entry: place it, or show its truth table.</summary>
+        public void ShowForLibraryEntry(Vector2 screen, PlacementRequest request)
+        {
+            UiFactory.DestroyChildren(_menu);
+            _labels.Clear();
+            _buttons.Clear();
+            bool canPlace = _workspace.Circuit != null && _workspace.IsEditable;
+            Add("Place", () => _workspace.BeginPlacement(request, fromDrag: false), canPlace);
+            if (!request.Component.IsBoundary)
+            {
+                ComponentRef component = request.Component;
+                string name = request.DisplayName;
+                Add("Truth Table", () => ComponentTruthTableRequested?.Invoke(component, name), true);
+            }
+
+            gameObject.SetActive(true);
+            transform.SetAsLastSibling();
+            Position(screen);
         }
 
         public void Close()

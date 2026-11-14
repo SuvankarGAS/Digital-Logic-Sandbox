@@ -244,7 +244,7 @@ namespace DigitalLogicSandbox.Tests.PlayMode
             bool listed = false;
             foreach (LibraryItemView item in app.Shell.Library.Items)
             {
-                listed |= item.Request.Component.Kind == ComponentKind.Custom && item.SearchText == "BUFFER-NOT";
+                listed |= item.Request.Component.Kind == ComponentKind.Custom && item.Title == "BUFFER-NOT";
             }
 
             Assert.That(listed, Is.True, "The library panel updates automatically.");

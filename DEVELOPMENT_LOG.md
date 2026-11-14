@@ -13,7 +13,7 @@
 | 6 | Animated signal visualization | ✅ Complete (2026-11-14) |
 | 7 | Truth table generator | ✅ Complete (2026-11-14) |
 | 8 | Persistence & undo/redo | ✅ Complete (2026-11-14) |
-| 9 | Polish & optimization | ⏳ Next |
+| 9 | Polish & optimization | ✅ Complete (2026-11-14) |
 
 ---
 
@@ -690,3 +690,80 @@ Delivered – see the Phase 3 section below.
 - An unsaved draft of a gate being edited is not part of the saved project until Save Version. Saving shows
   a reminder.
 - Autosave runs on the main thread. Projects are small JSON files, so this is fine; profile in Phase 9.
+
+---
+
+## Phase 9 – Polish and optimization (2026-11-14)
+
+### Implemented
+- **Wire routing** (`Rendering/Wires/WireRouter`):
+  - Routing follows pin direction, so rotated gates get wires that leave and enter on the correct side.
+    Before, every output was assumed to face right.
+  - Detours avoid both endpoint gate bodies. Candidates are L, Z and five-segment shapes, scored by length
+    and bends, with penalties for crossing a body or doubling back.
+  - Facing, aligned pins still get a straight wire.
+  - Allocation-free: tested with 1 000 routes and zero bytes allocated.
+  - The preview wire uses the same router. The snapped target pin's side and body are used.
+- **Framing respects the panels:**
+  - `WorkspaceCamera.Frame(bounds, viewport)` and `ComputeFrame` centre content in the uncovered area.
+  - `AppShell.GetWorkspaceScreenRect` measures the library, inspector, toolbar, breadcrumbs and status bar.
+  - This fixes the Phase 5 known issue: content no longer sits under the inspector.
+- **Library polish:**
+  - The custom gate icon (up to 4 characters) is shown as a badge on library entries and before the pin
+    summary on gate bodies.
+  - Search also matches category and description.
+  - Right-clicking a library entry opens a context menu with Place and Truth Table. Truth tables are now
+    available straight from the library (Phase 7 known issue).
+- **Diagnostics:** `CircuitPresenter.WireRerouteCount` and `NetSignalUpdateCount`, with `ResetDiagnostics()`.
+
+### Profiling results (editor, this machine)
+- Simulation, 5 000 random gates: compile 9 ms; 64 toggles in 9 ms, about 54 evaluations per toggle.
+- Workspace, 2 040 nodes and 2 020 wires:
+  - First frame (compile and build all views): about 1.2 s.
+  - Toggle one input: 13 ms, with exactly 100 evaluations (one chain). Only that chain's nets are pushed to
+    views.
+  - Move one gate: 10 ms, and exactly 2 wires are rerouted.
+- Persistence, 2 140 nodes and 2 220 connections (620 KiB):
+  - Serialize: 33 ms.
+  - Atomic save: 37 ms.
+  - Load: 113 ms.
+  - Main-thread autosave is therefore acceptable (Phase 8 known issue closed). No threading was introduced,
+    as the guidelines require profiling evidence first.
+
+### Decisions
+- **Endpoint-aware routing instead of global A\*.**
+  - It fixes the visible defects (rotated pins, wires through their own gates) at constant cost per wire.
+  - Global obstacle avoidance would make each route depend on every gate. Moving one gate would then
+    invalidate unrelated wires.
+- **Icons are short text, not images.** No asset pipeline is needed. Icons serialize as plain strings, and
+  they render with the existing TMP font.
+
+### Test results
+- EditMode: **290 / 290 passed** (7 new):
+  - Router: rotated source, avoiding both bodies, straight line between facing pins, zero allocations.
+  - Camera framing: viewport centring; a degenerate viewport is ignored.
+  - Large-project persistence profiling.
+- PlayMode: **50 / 50 passed** (2 new):
+  - `WorkspacePerformanceTests`: thousands of gates; checks evaluation counts, net updates, reroutes and
+    that no views are created on toggle.
+  - `AcceptanceWorkflowTests`: the section 20 workflow end to end in the Main scene.
+    - Build NAND, toggle the inputs and check animation.
+    - Generate the truth table and check the live state is unchanged.
+    - Package NAND through the dialog, then reuse and inspect it with breadcrumbs.
+    - Build OR from three NANDs, package it and generate its truth table.
+    - Save, start a new project and reopen; check the two-level hierarchy and that settings are restored.
+- Manual: play-mode screenshots.
+  - A rotated NOT, with its input entering from the top.
+  - A backward wire routed around both bodies.
+  - The icon badge in the library and on the gate.
+  - Framing centred between the panels.
+
+### Known issues / deferred
+- Wires avoid only their own endpoint gates, not third-party gates in between.
+- Opening a custom gate from the library without an instance is still not offered. Place an instance, or
+  use the library Truth Table.
+- `com.coplaydev.unity-mcp` still tracks `#main`. It is development tooling; pin or remove it before
+  release builds.
+- `ProjectSettings/EditorSettings.asset` has an uncommitted local change: Enter Play Mode Options was
+  turned on with domain and scene reload disabled. Its origin is unknown, so it was left out of the commits.
+

@@ -89,6 +89,7 @@ namespace DigitalLogicSandbox.UI
             shell.TruthTable = TruthTableDialog.Create(go.transform, shell.Factory, workspace, truthTableLimits);
             shell.Confirm = ConfirmDialog.Create(go.transform, shell.Factory, workspace);
             shell._workspace = workspace;
+            workspace.VisibleScreenArea = shell.GetWorkspaceScreenRect;
             shell.AttachProjects(projects);
 
             shell.Toolbar.SignalSettingsRequested += shell.SignalSettings.Toggle;
@@ -102,6 +103,8 @@ namespace DigitalLogicSandbox.UI
             shell.ContextMenu.CircuitTruthTableRequested += shell.TruthTable.OpenForCurrentCircuit;
             shell.Inspector.NodeTruthTableRequested += node => shell.TruthTable.OpenForNode(node);
             shell.ContextMenu.NodeTruthTableRequested += node => shell.TruthTable.OpenForNode(node);
+            shell.ContextMenu.ComponentTruthTableRequested += (component, _) => shell.TruthTable.OpenForComponent(component);
+            shell.Library.ItemContextRequested += (request, screen) => shell.ContextMenu.ShowForLibraryEntry(screen, request);
             return shell;
         }
 
@@ -255,6 +258,59 @@ namespace DigitalLogicSandbox.UI
         }
 
         /// <summary>True while the pointer is over any UI element that blocks raycasts.</summary>
+        /// <summary>
+        /// Screen-pixel rect of the workspace between the docked panels (library, inspector, toolbar, breadcrumbs,
+        /// status bar). Hidden panels do not reduce it.
+        /// </summary>
+        public Rect GetWorkspaceScreenRect()
+        {
+            float left = 0f;
+            float right = Screen.width;
+            float bottom = 0f;
+            float top = Screen.height;
+            if (Library != null && IsShown(Library))
+            {
+                left = Mathf.Max(left, ScreenRectOf(Library.transform).xMax);
+            }
+
+            if (Inspector != null && IsShown(Inspector))
+            {
+                right = Mathf.Min(right, ScreenRectOf(Inspector.transform).xMin);
+            }
+
+            if (Toolbar != null && IsShown(Toolbar))
+            {
+                top = Mathf.Min(top, ScreenRectOf(Toolbar.transform).yMin);
+            }
+
+            if (NavigationBar != null && IsShown(NavigationBar))
+            {
+                top = Mathf.Min(top, ScreenRectOf(NavigationBar.transform).yMin);
+            }
+
+            if (StatusBar != null && IsShown(StatusBar))
+            {
+                bottom = Mathf.Max(bottom, ScreenRectOf(StatusBar.transform).yMax);
+            }
+
+            return Rect.MinMaxRect(left, bottom, Mathf.Max(left, right), Mathf.Max(bottom, top));
+        }
+
+        private static bool IsShown(Component panel)
+        {
+            return panel.gameObject.activeInHierarchy;
+        }
+
+        private static readonly Vector3[] Corners = new Vector3[4];
+
+        /// <summary>Screen-pixel rect of a UI element on this screen-space-overlay canvas.</summary>
+        private static Rect ScreenRectOf(Transform element)
+        {
+            var rect = (RectTransform)element;
+            rect.GetWorldCorners(Corners);
+            return Rect.MinMaxRect(Corners[0].x, Corners[0].y, Corners[2].x, Corners[2].y);
+        }
+
         public static bool IsPointerOverUi()
         {
             EventSystem eventSystem = EventSystem.current;

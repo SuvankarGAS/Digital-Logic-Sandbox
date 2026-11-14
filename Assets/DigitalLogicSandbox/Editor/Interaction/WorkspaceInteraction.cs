@@ -6,6 +6,7 @@ using DigitalLogicSandbox.Core.Circuit;
 using DigitalLogicSandbox.Core.Connections;
 using DigitalLogicSandbox.Core.Nodes;
 using DigitalLogicSandbox.Core.Ports;
+using DigitalLogicSandbox.Rendering;
 using DigitalLogicSandbox.Rendering.Gates;
 using DigitalLogicSandbox.Rendering.Wires;
 using UnityEngine;
@@ -523,7 +524,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Interaction
             }
 
             bool hasTarget = TryFindWireTarget(world, out PinRef target, out Vector2 targetWorld);
-            UpdatePreview(hasTarget ? targetWorld : world, hasTarget);
+            UpdatePreview(hasTarget ? targetWorld : world, hasTarget, target);
 
             bool released = _controls.Primary.WasReleasedThisFrame();
             bool pressed = _controls.Primary.WasPressedThisFrame();
@@ -568,22 +569,36 @@ namespace DigitalLogicSandbox.CircuitEditor.Interaction
             return false;
         }
 
-        private void UpdatePreview(Vector2 end, bool valid)
+        private void UpdatePreview(Vector2 end, bool valid, PinRef target)
         {
-            if (!_workspace.Geometry.TryGetPin(_wireStart, out Vector2 start, out _))
+            CircuitGeometry geometry = _workspace.Geometry;
+            if (!geometry.TryGetPin(_wireStart, out Vector2 start, out _))
             {
                 Cancel();
                 return;
             }
 
-            // Route from driver to destination so the preview matches the final wire.
-            if (_wireStartDirection == PortDirection.Output)
+            // Route from driver to destination so the preview matches the final wire. The free end behaves like an
+            // unrotated pin with no body; once snapped, the target pin's own side and body are used.
+            bool startIsOutput = _wireStartDirection == PortDirection.Output;
+            PortDirection endDirection = startIsOutput ? PortDirection.Input : PortDirection.Output;
+            Vector2 startNormal = geometry.GetPinNormal(_wireStart.Node, _wireStartDirection);
+            Rect startBody = geometry.GetBounds(_wireStart.Node);
+            Vector2 endNormal = startIsOutput ? Vector2.left : Vector2.right;
+            Rect endBody = default;
+            if (valid)
             {
-                WireRouter.Route(start, end, _previewPath);
+                endNormal = geometry.GetPinNormal(target.Node, endDirection);
+                endBody = geometry.GetBounds(target.Node);
+            }
+
+            if (startIsOutput)
+            {
+                WireRouter.Route(start, startNormal, startBody, end, endNormal, endBody, _previewPath);
             }
             else
             {
-                WireRouter.Route(end, start, _previewPath);
+                WireRouter.Route(end, endNormal, endBody, start, startNormal, startBody, _previewPath);
             }
 
             _workspace.Presenter.ShowWirePreview(_previewPath, valid);

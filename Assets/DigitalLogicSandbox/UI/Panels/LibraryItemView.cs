@@ -26,16 +26,38 @@ namespace DigitalLogicSandbox.UI.Panels
         public string SearchText { get; private set; }
 
         public static LibraryItemView Create(Transform parent, UiFactory ui, WorkspaceController workspace,
-            PlacementRequest request, string title, string detail)
+            PlacementRequest request, string title, string detail, string icon = null, string searchExtra = null)
         {
             Image background = ui.Panel("Item " + title, parent, ui.Theme.ButtonNormal, rounded: true);
             var layout = background.gameObject.AddComponent<LayoutElement>();
             layout.preferredHeight = 34f;
             layout.minHeight = 34f;
 
+            float nameLeft = 12f;
+            if (!string.IsNullOrWhiteSpace(icon))
+            {
+                // Small badge with the user's icon text in front of the name.
+                Image badge = ui.Panel("Icon", background.transform, ui.Theme.Accent, rounded: true);
+                badge.raycastTarget = false;
+                RectTransform badgeRect = badge.rectTransform;
+                badgeRect.anchorMin = new Vector2(0f, 0.5f);
+                badgeRect.anchorMax = new Vector2(0f, 0.5f);
+                badgeRect.pivot = new Vector2(0f, 0.5f);
+                badgeRect.sizeDelta = new Vector2(BadgeSize, BadgeSize);
+                badgeRect.anchoredPosition = new Vector2(8f, 0f);
+                TextMeshProUGUI badgeText = ui.Text("IconText", badgeRect, icon.Trim(), 11f, ui.Theme.PanelBackground,
+                    TextAlignmentOptions.Center, FontStyles.Bold);
+                badgeText.enableAutoSizing = true;
+                badgeText.fontSizeMin = 7f;
+                badgeText.fontSizeMax = 11f;
+                UiFactory.Stretch(badgeText.rectTransform, 1f, 1f);
+                nameLeft = 8f + BadgeSize + 6f;
+            }
+
             TextMeshProUGUI name = ui.Text("Name", background.transform, title, 14f, ui.Theme.TextPrimary,
                 TextAlignmentOptions.MidlineLeft, FontStyles.Bold);
-            UiFactory.Stretch(name.rectTransform, 12f, 80f);
+            name.overflowMode = TextOverflowModes.Ellipsis;
+            UiFactory.Stretch(name.rectTransform, nameLeft, 80f);
             TextMeshProUGUI info = ui.Text("Detail", background.transform, detail, 12f, ui.Theme.TextSecondary,
                 TextAlignmentOptions.MidlineRight);
             UiFactory.Stretch(info.rectTransform, 80f, 12f);
@@ -46,9 +68,18 @@ namespace DigitalLogicSandbox.UI.Panels
             view._normal = ui.Theme.ButtonNormal;
             view._hover = ui.Theme.ButtonHover;
             view.Request = request;
-            view.SearchText = title ?? string.Empty;
+            view.Title = title ?? string.Empty;
+            view.SearchText = string.IsNullOrEmpty(searchExtra) ? view.Title : view.Title + " " + searchExtra;
             return view;
         }
+
+        private const float BadgeSize = 22f;
+
+        /// <summary>Display name of the entry.</summary>
+        public string Title { get; private set; }
+
+        /// <summary>Raised on right-click with the screen position, for the item context menu.</summary>
+        public event Action<LibraryItemView, Vector2> ContextRequested;
 
         public bool Matches(string filter)
         {
@@ -61,6 +92,10 @@ namespace DigitalLogicSandbox.UI.Panels
             if (eventData.button == PointerEventData.InputButton.Left && !eventData.dragging)
             {
                 _workspace.BeginPlacement(Request, fromDrag: false);
+            }
+            else if (eventData.button == PointerEventData.InputButton.Right)
+            {
+                ContextRequested?.Invoke(this, eventData.position);
             }
         }
 

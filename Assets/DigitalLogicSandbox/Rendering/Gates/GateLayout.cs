@@ -16,8 +16,9 @@ namespace DigitalLogicSandbox.Rendering.Gates
         public const float MinGateHeight = 2f;
         public static readonly Vector2 BoundarySize = new Vector2(2.4f, 1.2f);
 
+        /// <param name="icon">Optional short user icon of a custom gate, shown before the pin summary.</param>
         public static GateGeometry Compute(ComponentKind kind, ComponentSignature signature, Rotation rotation,
-            string title)
+            string title, string icon = null)
         {
             IReadOnlyList<PortDescriptor> inputs = signature.Inputs;
             IReadOnlyList<PortDescriptor> outputs = signature.Outputs;
@@ -86,6 +87,10 @@ namespace DigitalLogicSandbox.Rendering.Gates
             string subtitle = kind == ComponentKind.Custom || kind == ComponentKind.Primitive
                 ? inputs.Count + " in / " + outputs.Count + " out"
                 : string.Empty;
+            if (kind == ComponentKind.Custom && !string.IsNullOrWhiteSpace(icon))
+            {
+                subtitle = icon.Trim() + "  ·  " + subtitle;
+            }
             string[] inputNames = null;
             string[] outputNames = null;
             if (kind == ComponentKind.Custom)

@@ -85,7 +85,11 @@ namespace DigitalLogicSandbox.Rendering
             }
 
             string title = component.IsBoundary ? boundaryTitle : TitleOf(component);
-            return GateLayout.Compute(component.Kind, signature, Rotation.R0, title);
+            string icon = component.Kind == ComponentKind.Custom &&
+                _catalog.TryGetDefinition(component.Definition, out CircuitDefinition definition)
+                    ? definition.Icon
+                    : null;
+            return GateLayout.Compute(component.Kind, signature, Rotation.R0, title, icon);
         }
 
         public Vector2 GetPosition(NodeId id)
@@ -139,16 +143,27 @@ namespace DigitalLogicSandbox.Rendering
                 return path;
             }
 
-            path = new List<Vector3>(6);
+            path = new List<Vector3>(8);
             if (Circuit.TryGetConnectionTo(destination, out ConnectionDefinition connection) &&
                 TryGetPin(connection.Source, out Vector2 from, out _) &&
                 TryGetPin(destination, out Vector2 to, out _))
             {
-                WireRouter.Route(from, to, path);
+                WireRouter.Route(from, GetPinNormal(connection.Source.Node, PortDirection.Output),
+                    GetBounds(connection.Source.Node), to, GetPinNormal(destination.Node, PortDirection.Input),
+                    GetBounds(destination.Node), path);
             }
 
             _wires[destination] = path;
             return path;
+        }
+
+        /// <summary>
+        /// Outward normal of a node's pins on one side: outputs face right and inputs face left before rotation.
+        /// </summary>
+        public Vector2 GetPinNormal(NodeId node, PortDirection direction)
+        {
+            Vector2 local = direction == PortDirection.Output ? Vector2.right : Vector2.left;
+            return GateLayout.Rotate(local, GetGate(node).Rotation);
         }
 
         /// <summary>Display title of a node: primitive name, custom gate name, or interface port name.</summary>
@@ -192,7 +207,14 @@ namespace DigitalLogicSandbox.Rendering
                 signature = new ComponentSignature(null, null);
             }
 
-            return GateLayout.Compute(node.Component.Kind, signature, node.Rotation, TitleOf(node));
+            string icon = null;
+            if (node.Component.Kind == ComponentKind.Custom &&
+                _catalog.TryGetDefinition(node.Component.Definition, out CircuitDefinition definition))
+            {
+                icon = definition.Icon;
+            }
+
+            return GateLayout.Compute(node.Component.Kind, signature, node.Rotation, TitleOf(node), icon);
         }
 
         private void InvalidateWiresOf(NodeId node)

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using DigitalLogicSandbox.CircuitEditor.CameraControl;
 using DigitalLogicSandbox.CircuitEditor.Interaction;
 using DigitalLogicSandbox.CircuitEditor.Placement;
 using DigitalLogicSandbox.CircuitEditor.Selection;
@@ -145,11 +146,110 @@ namespace DigitalLogicSandbox.Tests.EditMode.CircuitEditor
         }
 
         [Test]
+        public void WireRouter_RotatedSourceLeavesAlongItsNormal()
+        {
+            // Output pin on the bottom of a gate rotated so its outputs face down.
+            var points = new List<Vector3>();
+            var body = new Rect(-1f, 0f, 2f, 3f);
+            WireRouter.Route(new Vector2(0f, 0f), Vector2.down, body, new Vector2(6f, -4f), Vector2.left, default,
+                points);
+
+            AssertOrthogonal(points);
+            Assert.That(points[1].x, Is.EqualTo(0f).Within(1e-4f));
+            Assert.That(points[1].y, Is.LessThan(0f), "First segment goes down, out of the pin.");
+            AssertAvoids(points, body);
+        }
+
+        [Test]
+        public void WireRouter_BackwardRouteAvoidsBothGateBodies()
+        {
+            // Source gate to the right of the destination gate, overlapping vertically.
+            var source = new Rect(4f, -1f, 3f, 2f);      // output pin on its right edge at (7, 0)
+            var destination = new Rect(-3f, -1f, 3f, 2f); // input pin on its left edge at (-3, 0.5)
+            var points = new List<Vector3>();
+            WireRouter.Route(new Vector2(7f, 0f), Vector2.right, source, new Vector2(-3f, 0.5f), Vector2.left,
+                destination, points);
+
+            AssertOrthogonal(points);
+            AssertAvoids(points, source);
+            AssertAvoids(points, destination);
+            Assert.That(points[1].x, Is.GreaterThan(7f), "Leaves the output to the right first.");
+            Assert.That(points[points.Count - 2].x, Is.LessThan(-3f), "Enters the input from the left.");
+        }
+
+        [Test]
+        public void WireRouter_FacingPinsUseStraightLine()
+        {
+            var points = new List<Vector3>();
+            WireRouter.Route(new Vector2(0f, 2f), Vector2.up, new Rect(-1f, -1f, 2f, 3f), new Vector2(0f, 6f),
+                Vector2.down, new Rect(-1f, 6f, 2f, 3f), points);
+            Assert.That(points.Count, Is.EqualTo(2));
+        }
+
+        [Test]
+        public void WireRouter_RoutingAllocatesNoGarbage()
+        {
+            var points = new List<Vector3>(16);
+            var source = new Rect(4f, -1f, 3f, 2f);
+            var destination = new Rect(-3f, -1f, 3f, 2f);
+            WireRouter.Route(new Vector2(7f, 0f), Vector2.right, source, new Vector2(-3f, 0.5f), Vector2.left,
+                destination, points); // warm up
+
+            long before = System.GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 1000; i++)
+            {
+                WireRouter.Route(new Vector2(7f, i * 0.01f), Vector2.right, source, new Vector2(-3f, 0.5f),
+                    Vector2.left, destination, points);
+            }
+
+            Assert.That(System.GC.GetAllocatedBytesForCurrentThread() - before, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void CameraFrame_CentresContentInUncoveredViewport()
+        {
+            var bounds = new Rect(-2f, -1f, 4f, 2f);
+
+            WorkspaceCamera.ComputeFrame(bounds, new Rect(0f, 0f, 1000f, 500f), 1000, 500, out Vector2 full,
+                out float fullSize);
+            Assert.That(full, Is.EqualTo(bounds.center));
+
+            // Panels cover the left half: content must appear centred in the right half.
+            WorkspaceCamera.ComputeFrame(bounds, new Rect(500f, 0f, 500f, 500f), 1000, 500, out Vector2 center,
+                out float size);
+            Assert.That(size, Is.GreaterThanOrEqualTo(fullSize), "A smaller viewport needs at least as much zoom-out.");
+            float worldPerPixel = size * 2f / 500f;
+            float contentScreenX = 500f + (bounds.center.x - center.x) / worldPerPixel;
+            Assert.That(contentScreenX, Is.EqualTo(750f).Within(0.5f));
+
+            // The padded content fits in the viewport horizontally.
+            Assert.That((bounds.width * 1.2f + 2f) / worldPerPixel, Is.LessThanOrEqualTo(500f + 0.5f));
+        }
+
+        [Test]
+        public void CameraFrame_IgnoresDegenerateViewport()
+        {
+            var bounds = new Rect(0f, 0f, 4f, 2f);
+            WorkspaceCamera.ComputeFrame(bounds, new Rect(0f, 0f, 10f, 10f), 1000, 500, out Vector2 center, out _);
+            Assert.That(center, Is.EqualTo(bounds.center));
+        }
+
+        [Test]
         public void DistanceToPath_MeasuresNearestSegment()
         {
             var path = new List<Vector3> { new Vector3(0, 0), new Vector3(4, 0), new Vector3(4, 4) };
             Assert.That(WireRouter.DistanceToPath(path, new Vector2(2, 1)), Is.EqualTo(1f).Within(1e-5f));
             Assert.That(WireRouter.DistanceToPath(path, new Vector2(5, 2)), Is.EqualTo(1f).Within(1e-5f));
+        }
+
+        private static void AssertAvoids(List<Vector3> points, Rect body)
+        {
+            // The first and last segments are pin stubs touching the body edge; everything in between stays out.
+            for (int i = 1; i < points.Count - 2; i++)
+            {
+                Assert.That(WireRouter.SegmentCrossesRect(points[i], points[i + 1], body), Is.False,
+                    $"Segment {i} ({points[i]} -> {points[i + 1]}) crosses the gate body {body}.");
+            }
         }
 
         private static void AssertOrthogonal(List<Vector3> points)

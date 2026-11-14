@@ -1150,6 +1150,24 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             _camera.ResetView();
         }
 
+        /// <summary>
+        /// Screen-pixel rect of the workspace area not covered by UI panels, supplied by the UI. Framing centres
+        /// content in this area. Null means the whole screen.
+        /// </summary>
+        public Func<Rect> VisibleScreenArea { get; set; }
+
+        private void FrameWorld(Rect bounds)
+        {
+            if (VisibleScreenArea != null)
+            {
+                _camera.Frame(bounds, VisibleScreenArea());
+            }
+            else
+            {
+                _camera.Frame(bounds);
+            }
+        }
+
         /// <summary>Frames the selection, or all content when nothing is selected.</summary>
         public void FrameContent()
         {
@@ -1167,11 +1185,11 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
                     first = false;
                 }
 
-                _camera.Frame(bounds);
+                FrameWorld(bounds);
             }
             else if (_hitTester.TryGetContentBounds(out Rect all))
             {
-                _camera.Frame(all);
+                FrameWorld(all);
             }
             else
             {

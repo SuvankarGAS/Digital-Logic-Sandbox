@@ -78,6 +78,19 @@ namespace DigitalLogicSandbox.Rendering
 
         public int WireViewCount => _wires.Count;
 
+        /// <summary>Diagnostics: wire views rerouted after gates moved or rotated (since the last reset).</summary>
+        public int WireRerouteCount { get; private set; }
+
+        /// <summary>Diagnostics: nets whose value was pushed to views (since the last reset).</summary>
+        public int NetSignalUpdateCount { get; private set; }
+
+        /// <summary>Resets the diagnostic counters (profiling and tests).</summary>
+        public void ResetDiagnostics()
+        {
+            WireRerouteCount = 0;
+            NetSignalUpdateCount = 0;
+        }
+
         public bool TryGetGateView(NodeId node, out GateView view)
         {
             return _gates.TryGetValue(node, out view);
@@ -221,6 +234,7 @@ namespace DigitalLogicSandbox.Rendering
                 if (_wires.TryGetValue(destination, out WireView view))
                 {
                     view.SetPath(_geometry.GetWirePath(destination));
+                    WireRerouteCount++;
                 }
             }
         }
@@ -301,6 +315,8 @@ namespace DigitalLogicSandbox.Rendering
             {
                 return;
             }
+
+            NetSignalUpdateCount++;
 
             for (int i = 0; i < targets.Count; i++)
             {
