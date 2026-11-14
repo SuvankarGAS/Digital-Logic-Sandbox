@@ -14,7 +14,7 @@ namespace DigitalLogicSandbox.TruthTable.Generation
         /// Returns a circuit whose interface matches <paramref name="component"/>: the packaged definition itself
         /// for a custom gate, or a one-node test harness for a primitive (each pin wired to a boundary named after
         /// it), so built-in gates are also tabulated by the simulation engine rather than from stored data.
-        /// Returns null when the component cannot be resolved or is a boundary.
+        /// Returns null when the component cannot be resolved or is a utility (boundary or clock).
         /// </summary>
         public static CircuitDefinition ForComponent(ComponentCatalog catalog, ComponentRef component, string name)
         {
@@ -23,7 +23,7 @@ namespace DigitalLogicSandbox.TruthTable.Generation
                 throw new ArgumentNullException(nameof(catalog));
             }
 
-            if (component.IsBoundary)
+            if (component.IsUtility)
             {
                 return null;
             }

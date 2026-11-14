@@ -36,7 +36,8 @@ namespace DigitalLogicSandbox.Simulation.Engine
             int[] outputNets,
             PortId[] outputPorts,
             int hierarchyDepth,
-            List<int[]> combinationalCycles)
+            List<int[]> combinationalCycles,
+            int clockNet = FloatingNet)
         {
             RootDefinition = rootDefinition;
             Root = root;
@@ -57,6 +58,7 @@ namespace DigitalLogicSandbox.Simulation.Engine
             OutputPorts = outputPorts;
             HierarchyDepth = hierarchyDepth;
             CombinationalCycles = combinationalCycles;
+            ClockNet = clockNet;
 
             for (int g = 0; g < gateComponents.Length; g++)
             {
@@ -94,6 +96,17 @@ namespace DigitalLogicSandbox.Simulation.Engine
         public IReadOnlyList<int[]> CombinationalCycles { get; }
 
         public bool HasCombinationalCycles => CombinationalCycles.Count > 0;
+
+        /// <summary>Net carrying the global clock, or <see cref="FloatingNet"/> when the circuit has no clock node.</summary>
+        public int ClockNet { get; }
+
+        public bool HasClock => ClockNet != FloatingNet;
+
+        /// <summary>
+        /// True when outputs can depend on history: the circuit has feedback loops (latches, flip-flops) or a clock.
+        /// A combinational truth table does not describe such a circuit; use sequence analysis instead.
+        /// </summary>
+        public bool IsSequential => HasCombinationalCycles || HasClock;
 
         public int MaxGateInputs { get; }
 

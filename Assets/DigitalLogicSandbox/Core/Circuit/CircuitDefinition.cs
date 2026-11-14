@@ -431,11 +431,8 @@ namespace DigitalLogicSandbox.Core.Circuit
                 return ConnectionError.MissingDestinationNode;
             }
 
-            if (source.Node == destination.Node)
-            {
-                return ConnectionError.SelfConnection;
-            }
-
+            // A node may feed its own input (a one-node feedback loop, e.g. a toggle flip-flop with QN -> D). Since
+            // Phase B feedback is allowed; validation reports it as a FeedbackLoop warning.
             if (_connectionByDestination.ContainsKey(destination))
             {
                 return ConnectionError.DestinationAlreadyDriven;

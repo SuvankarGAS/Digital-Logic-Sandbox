@@ -245,7 +245,7 @@ namespace DigitalLogicSandbox.Tests.EditMode.GateLibrary
         }
 
         [Test]
-        public void Validation_RejectsCombinationalFeedback()
+        public void Validation_AllowsFeedbackLoops_WithWarning()
         {
             var source = new CircuitDefinition(DefinitionId.New(), "Loop");
             NodeDefinition not = source.AddNode(Not, CircuitPoint.Zero);
@@ -255,11 +255,12 @@ namespace DigitalLogicSandbox.Tests.EditMode.GateLibrary
             source.Connect(new PinRef(not2.Id, NotGate.Output), new PinRef(not.Id, NotGate.Input));
             source.Connect(new PinRef(not2.Id, NotGate.Output), BoundaryIn(output));
             PackagingSpec spec = PackagingSpec.FromCircuit(source);
-            spec.Name = "Oscillator";
+            spec.Name = "Bistable";
 
             PackagingResult result = _packager.Package(source, spec);
-            Assert.That(result.Succeeded, Is.False);
-            Assert.That(result.Report.Contains(DiagnosticCode.CombinationalCycle), Is.True);
+            Assert.That(result.Succeeded, Is.True, result.Report.ToString());
+            Assert.That(result.Report.Contains(DiagnosticCode.FeedbackLoop), Is.True,
+                "Packaging a loop warns that the gate is sequential.");
         }
 
         [Test]

@@ -166,6 +166,9 @@ namespace DigitalLogicSandbox.Rendering
             return GateLayout.Rotate(local, GetGate(node).Rotation);
         }
 
+        /// <summary>Title drawn on clock nodes.</summary>
+        public const string ClockTitle = "CLK";
+
         /// <summary>Display title of a node: primitive name, custom gate name, or interface port name.</summary>
         public string TitleOf(NodeDefinition node)
         {
@@ -195,6 +198,8 @@ namespace DigitalLogicSandbox.Rendering
                     return definition.Version > 1 ? definition.Name + " v" + definition.Version : definition.Name;
                 case ComponentKind.InputBoundary:
                     return "Input";
+                case ComponentKind.Clock:
+                    return ClockTitle;
                 default:
                     return "Output";
             }

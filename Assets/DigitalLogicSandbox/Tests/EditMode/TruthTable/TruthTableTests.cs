@@ -396,7 +396,7 @@ namespace DigitalLogicSandbox.Tests.EditMode.TruthTables
 
             TruthTablePlan plan = _generator.Plan(circuit);
             Assert.That(plan.CanGenerate, Is.False);
-            Assert.That(plan.FirstError, Does.Contain("feedback loop").And.Contain("combinational"));
+            Assert.That(plan.FirstError, Does.Contain("feedback loop").And.Contain("Sequence Analysis"));
         }
 
         [Test]

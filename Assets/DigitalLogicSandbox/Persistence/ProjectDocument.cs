@@ -47,6 +47,21 @@ namespace DigitalLogicSandbox.Persistence
 
         public TruthTableSettingsData TruthTable = new TruthTableSettingsData();
         public CameraSettingsData Camera = new CameraSettingsData();
+        public SimulationSettingsData Simulation = new SimulationSettingsData();
+    }
+
+    /// <summary>Clock and power-on settings of the live simulation (schema v2).</summary>
+    [Serializable]
+    public sealed class SimulationSettingsData
+    {
+        /// <summary>Full clock cycles per second.</summary>
+        public float ClockFrequency = 2f;
+
+        /// <summary>Whether the clock ticks in real time while the simulation is playing.</summary>
+        public bool ClockEnabled = true;
+
+        /// <summary>Power-on state name ("Resolved" or "Unknown").</summary>
+        public string PowerOnState = "Resolved";
     }
 
     [Serializable]

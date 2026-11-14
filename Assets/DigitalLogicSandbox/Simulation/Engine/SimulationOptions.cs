@@ -2,6 +2,19 @@ using DigitalLogicSandbox.Core.Validation;
 
 namespace DigitalLogicSandbox.Simulation.Engine
 {
+    /// <summary>How state held in feedback loops (latches, flip-flops) is initialised by a reset.</summary>
+    public enum PowerOnState : byte
+    {
+        /// <summary>
+        /// Loops start unknown and are then resolved to a deterministic binary state: unknown loop nets are forced
+        /// LOW one at a time, in compiled gate order, until the circuit settles. Repeatable for a given circuit.
+        /// </summary>
+        Resolved = 0,
+
+        /// <summary>Loops start and stay unknown (X) until inputs or the clock drive them to a known value.</summary>
+        Unknown = 1,
+    }
+
     public sealed class SimulationOptions
     {
         /// <summary>Minimum evaluation budget per settle, regardless of circuit size.</summary>
@@ -16,6 +29,9 @@ namespace DigitalLogicSandbox.Simulation.Engine
         public int MaxHierarchyDepth { get; set; } = ValidationOptions.DefaultMaxHierarchyDepth;
 
         public int MinimumEvaluationBudget { get; set; } = DefaultMinimumEvaluationBudget;
+
+        /// <summary>Initial state of feedback loops after a reset (sequential circuits only).</summary>
+        public PowerOnState PowerOnState { get; set; } = PowerOnState.Resolved;
 
         public int EvaluationsPerGate { get; set; } = DefaultEvaluationsPerGate;
 

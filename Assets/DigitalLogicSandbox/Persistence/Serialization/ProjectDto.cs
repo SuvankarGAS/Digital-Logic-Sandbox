@@ -67,6 +67,7 @@ namespace DigitalLogicSandbox.Persistence.Serialization
         public const string KindCustom = "custom";
         public const string KindInput = "input";
         public const string KindOutput = "output";
+        public const string KindClock = "clock";
 
         public int Id;
         public string Kind;

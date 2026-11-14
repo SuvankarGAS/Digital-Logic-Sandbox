@@ -295,7 +295,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Interaction
             {
                 _pressNode = hoverNode;
                 _pressWasSelected = _workspace.Selection.Contains(hoverNode);
-                bool isInputSwitch = IsInputBoundary(hoverNode) && _workspace.CanToggleInputs;
+                bool isInputSwitch = (IsInputBoundary(hoverNode) || IsClock(hoverNode)) && _workspace.CanToggleInputs;
                 if (_pressAdditive)
                 {
                     if (!_pressWasSelected)
@@ -406,6 +406,10 @@ namespace DigitalLogicSandbox.CircuitEditor.Interaction
                 else if (IsInputBoundary(_pressNode) && _workspace.CanToggleInputs)
                 {
                     _workspace.ToggleInput(_pressNode);
+                }
+                else if (IsClock(_pressNode) && _workspace.CanToggleInputs)
+                {
+                    _workspace.TickClock(); // manual clock edge
                 }
                 else
                 {
@@ -687,6 +691,12 @@ namespace DigitalLogicSandbox.CircuitEditor.Interaction
         private float PinRadius()
         {
             return Mathf.Max(_workspace.Theme.PinRadius * 1.6f, PinPickPixels * _workspace.WorkspaceCamera.WorldPerPixel);
+        }
+
+        private bool IsClock(NodeId node)
+        {
+            return Circuit.TryGetNode(node, out NodeDefinition definition) &&
+                definition.Component.Kind == ComponentKind.Clock;
         }
 
         private bool IsInputBoundary(NodeId node)

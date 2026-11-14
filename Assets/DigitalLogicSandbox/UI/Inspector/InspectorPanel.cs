@@ -9,6 +9,7 @@ using DigitalLogicSandbox.Core.Connections;
 using DigitalLogicSandbox.Core.Nodes;
 using DigitalLogicSandbox.Core.Ports;
 using DigitalLogicSandbox.Core.Signals;
+using DigitalLogicSandbox.Simulation.Engine;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -26,6 +27,7 @@ namespace DigitalLogicSandbox.UI.Inspector
         public const float Width = 280f;
 
         private readonly List<LiveValue> _liveValues = new List<LiveValue>();
+        private TextMeshProUGUI _clockStatus;
 
         private UiFactory _ui;
         private WorkspaceController _workspace;
@@ -42,6 +44,9 @@ namespace DigitalLogicSandbox.UI.Inspector
 
         /// <summary>"Generate Truth Table" for the shown circuit.</summary>
         public event Action CircuitTruthTableRequested;
+
+        /// <summary>"Sequence Analysis..." for the shown circuit.</summary>
+        public event Action SequenceAnalysisRequested;
 
         /// <summary>"Truth Table" for the selected gate.</summary>
         public event Action<NodeId> NodeTruthTableRequested;
@@ -100,6 +105,7 @@ namespace DigitalLogicSandbox.UI.Inspector
             _rebuildPending = false;
             _shownCircuit = _workspace != null && _workspace.IsInitialized ? _workspace.Circuit : null;
             _liveValues.Clear();
+            _clockStatus = null;
             UiFactory.DestroyChildren(_content);
             if (_workspace == null || !_workspace.IsInitialized || _workspace.Circuit == null)
             {
@@ -175,7 +181,7 @@ namespace DigitalLogicSandbox.UI.Inspector
             int gates = 0;
             for (int i = 0; i < circuit.Nodes.Count; i++)
             {
-                gates += circuit.Nodes[i].IsBoundary ? 0 : 1;
+                gates += circuit.Nodes[i].Component.IsUtility ? 0 : 1;
             }
 
             _ui.Property(_content, "Gates", gates.ToString(CultureInfo.InvariantCulture));
@@ -184,8 +190,12 @@ namespace DigitalLogicSandbox.UI.Inspector
             BuildInterfaceList(circuit, circuit.Inputs, "Input interface", input: true);
             BuildInterfaceList(circuit, circuit.Outputs, "Output interface", input: false);
 
+            BuildClockSection();
+
             _ui.Caption(_content, "Truth table");
             _ui.Button("TruthTable", _content, "Generate Truth Table...", () => CircuitTruthTableRequested?.Invoke())
+                .interactable = circuit.Outputs.Count > 0;
+            _ui.Button("SequenceAnalysis", _content, "Sequence Analysis...", () => SequenceAnalysisRequested?.Invoke())
                 .interactable = circuit.Outputs.Count > 0;
 
             if (!_workspace.CanPackage)
@@ -329,6 +339,11 @@ namespace DigitalLogicSandbox.UI.Inspector
                 BuildCustomGateInfo(node.Component.Definition);
             }
 
+            if (node.Component.Kind == ComponentKind.Clock)
+            {
+                BuildClockSection();
+            }
+
             _ui.Caption(_content, "Actions");
             if (node.Component.Kind == ComponentKind.Custom)
             {
@@ -336,7 +351,7 @@ namespace DigitalLogicSandbox.UI.Inspector
                     _workspace.CanOpenNode(id);
             }
 
-            if (!node.IsBoundary)
+            if (!node.Component.IsUtility)
             {
                 _ui.Button("NodeTruthTable", _content, "Truth Table", () => NodeTruthTableRequested?.Invoke(id));
             }
@@ -345,6 +360,51 @@ namespace DigitalLogicSandbox.UI.Inspector
             {
                 _ui.Button("Package", _content, "Create Custom Gate from selection...", () => PackageRequested?.Invoke(true));
             }
+        }
+
+        /// <summary>Clock and power-on settings (project-wide) plus the live clock state.</summary>
+        private void BuildClockSection()
+        {
+            _ui.Caption(_content, "Clock & power-on");
+            TMP_InputField frequency = _ui.FieldRow(_content, "Frequency (Hz)",
+                _workspace.ClockFrequency.ToString("0.##", CultureInfo.InvariantCulture), value =>
+                {
+                    if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out float hz))
+                    {
+                        _workspace.ClockFrequency = hz;
+                    }
+
+                    MarkRebuild(); // show the clamped value
+                });
+            frequency.contentType = TMP_InputField.ContentType.DecimalNumber;
+            _ui.Toggle("ClockEnabled", _content, "Clock runs while playing", _workspace.ClockEnabled,
+                value => _workspace.ClockEnabled = value);
+            _ui.Toggle("PowerOnUnknown", _content, "Power on loops as unknown (X)",
+                _workspace.PowerOnState == PowerOnState.Unknown,
+                value => _workspace.PowerOnState = value ? PowerOnState.Unknown : PowerOnState.Resolved);
+            _clockStatus = _ui.Property(_content, "Clock", "-");
+            TextMeshProUGUI note = _ui.Text("ClockNote", _content,
+                "Click a clock node (or Step while paused) for a single edge. Power-on mode applies at the next Reset.",
+                11.5f, _ui.Theme.TextSecondary, TextAlignmentOptions.TopLeft);
+            note.enableWordWrapping = true;
+        }
+
+        private void RefreshClockStatus()
+        {
+            if (_clockStatus == null)
+            {
+                return;
+            }
+
+            SimulationRunner runner = _workspace.Runner;
+            if (runner == null || runner.Context == null || !runner.HasClock)
+            {
+                _clockStatus.text = "no clock in this circuit";
+                return;
+            }
+
+            _clockStatus.text = runner.Context.Clock.ToDisplayChar() + "  ·  " +
+                runner.ClockCycles.ToString(CultureInfo.InvariantCulture) + " cycles";
         }
 
         private void BuildCustomGateInfo(DefinitionRef reference)
@@ -414,6 +474,8 @@ namespace DigitalLogicSandbox.UI.Inspector
                     case ComponentKind.OutputBoundary:
                         outputs++;
                         break;
+                    case ComponentKind.Clock:
+                        break;
                     default:
                         gates++;
                         break;
@@ -456,6 +518,7 @@ namespace DigitalLogicSandbox.UI.Inspector
                 return;
             }
 
+            RefreshClockStatus();
             CircuitSession session = _workspace.Session;
             for (int i = 0; i < _liveValues.Count; i++)
             {
@@ -548,6 +611,8 @@ namespace DigitalLogicSandbox.UI.Inspector
                     return "Custom gate";
                 case ComponentKind.InputBoundary:
                     return "Circuit input";
+                case ComponentKind.Clock:
+                    return "Clock (global)";
                 default:
                     return "Circuit output";
             }

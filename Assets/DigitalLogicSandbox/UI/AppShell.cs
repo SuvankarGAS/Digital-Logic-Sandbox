@@ -48,6 +48,9 @@ namespace DigitalLogicSandbox.UI
 
         public TruthTableDialog TruthTable { get; private set; }
 
+        /// <summary>Input/clock sequences for sequential circuits.</summary>
+        public SequenceAnalysisDialog SequenceAnalysis { get; private set; }
+
         /// <summary>Generic question dialog (unsaved changes, recovery).</summary>
         public ConfirmDialog Confirm { get; private set; }
 
@@ -87,6 +90,7 @@ namespace DigitalLogicSandbox.UI
             shell.PackagingDialog = PackagingDialog.Create(go.transform, shell.Factory, workspace);
             shell.VersionSaveDialog = VersionSaveDialog.Create(go.transform, shell.Factory, workspace);
             shell.TruthTable = TruthTableDialog.Create(go.transform, shell.Factory, workspace, truthTableLimits);
+            shell.SequenceAnalysis = SequenceAnalysisDialog.Create(go.transform, shell.Factory, workspace);
             shell.Confirm = ConfirmDialog.Create(go.transform, shell.Factory, workspace);
             shell._workspace = workspace;
             workspace.VisibleScreenArea = shell.GetWorkspaceScreenRect;
@@ -104,6 +108,8 @@ namespace DigitalLogicSandbox.UI
             shell.Inspector.NodeTruthTableRequested += node => shell.TruthTable.OpenForNode(node);
             shell.ContextMenu.NodeTruthTableRequested += node => shell.TruthTable.OpenForNode(node);
             shell.ContextMenu.ComponentTruthTableRequested += (component, _) => shell.TruthTable.OpenForComponent(component);
+            shell.TruthTable.SequenceAnalysisRequested += shell.SequenceAnalysis.Open;
+            shell.Inspector.SequenceAnalysisRequested += shell.SequenceAnalysis.OpenForCurrentCircuit;
             shell.Library.ItemContextRequested += (request, screen) => shell.ContextMenu.ShowForLibraryEntry(screen, request);
             return shell;
         }

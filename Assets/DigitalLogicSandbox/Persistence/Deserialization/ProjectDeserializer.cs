@@ -289,6 +289,9 @@ namespace DigitalLogicSandbox.Persistence.Deserialization
                     var reference = new DefinitionRef(new DefinitionId(node.Definition), Math.Max(1, node.DefinitionVersion ?? 1));
                     circuit.RestoreNode(id, ComponentRef.Custom(reference), position, rotation, node.Label);
                     break;
+                case NodeDto.KindClock:
+                    circuit.RestoreNode(id, ComponentRef.Clock, position, rotation, node.Label);
+                    break;
                 case NodeDto.KindInput:
                 case NodeDto.KindOutput:
                 {
@@ -385,6 +388,8 @@ namespace DigitalLogicSandbox.Persistence.Deserialization
             settings.Animation ??= new AnimationSettingsData();
             settings.TruthTable ??= new TruthTableSettingsData();
             settings.Camera ??= new CameraSettingsData();
+            settings.Simulation ??= new SimulationSettingsData();
+            settings.Simulation.PowerOnState ??= "Resolved";
             settings.VisualizationMode ??= "Standard";
         }
     }

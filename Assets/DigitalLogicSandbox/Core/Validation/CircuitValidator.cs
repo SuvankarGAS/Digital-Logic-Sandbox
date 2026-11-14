@@ -11,7 +11,8 @@ namespace DigitalLogicSandbox.Core.Validation
 {
     /// <summary>
     /// Validates a circuit definition against the component library: references, pins, interface consistency,
-    /// usage warnings, combinational feedback loops and the custom-gate hierarchy. Not a hot path; runs on
+    /// usage warnings, feedback loops (allowed since Phase B: reported as warnings because they make a circuit
+    /// sequential) and the custom-gate hierarchy. Not a hot path; runs on
     /// edit/packaging/load, never per simulation step.
     /// </summary>
     public sealed class CircuitValidator
@@ -160,12 +161,6 @@ namespace DigitalLogicSandbox.Core.Validation
                     continue;
                 }
 
-                if (connection.Source.Node == connection.Destination.Node)
-                {
-                    report.Add(new Diagnostic(DiagnosticSeverity.Error, DiagnosticCode.SelfConnection,
-                        "Node " + connection.Source.Node + " is connected to itself.", connection.Source.Node));
-                }
-
                 _nodesWithFanOut.Add(connection.Source.Node);
 
                 if (_signatures.TryGetValue(connection.Source.Node, out ComponentSignature sourceSignature) &&
@@ -287,7 +282,7 @@ namespace DigitalLogicSandbox.Core.Validation
             {
                 int[] cycle = _cycles[c];
                 var builder = new StringBuilder();
-                builder.Append("Combinational feedback loop through ").Append(cycle.Length).Append(" node(s): ");
+                builder.Append("Feedback loop through ").Append(cycle.Length).Append(" node(s): ");
                 for (int i = 0; i < cycle.Length; i++)
                 {
                     if (i > 0)
@@ -298,8 +293,8 @@ namespace DigitalLogicSandbox.Core.Validation
                     builder.Append(nodes[cycle[i]].Id).Append(" (").Append(nodes[cycle[i]].Component).Append(')');
                 }
 
-                builder.Append(". Feedback loops are not supported in combinational circuits.");
-                report.Add(new Diagnostic(DiagnosticSeverity.Error, DiagnosticCode.CombinationalCycle,
+                builder.Append(". The circuit stores state (sequential logic), so it has no combinational truth table.");
+                report.Add(new Diagnostic(DiagnosticSeverity.Warning, DiagnosticCode.FeedbackLoop,
                     builder.ToString(), nodes[cycle[0]].Id));
             }
         }

@@ -26,8 +26,9 @@ namespace DigitalLogicSandbox.Rendering.Gates
             var inputPins = new Vector2[inputs.Count];
             var outputPins = new Vector2[outputs.Count];
 
-            if (kind == ComponentKind.InputBoundary || kind == ComponentKind.OutputBoundary)
+            if (kind == ComponentKind.InputBoundary || kind == ComponentKind.OutputBoundary || kind == ComponentKind.Clock)
             {
+                // Boundaries and the clock are compact utility boxes with a state indicator.
                 size = BoundarySize;
                 float edge = size.x * 0.5f;
                 for (int i = 0; i < inputPins.Length; i++)

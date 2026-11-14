@@ -171,6 +171,7 @@ namespace DigitalLogicSandbox.UI.Panels
             Section("Circuit I/O");
             AddItem(_content, new PlacementRequest(ComponentRef.InputBoundary, "Input"), "Input", "switch");
             AddItem(_content, new PlacementRequest(ComponentRef.OutputBoundary, "Output"), "Output", "indicator");
+            AddItem(_content, new PlacementRequest(ComponentRef.Clock, "Clock"), "Clock", "global clock signal");
 
             Section("My Custom Gates");
             _customRoot = UiFactory.CreateRect("Custom Gates", _content);

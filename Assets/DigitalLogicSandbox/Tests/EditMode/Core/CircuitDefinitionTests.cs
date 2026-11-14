@@ -93,11 +93,11 @@ namespace DigitalLogicSandbox.Tests.EditMode.Core
         }
 
         [Test]
-        public void Connect_RejectsSelfConnection()
+        public void Connect_AllowsSelfConnection_AsFeedbackLoop()
         {
             NodeDefinition not = _circuit.AddNode(Not, CircuitPoint.Zero);
             ConnectionError error = _circuit.TryConnect(new PinRef(not.Id, NotGate.Output), new PinRef(not.Id, NotGate.Input));
-            Assert.That(error, Is.EqualTo(ConnectionError.SelfConnection));
+            Assert.That(error, Is.EqualTo(ConnectionError.None), "Feedback (including one-node loops) is allowed.");
         }
 
         [Test]

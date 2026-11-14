@@ -61,6 +61,7 @@ namespace DigitalLogicSandbox.UI.Dialogs
         private Button _regenerateButton;
         private Button _copyButton;
         private Button _exportButton;
+        private Button _sequenceButton;
 
         private CircuitDefinition _target;
         private string _targetTitle;
@@ -98,6 +99,12 @@ namespace DigitalLogicSandbox.UI.Dialogs
         public Button CopyButton => _copyButton;
 
         public Button ExportButton => _exportButton;
+
+        /// <summary>Shown when the target is sequential (truth tables refuse it).</summary>
+        public Button SequenceButton => _sequenceButton;
+
+        /// <summary>Raised by "Sequence Analysis..." with the refused target and its title.</summary>
+        public event Action<CircuitDefinition, string> SequenceAnalysisRequested;
 
         public ScrollRect Scroll => _scroll;
 
@@ -151,7 +158,7 @@ namespace DigitalLogicSandbox.UI.Dialogs
         public bool OpenForNode(NodeId node)
         {
             CircuitDefinition circuit = _workspace.Circuit;
-            if (circuit == null || !circuit.TryGetNode(node, out NodeDefinition definition) || definition.IsBoundary)
+            if (circuit == null || !circuit.TryGetNode(node, out NodeDefinition definition) || definition.Component.IsUtility)
             {
                 return false;
             }
@@ -253,6 +260,20 @@ namespace DigitalLogicSandbox.UI.Dialogs
             }
 
             RefreshButtons();
+        }
+
+        /// <summary>Hands the (sequential) target over to sequence analysis.</summary>
+        public void OpenSequenceAnalysis()
+        {
+            if (_target == null)
+            {
+                return;
+            }
+
+            CircuitDefinition target = _target;
+            string title = _targetTitle;
+            Close();
+            SequenceAnalysisRequested?.Invoke(target, title);
         }
 
         public void CancelGeneration()
@@ -385,6 +406,8 @@ namespace DigitalLogicSandbox.UI.Dialogs
             _generateButton.gameObject.SetActive(_plan != null && _plan.CanGenerate && _plan.RequiresConfirmation && _table == null);
             _cancelButton.gameObject.SetActive(running);
             _regenerateButton.interactable = !running && _target != null;
+            _sequenceButton.gameObject.SetActive(_plan != null && !_plan.CanGenerate &&
+                _plan.Report.Contains(DiagnosticCode.SequentialCircuit));
             _copyButton.interactable = !running && hasRows;
             _exportButton.interactable = !running && hasRows;
         }
@@ -729,6 +752,7 @@ namespace DigitalLogicSandbox.UI.Dialogs
             _copyButton = _ui.Button("Copy", buttons, "Copy", () => CopyToClipboard(), 80f);
             _exportButton = _ui.Button("Export", buttons, "Export CSV", () => ExportCsv(), 110f);
             UiFactory.Flexible(buttons);
+            _sequenceButton = _ui.Button("Sequence", buttons, "Sequence Analysis...", OpenSequenceAnalysis, 170f);
             _cancelButton = _ui.Button("Cancel", buttons, "Cancel", CancelGeneration, 90f);
             _generateButton = _ui.Button("Generate", buttons, "Generate", Generate, 100f);
             _ui.Button("Done", buttons, "Close", Close, 80f);

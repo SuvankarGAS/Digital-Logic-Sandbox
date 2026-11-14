@@ -10,7 +10,7 @@ namespace DigitalLogicSandbox.Simulation.Diagnostics
     public static class SimulationDiagnostics
     {
         /// <summary>
-        /// Adds an error describing an oscillation (budget exhausted) to <paramref name="report"/>, naming up to
+        /// Adds a warning describing an oscillation (budget exhausted) to <paramref name="report"/>, naming up to
         /// <paramref name="maxGates"/> of the gates that were still switching. No-op for a stable result.
         /// </summary>
         public static void ReportLastSettle(SimulationContext context, ValidationReport report, int maxGates = 5)
@@ -25,7 +25,7 @@ namespace DigitalLogicSandbox.Simulation.Diagnostics
             var builder = new StringBuilder();
             builder.Append("The circuit did not stabilise after ").Append(result.Evaluations)
                 .Append(" gate evaluations (limit ").Append(context.EvaluationBudget)
-                .Append("). It is probably oscillating through a feedback loop.");
+                .Append("). A feedback loop is oscillating; its signals are shown as unknown (X). Reset the simulation after fixing the loop.");
 
             if (gates.Count > 0)
             {
@@ -52,7 +52,7 @@ namespace DigitalLogicSandbox.Simulation.Diagnostics
             context.Circuit.GetGateOrigin(gates.Count > 0 ? gates[0] : 0, out Engine.CompiledInstance instance,
                 out Core.Nodes.NodeId node);
             Core.Nodes.NodeId rootNode = instance.Parent == null ? node : instance.RootNode();
-            report.Add(new Diagnostic(DiagnosticSeverity.Error, DiagnosticCode.CombinationalCycle, builder.ToString(),
+            report.Add(new Diagnostic(DiagnosticSeverity.Warning, DiagnosticCode.Oscillation, builder.ToString(),
                 rootNode));
         }
     }

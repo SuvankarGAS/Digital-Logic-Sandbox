@@ -95,7 +95,7 @@ namespace DigitalLogicSandbox.UI.ContextMenus
                     Add("Open Internal Circuit", () => _workspace.OpenNode(id), _workspace.CanOpenNode(id));
                 }
 
-                if (!node.IsBoundary)
+                if (!node.Component.IsUtility)
                 {
                     NodeId gate = request.Node;
                     Add("Truth Table", () => NodeTruthTableRequested?.Invoke(gate), true);
@@ -148,7 +148,7 @@ namespace DigitalLogicSandbox.UI.ContextMenus
             _buttons.Clear();
             bool canPlace = _workspace.Circuit != null && _workspace.IsEditable;
             Add("Place", () => _workspace.BeginPlacement(request, fromDrag: false), canPlace);
-            if (!request.Component.IsBoundary)
+            if (!request.Component.IsUtility)
             {
                 ComponentRef component = request.Component;
                 string name = request.DisplayName;

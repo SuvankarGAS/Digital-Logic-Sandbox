@@ -15,5 +15,9 @@ namespace DigitalLogicSandbox.Core.Ports
 
         public static readonly ComponentSignature Output =
             new ComponentSignature(new[] { new PortDescriptor(Pin, "IN") }, null);
+
+        /// <summary>Clock source: a single output pin carrying the global clock.</summary>
+        public static readonly ComponentSignature Clock =
+            new ComponentSignature(null, new[] { new PortDescriptor(Pin, "CLK") });
     }
 }

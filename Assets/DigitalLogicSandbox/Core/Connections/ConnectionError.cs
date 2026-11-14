@@ -7,6 +7,7 @@ namespace DigitalLogicSandbox.Core.Connections
         CircuitReadOnly,
         MissingSourceNode,
         MissingDestinationNode,
+        /// <summary>Obsolete since Phase B: self-connections are allowed as one-node feedback loops.</summary>
         SelfConnection,
         UnresolvedSourceComponent,
         UnresolvedDestinationComponent,

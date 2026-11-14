@@ -14,6 +14,7 @@
 | 7 | Truth table generator | ✅ Complete (2026-11-14) |
 | 8 | Persistence & undo/redo | ✅ Complete (2026-11-14) |
 | 9 | Polish & optimization | ✅ Complete (2026-11-14) |
+| B | Sequential logic (future-expansion phase B) | ✅ Complete (2026-11-14) |
 
 ---
 
@@ -766,4 +767,117 @@ Delivered – see the Phase 3 section below.
   release builds.
 - `ProjectSettings/EditorSettings.asset` has an uncommitted local change: Enter Play Mode Options was
   turned on with domain and scene reload disabled. Its origin is unknown, so it was left out of the commits.
+  (Resolved: committed on request in `fcfdabd`.)
+
+
+## Phase B – Sequential logic (2026-11-14)
+
+No sequential primitive was added. Latches, flip-flops, registers and counters are built from AND and NOT
+feedback loops and packaged like any other gate. The only new component is the **clock**, a circuit utility
+like the input and output boundaries.
+
+### Implemented
+- **Unit-delay timing** (`SimulationContext`):
+  - Propagation runs in waves. Every gate in a wave reads the values committed at the start of that wave.
+    Outputs are buffered and committed together at the end of the wave.
+  - Results are deterministic and do not depend on gate creation order. A reversed-order flip-flop matched
+    over 200 random steps.
+  - The number of waves equals the logic depth.
+- **Power-on state** (`SimulationOptions.PowerOnState`):
+  - Gate-driven nets start unknown (X).
+  - `Resolved` (the default): unknown loop nets are forced LOW one at a time, in compiled gate order, with a
+    settle after each. The result is binary and repeatable.
+  - `Unknown`: values stay X until inputs or the clock drive them.
+- **Oscillation collapse:** when a loop uses up the evaluation budget, its switching gates are set to X and
+  the circuit settles again (X is a fixed point). Status `Oscillating`, warning code `Oscillation`. Nothing
+  hangs.
+- **Feedback allowed everywhere:**
+  - Validation, packaging and the compiler report loops as `FeedbackLoop` warnings instead of errors.
+  - Self-connections (one-node loops) are allowed.
+- **Global clock:**
+  - `ComponentKind.Clock` / `ComponentRef.Clock`, with one output pin "CLK".
+  - All clock nodes anywhere in the hierarchy share one net (`CompiledCircuit.ClockNet`), so packaged
+    clocked gates tick together.
+  - `CompiledCircuit.IsSequential` is true for feedback or a clock.
+  - `SimulationRunner`:
+    - `Advance(dt)` ticks in real time while running: one edge per half period, at most 8 edges per call,
+      and a backlog is dropped.
+    - `TickClock()` applies one edge by hand.
+    - `Step()` starts the next clock edge when the circuit is idle.
+    - Settings and counters: `ClockFrequency` (0.1–50 Hz, default 2), `ClockEnabled`,
+      `ClockEdges`/`ClockCycles`.
+    - The `ClockTicked` event fires on each edge.
+    - Ticking allocates no garbage.
+- **Sequence analysis** (`TruthTable/Generation/SequenceAnalysis.cs`):
+  - The truth table refuses sequential circuits (`SequentialCircuit`) and points here.
+  - `SequenceSpec` holds one 0/1 pattern per input, the step count, the power-on state, and whether to pulse
+    the clock each step.
+  - `SequenceAnalyzer` runs in a fresh context that records nothing. Row 0 is power-on. Each later step sets
+    the inputs and settles. If the circuit is clocked, it then sets the clock HIGH, settles, sets it LOW and
+    settles.
+  - Unstable rows (power-on included) are flagged and reported.
+  - Results export as CSV or tab-separated text.
+- **Editor and UI:**
+  - The library's "Circuit I/O" section has a Clock entry. It is drawn as a utility box titled CLK with a
+    live state indicator.
+  - Clicking a clock node at the top simulation level applies one edge.
+  - The workspace ticks the shown level's runner in `LateUpdate`, before `Sync`, so clock edges animate like
+    any other change.
+  - `WorkspaceController.ClockFrequency`, `ClockEnabled` and `PowerOnState` are shared by the main circuit
+    and drafts through one `SimulationOptions` instance. Changing them raises `SettingsChanged`, which marks
+    the project dirty.
+  - The inspector has a "Clock & power-on" section, shown for the circuit and for clock nodes: frequency,
+    enabled, power on as X, and the live cycle count. It also has a "Sequence Analysis..." button.
+  - The status bar has a clock cell, for example `CLK 1 · 2 Hz · cycle 12`, or "manual".
+  - `SequenceAnalysisDialog` has:
+    - One pattern field per input (default: a binary count).
+    - A steps field, plus pulse-clock and power-on toggles.
+    - A `<pos>`-aligned table.
+    - Run, Copy and Export CSV buttons. Esc closes it.
+  - The truth-table dialog shows "Sequence Analysis..." when it refuses a sequential target.
+  - Clocks are utilities, like boundaries: they have no truth table entry and are not counted as gates.
+- **Persistence, schema v2:**
+  - Node kind `clock`.
+  - `settings.simulation` with `clockFrequency`, `clockEnabled` and `powerOnState`.
+  - `AddSimulationSettingsMigration` upgrades v1 files.
+  - Simulation settings are applied before the main circuit is compiled, so the power-on mode takes effect
+    on load.
+
+### Decisions
+- **Build memory from gates, not primitives.** This follows CLAUDE.md ("everything else constructible"). It
+  needs a well-defined timing model, hence unit delay: with plain FIFO evaluation, a cross-coupled latch
+  depends on scheduling order.
+- **Resolved power-on by default.** With X power-on, a toggle flip-flop (D = QN) can never leave X, so
+  counters would never count. X power-on stays available for teaching and verification.
+- **One global clock net.** It is simple and matches the single-clock designs in the reference material.
+  Multiple clock domains can come later as named clocks.
+- **Real-time ticking only for the shown level.** Hidden sessions would otherwise build up change logs that
+  nothing reads.
+- **A power-on mode change takes effect at the next Reset or load**, so it doesn't wipe the user's switches.
+
+### Test results
+- EditMode: **319 / 319 passed** (29 new or changed):
+  - `SequentialLogicTests` (16): SR latch, X power-on, repeatability, D latch, rising-edge DFF, creation-order
+    independence, waves equal depth, 4-bit ripple counter, register, nested clocks sharing a net,
+    combinational circuits stay X-free, feedback warning, real-time ticking in the runner, `Step` through
+    edges, `TickClock` and its event, zero-allocation ticking.
+  - `SequenceAnalysisTests` (10): pattern parsing, holding the last value, a DFF driven through its CLK
+    input, clocked counter, explicit X power-on, a combinational sequence, isolation from the live context,
+    limits and mismatches, oscillation reporting, export format.
+  - Persistence (3): round trip of a clock node and the simulation settings, the v1→v2 migration, defaults
+    filled in when settings are missing.
+- PlayMode: **55 / 55 passed** (5 new, `SequentialWorkspaceTests`):
+  - The library entry and how the clock renders.
+  - Real-time ticking, enable/disable, manual edges and paused stepping.
+  - Truth-table hand-off to sequence analysis, with the live clock untouched; Copy and CSV export.
+  - Invalid patterns are rejected.
+  - A clocked project and its settings survive Save, New Project and Open.
+- Manual: play-mode screenshots of the CLK box, the inspector clock section, the status bar clock cell and
+  the sequence analysis dialog.
+
+### Known issues / deferred
+- Only one clock domain: all clock nodes share one frequency.
+- The sequence analysis panel shows up to 256 steps (`MaxDisplaySteps`). The analyzer's own limit is 1 024.
+- While a draft is being edited only the draft's clock ticks. The main circuit's clock waits until you
+  return to it.
 

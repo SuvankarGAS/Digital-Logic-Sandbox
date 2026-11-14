@@ -13,5 +13,11 @@ namespace DigitalLogicSandbox.Core.Nodes
 
         /// <summary>Circuit utility: external output boundary (indicator). Not a logic gate.</summary>
         OutputBoundary = 3,
+
+        /// <summary>
+        /// Circuit utility: clock source driven by the simulation's global clock (Phase B). Not a logic gate and not
+        /// part of the circuit interface; every clock node in a hierarchy carries the same clock signal.
+        /// </summary>
+        Clock = 4,
     }
 }

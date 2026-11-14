@@ -50,6 +50,11 @@ namespace DigitalLogicSandbox.Core.Nodes
 
         public static ComponentRef OutputBoundary => new ComponentRef(ComponentKind.OutputBoundary, null, default);
 
+        public static ComponentRef Clock => new ComponentRef(ComponentKind.Clock, null, default);
+
+        /// <summary>Circuit utilities (boundaries and clock): not logic gates, no internal behaviour to inspect.</summary>
+        public bool IsUtility => IsBoundary || Kind == ComponentKind.Clock;
+
         public bool Equals(ComponentRef other)
         {
             return Kind == other.Kind

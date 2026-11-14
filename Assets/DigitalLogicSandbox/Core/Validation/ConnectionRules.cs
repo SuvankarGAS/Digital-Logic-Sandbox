@@ -41,11 +41,6 @@ namespace DigitalLogicSandbox.Core.Validation
                 return ConnectionError.MissingDestinationNode;
             }
 
-            if (source.Node == destination.Node)
-            {
-                return ConnectionError.SelfConnection;
-            }
-
             if (!resolver.TryGetSignature(sourceNode.Component, out ComponentSignature sourceSignature))
             {
                 return ConnectionError.UnresolvedSourceComponent;

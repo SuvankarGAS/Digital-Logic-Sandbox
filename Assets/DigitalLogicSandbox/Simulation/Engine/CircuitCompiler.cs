@@ -41,6 +41,7 @@ namespace DigitalLogicSandbox.Simulation.Engine
         private ValidationReport _report;
         private int _maxDepth;
         private bool _depthReported;
+        private int _rawClock;
 
         public CircuitCompiler(ComponentCatalog catalog, SimulationOptions options = null)
         {
@@ -64,6 +65,7 @@ namespace DigitalLogicSandbox.Simulation.Engine
             _rootOutputs.Clear();
             _maxDepth = 0;
             _depthReported = false;
+            _rawClock = -1;
             _parent.Add(RawFloating);
 
             var rootInstance = new CompiledInstance(root, null, NodeId.None);
@@ -139,6 +141,23 @@ namespace DigitalLogicSandbox.Simulation.Engine
 
                     case ComponentKind.OutputBoundary:
                         break;
+
+                    case ComponentKind.Clock:
+                    {
+                        // Every clock node, in every scope, carries the one global clock: union them into one net.
+                        int raw = NewNet();
+                        scope.SetRawOutputPinNet(new PinRef(node.Id, BoundarySignatures.Pin), raw);
+                        if (_rawClock < 0)
+                        {
+                            _rawClock = raw;
+                        }
+                        else
+                        {
+                            Union(raw, _rawClock);
+                        }
+
+                        break;
+                    }
 
                     default:
                     {
@@ -384,6 +403,13 @@ namespace DigitalLogicSandbox.Simulation.Engine
                 }
             }
 
+            int clockNet = _rawClock >= 0 ? rawToDense[_rawClock] : CompiledCircuit.FloatingNet;
+            if (clockNet != CompiledCircuit.FloatingNet && driver[clockNet] >= 0)
+            {
+                report.Add(new Diagnostic(DiagnosticSeverity.Error, DiagnosticCode.MultipleDrivers,
+                    "Internal error: the clock net is also driven by a gate."));
+            }
+
             rootPorts = rootDefinition.Outputs;
             var rootOutputNets = new int[rootPorts.Count];
             var rootOutputPorts = new PortId[rootPorts.Count];
@@ -446,7 +472,7 @@ namespace DigitalLogicSandbox.Simulation.Engine
 
             var circuit = new CompiledCircuit(rootDefinition, rootInstance, netCount, components, inputOffsets, inputNets,
                 outputOffsets, outputNets, readerOffsets, readers, driver, gateInstances, gateNodes, rootInputNets,
-                rootInputPorts, rootOutputNets, rootOutputPorts, _maxDepth, cycles);
+                rootInputPorts, rootOutputNets, rootOutputPorts, _maxDepth, cycles, clockNet);
 
             for (int c = 0; c < cycles.Count; c++)
             {
@@ -469,8 +495,8 @@ namespace DigitalLogicSandbox.Simulation.Engine
                     builder.Append(", …");
                 }
 
-                builder.Append(". The circuit may oscillate.");
-                report.Add(new Diagnostic(DiagnosticSeverity.Warning, DiagnosticCode.CombinationalCycle,
+                builder.Append(". The circuit stores state (sequential logic); a loop that never settles is shown as unknown (X).");
+                report.Add(new Diagnostic(DiagnosticSeverity.Warning, DiagnosticCode.FeedbackLoop,
                     builder.ToString(), RootNodeOf(gateInstances[cycle[0]], gateNodes[cycle[0]])));
             }
 

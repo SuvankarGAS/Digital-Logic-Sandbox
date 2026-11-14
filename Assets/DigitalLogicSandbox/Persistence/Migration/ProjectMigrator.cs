@@ -60,9 +60,11 @@ namespace DigitalLogicSandbox.Persistence.Migration
         /// <summary>The application's migrator: every step the shipped format has ever needed.</summary>
         public static ProjectMigrator CreateDefault()
         {
-            // Schema 1 is the first released format, so no upgrade steps exist yet. New steps are appended here
-            // whenever ProjectFormat.CurrentSchemaVersion is increased.
-            return new ProjectMigrator(ProjectFormat.CurrentSchemaVersion);
+            // New steps are appended here whenever ProjectFormat.CurrentSchemaVersion is increased.
+            return new ProjectMigrator(ProjectFormat.CurrentSchemaVersion, new IProjectMigration[]
+            {
+                new AddSimulationSettingsMigration(),
+            });
         }
 
         public int CurrentVersion { get; }

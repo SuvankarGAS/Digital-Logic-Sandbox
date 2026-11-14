@@ -53,6 +53,10 @@ namespace DigitalLogicSandbox.Components.Abstractions
                 case ComponentKind.OutputBoundary:
                     signature = BoundarySignatures.Output;
                     return true;
+
+                case ComponentKind.Clock:
+                    signature = BoundarySignatures.Clock;
+                    return true;
             }
 
             signature = null;

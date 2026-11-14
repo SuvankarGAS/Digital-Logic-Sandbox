@@ -398,7 +398,7 @@ namespace DigitalLogicSandbox.Rendering
                     }
 
                     AddTarget(net, new NetTarget(NetTargetKind.OutputPin, node.Id, p, default));
-                    if (node.Component.Kind == ComponentKind.InputBoundary)
+                    if (node.Component.Kind == ComponentKind.InputBoundary || node.Component.Kind == ComponentKind.Clock)
                     {
                         AddTarget(net, new NetTarget(NetTargetKind.BoundaryState, node.Id, 0, default));
                     }

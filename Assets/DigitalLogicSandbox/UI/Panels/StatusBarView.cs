@@ -30,6 +30,7 @@ namespace DigitalLogicSandbox.UI.Panels
         private WorkspaceController _workspace;
         private UiFactory _ui;
         private TextMeshProUGUI _status;
+        private TextMeshProUGUI _clock;
         private TextMeshProUGUI _evaluations;
         private TextMeshProUGUI _message;
         private TextMeshProUGUI _values;
@@ -41,6 +42,8 @@ namespace DigitalLogicSandbox.UI.Panels
         public string MessageText => _message.text;
 
         public string ValuesText => _values.text;
+
+        public string ClockText => _clock.text;
 
         public static StatusBarView Create(Transform parent, UiFactory ui, WorkspaceController workspace)
         {
@@ -58,6 +61,7 @@ namespace DigitalLogicSandbox.UI.Panels
             view._ui = ui;
             view._status = view.Cell("Status", rect, 150f);
             view._evaluations = view.Cell("Evaluations", rect, 210f);
+            view._clock = view.Cell("Clock", rect, 190f);
             view._values = view.Cell("Values", rect, 360f);
             view._message = view.Cell("Message", rect, -1f);
 
@@ -90,6 +94,7 @@ namespace DigitalLogicSandbox.UI.Panels
             {
                 _status.text = "No circuit";
                 _evaluations.text = string.Empty;
+                _clock.text = string.Empty;
                 _values.text = string.Empty;
                 _message.text = string.Empty;
                 return;
@@ -101,6 +106,7 @@ namespace DigitalLogicSandbox.UI.Panels
             {
                 SetStatus("Circuit has errors", _ui.Theme.Error);
                 _evaluations.text = string.Empty;
+                _clock.text = string.Empty;
                 _values.text = string.Empty;
             }
             else
@@ -119,6 +125,14 @@ namespace DigitalLogicSandbox.UI.Panels
                 {
                     SetStatus("Running", _ui.Theme.TextPrimary);
                 }
+
+                _clock.text = runner.HasClock
+                    ? "CLK " + runner.Context.Clock.ToDisplayChar() + "  ·  " +
+                      (runner.ClockEnabled && runner.State == SimulationState.Running
+                          ? runner.ClockFrequency.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + " Hz"
+                          : "manual") +
+                      "  ·  cycle " + runner.ClockCycles
+                    : string.Empty;
 
                 _evaluations.text = "Evaluations: " + runner.EvaluationCount +
                     (_workspace.SignalAnimation != null && _workspace.SignalAnimation.IsAnimating ? "  - propagating" : string.Empty);

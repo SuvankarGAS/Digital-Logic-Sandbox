@@ -136,7 +136,7 @@ namespace DigitalLogicSandbox.Tests.EditMode.Core
         }
 
         [Test]
-        public void TwoNotLoop_ReportsCombinationalCycle()
+        public void TwoNotLoop_ReportsFeedbackLoopWarning()
         {
             var circuit = new CircuitDefinition(DefinitionId.New(), "Ring");
             NodeDefinition n1 = circuit.AddNode(Not, CircuitPoint.Zero);
@@ -146,7 +146,8 @@ namespace DigitalLogicSandbox.Tests.EditMode.Core
 
             ValidationReport report = Validate(circuit);
 
-            Assert.That(report.Count(DiagnosticCode.CombinationalCycle), Is.EqualTo(1), report.ToString());
+            Assert.That(report.Count(DiagnosticCode.FeedbackLoop), Is.EqualTo(1), report.ToString());
+            Assert.That(report.HasErrors, Is.False, "Feedback loops are allowed (sequential logic).");
         }
 
         [Test]
@@ -162,7 +163,7 @@ namespace DigitalLogicSandbox.Tests.EditMode.Core
             circuit.Connect(new PinRef(n1.Id, NotGate.Output), new PinRef(n2.Id, NotGate.Input));
             circuit.Connect(new PinRef(n2.Id, NotGate.Output), new PinRef(and.Id, AndGate.InputB));
 
-            Assert.That(Validate(circuit).Count(DiagnosticCode.CombinationalCycle), Is.EqualTo(1));
+            Assert.That(Validate(circuit).Count(DiagnosticCode.FeedbackLoop), Is.EqualTo(1));
         }
 
         [Test]

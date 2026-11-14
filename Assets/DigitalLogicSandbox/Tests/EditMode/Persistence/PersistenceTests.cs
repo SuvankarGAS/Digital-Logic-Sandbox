@@ -362,6 +362,69 @@ namespace DigitalLogicSandbox.Tests.EditMode.PersistenceTests
             var document = new JObject { ["schemaVersion"] = ProjectFormat.CurrentSchemaVersion };
             Assert.That(migrator.Migrate(document), Is.EqualTo(ProjectFormat.CurrentSchemaVersion));
         }
+
+        // ------------------------------------------------------------------------------------------------
+        // Phase B: clock nodes and simulation settings (schema v2)
+        // ------------------------------------------------------------------------------------------------
+
+        [Test]
+        public void SaveAndLoad_RestoresClockNodesAndSimulationSettings()
+        {
+            var root = new CircuitDefinition(DefinitionId.New(), "Clocked");
+            root.AddInputBoundary("EN", new CircuitPoint(-4, 3));
+            NodeDefinition clock = root.AddNode(ComponentRef.Clock, new CircuitPoint(-4, 0), Rotation.R90, "main clock");
+            NodeDefinition not = root.AddNode(Not, new CircuitPoint(0, 0));
+            NodeDefinition lamp = root.AddOutputBoundary("Y", new CircuitPoint(4, 0));
+            root.Connect(new PinRef(clock.Id, BoundarySignatures.Pin), new PinRef(not.Id, NotGate.Input));
+            root.Connect(new PinRef(not.Id, NotGate.Output), BoundaryIn(lamp));
+            ProjectDocument document = BuildDocument(root);
+            document.Settings.Simulation.ClockFrequency = 7.5f;
+            document.Settings.Simulation.ClockEnabled = false;
+            document.Settings.Simulation.PowerOnState = "Unknown";
+
+            string json = ProjectSerializer.ToJson(document);
+            Assert.That(json, Does.Contain("\"kind\": \"clock\""));
+            ProjectLoadResult result = new ProjectDeserializer(null, PrimitiveRegistry.CreateDefault()).Read(json);
+
+            Assert.That(result.Report.HasErrors, Is.False, result.Report.ToString());
+            CircuitDefinition loaded = result.Document.RootCircuit;
+            Assert.That(CircuitFingerprint.Of(loaded), Is.EqualTo(CircuitFingerprint.Of(root)));
+            Assert.That(loaded.GetNode(clock.Id).Component, Is.EqualTo(ComponentRef.Clock));
+            Assert.That(loaded.GetNode(clock.Id).Label, Is.EqualTo("main clock"));
+            SimulationSettingsData simulation = result.Document.Settings.Simulation;
+            Assert.That(simulation.ClockFrequency, Is.EqualTo(7.5f));
+            Assert.That(simulation.ClockEnabled, Is.False);
+            Assert.That(simulation.PowerOnState, Is.EqualTo("Unknown"));
+        }
+
+        [Test]
+        public void Version1Files_AreMigrated_WithSimulationDefaults()
+        {
+            JObject json = JObject.Parse(ProjectSerializer.ToJson(BuildDocument(BuildRoot())));
+            json["schemaVersion"] = 1;
+            ((JObject)json["settings"]).Remove("simulation");
+
+            ProjectLoadResult result = new ProjectDeserializer().Read(json.ToString());
+
+            Assert.That(result.StoredSchemaVersion, Is.EqualTo(1));
+            Assert.That(result.WasMigrated, Is.True);
+            Assert.That(result.AppliedMigrations[0], Does.Contain("v1 -> v2").And.Contain("simulation settings"));
+            SimulationSettingsData simulation = result.Document.Settings.Simulation;
+            Assert.That(simulation, Is.Not.Null);
+            Assert.That(simulation.ClockFrequency, Is.EqualTo(2f));
+            Assert.That(simulation.ClockEnabled, Is.True);
+            Assert.That(simulation.PowerOnState, Is.EqualTo("Resolved"));
+            Assert.That(result.Document.Settings.GridVisible, Is.False, "Other settings are untouched.");
+        }
+
+        [Test]
+        public void MissingSimulationSettings_AreNormalizedToDefaults()
+        {
+            JObject json = JObject.Parse(ProjectSerializer.ToJson(BuildDocument(BuildRoot())));
+            ((JObject)json["settings"]).Remove("simulation");
+            ProjectLoadResult result = new ProjectDeserializer().Read(json.ToString());
+            Assert.That(result.Document.Settings.Simulation.PowerOnState, Is.EqualTo("Resolved"));
+        }
     }
 
     public sealed class ProjectFileStoreTests

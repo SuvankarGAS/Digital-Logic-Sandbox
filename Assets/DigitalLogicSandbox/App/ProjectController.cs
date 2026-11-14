@@ -17,6 +17,7 @@ using DigitalLogicSandbox.Persistence.Deserialization;
 using DigitalLogicSandbox.Persistence.Migration;
 using DigitalLogicSandbox.Persistence.Recovery;
 using DigitalLogicSandbox.Rendering.Wires;
+using DigitalLogicSandbox.Simulation.Engine;
 using DigitalLogicSandbox.TruthTable.Generation;
 using DigitalLogicSandbox.UI;
 using UnityEngine;
@@ -321,6 +322,9 @@ namespace DigitalLogicSandbox.App
                 settings.TruthTable.ConfirmRows = _truthTableLimits.ConfirmRows;
             }
 
+            settings.Simulation.ClockFrequency = _workspace.ClockFrequency;
+            settings.Simulation.ClockEnabled = _workspace.ClockEnabled;
+            settings.Simulation.PowerOnState = _workspace.PowerOnState.ToString();
             if (_workspace.WorkspaceCamera != null)
             {
                 settings.Camera.HasValue = true;
@@ -346,6 +350,8 @@ namespace DigitalLogicSandbox.App
                     _library.Add(document.Definitions[i]);
                 }
 
+                // Power-on mode must be in place before the main circuit is compiled and powered on.
+                ApplySimulationSettings(document.Settings?.Simulation);
                 _workspace.LoadCircuit(document.RootCircuit);
                 foreach (KeyValuePair<PortId, Signal> input in document.InputValues)
                 {
@@ -362,6 +368,16 @@ namespace DigitalLogicSandbox.App
             {
                 _suppressDirty--;
             }
+        }
+
+        private void ApplySimulationSettings(SimulationSettingsData simulation)
+        {
+            simulation ??= new SimulationSettingsData();
+            _workspace.ClockFrequency = simulation.ClockFrequency;
+            _workspace.ClockEnabled = simulation.ClockEnabled;
+            _workspace.PowerOnState = Enum.TryParse(simulation.PowerOnState, out PowerOnState powerOn)
+                ? powerOn
+                : PowerOnState.Resolved;
         }
 
         private void ApplySettings(ProjectSettingsData settings)

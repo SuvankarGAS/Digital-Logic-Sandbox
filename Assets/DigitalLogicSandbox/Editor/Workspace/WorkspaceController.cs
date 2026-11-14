@@ -90,7 +90,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
         /// <summary>Raised on a right-click without dragging.</summary>
         public event Action<ContextMenuRequest> ContextMenuRequested;
 
-        /// <summary>Raised when a persisted workspace setting changes (grid, snapping, visualization mode).</summary>
+        /// <summary>Raised when a persisted workspace setting changes (grid, snapping, visualization mode, clock).</summary>
         public event Action SettingsChanged;
 
         public bool IsInitialized => _navigator != null;
@@ -110,6 +110,72 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
         public CircuitSession Session => _navigator?.Current?.Session ?? _navigator?.RootSession;
 
         public SimulationRunner Runner => Session?.Runner;
+
+        /// <summary>Clock frequency in full cycles per second (shared by the main circuit and drafts).</summary>
+        public float ClockFrequency
+        {
+            get => _navigator != null ? _navigator.ClockFrequency : SimulationRunner.DefaultClockFrequency;
+            set
+            {
+                if (_navigator == null)
+                {
+                    return;
+                }
+
+                float before = _navigator.ClockFrequency;
+                _navigator.ClockFrequency = value;
+                if (!Mathf.Approximately(before, _navigator.ClockFrequency))
+                {
+                    MarkStatusDirty();
+                    SettingsChanged?.Invoke();
+                }
+            }
+        }
+
+        /// <summary>Whether clock nodes tick in real time while the simulation plays.</summary>
+        public bool ClockEnabled
+        {
+            get => _navigator == null || _navigator.ClockEnabled;
+            set
+            {
+                if (_navigator != null && _navigator.ClockEnabled != value)
+                {
+                    _navigator.ClockEnabled = value;
+                    MarkStatusDirty();
+                    SettingsChanged?.Invoke();
+                }
+            }
+        }
+
+        /// <summary>How feedback loops start on load and Reset (takes effect at the next Reset).</summary>
+        public PowerOnState PowerOnState
+        {
+            get => _navigator != null ? _navigator.PowerOnState : PowerOnState.Resolved;
+            set
+            {
+                if (_navigator != null && _navigator.PowerOnState != value)
+                {
+                    _navigator.PowerOnState = value;
+                    MarkStatusDirty();
+                    SettingsChanged?.Invoke();
+                }
+            }
+        }
+
+        /// <summary>Applies one clock edge to the shown level's simulation (e.g. clicking a clock node).</summary>
+        public bool TickClock()
+        {
+            SimulationRunner runner = Runner;
+            if (runner == null || runner.Context == null || !runner.HasClock)
+            {
+                Notification?.Invoke("This circuit has no clock.");
+                return false;
+            }
+
+            runner.TickClock();
+            MarkStatusDirty();
+            return true;
+        }
 
         /// <summary>Undo history of the shown level (an always-empty history for read-only levels).</summary>
         public CommandHistory History => _navigator?.Current?.History ?? _readOnlyHistory;
@@ -297,6 +363,12 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             if (!IsInitialized)
             {
                 return;
+            }
+
+            // The clock ticks in real time for the shown level only; the simulation never waits for animation.
+            if (Session?.Runner.Advance(Time.unscaledDeltaTime) > 0)
+            {
+                MarkStatusDirty();
             }
 
             Sync();

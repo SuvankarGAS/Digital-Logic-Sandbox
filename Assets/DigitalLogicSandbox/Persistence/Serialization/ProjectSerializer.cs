@@ -137,6 +137,9 @@ namespace DigitalLogicSandbox.Persistence.Serialization
                         nodeDto.Kind = NodeDto.KindOutput;
                         nodeDto.Port = node.InterfacePort.Value;
                         break;
+                    case ComponentKind.Clock:
+                        nodeDto.Kind = NodeDto.KindClock;
+                        break;
                     default:
                         throw new InvalidOperationException("Unknown component kind " + node.Component.Kind + ".");
                 }

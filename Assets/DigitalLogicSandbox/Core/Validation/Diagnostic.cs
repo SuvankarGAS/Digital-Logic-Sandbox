@@ -50,6 +50,16 @@ namespace DigitalLogicSandbox.Core.Validation
 
         // Analysis
         TruthTableTooLarge,
+
+        // Sequential logic (Phase B)
+        /// <summary>Feedback loop: allowed, the circuit stores state (warning).</summary>
+        FeedbackLoop,
+
+        /// <summary>A feedback loop never settled at runtime; its nets were set to unknown.</summary>
+        Oscillation,
+
+        /// <summary>A combinational-only analysis was requested for a circuit with state or a clock.</summary>
+        SequentialCircuit,
     }
 
     /// <summary>A single validation finding with enough context for the UI to highlight the culprit.</summary>

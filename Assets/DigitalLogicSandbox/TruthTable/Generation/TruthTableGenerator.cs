@@ -19,8 +19,9 @@ namespace DigitalLogicSandbox.TruthTable.Generation
     /// touched, so there is nothing to capture or restore and the user's input values cannot change.
     /// </para>
     /// <para>
-    /// Only combinational circuits are accepted: a feedback loop means the outputs can depend on history, which an
-    /// ordinary truth table cannot describe, so such circuits are refused with an explanation.
+    /// Only combinational circuits are accepted. A feedback loop or a clock means the outputs can depend on history,
+    /// which an ordinary truth table cannot describe, so such circuits are refused with an explanation that points
+    /// to <see cref="SequenceAnalyzer"/> (explicit power-on state and input/clock steps).
     /// </para>
     /// </summary>
     public sealed class TruthTableGenerator
@@ -129,12 +130,13 @@ namespace DigitalLogicSandbox.TruthTable.Generation
                     "'" + definition.Name + "' has no outputs, so there is nothing to tabulate. Add an output first."));
             }
 
-            if (circuit.HasCombinationalCycles)
+            if (circuit.IsSequential)
             {
-                report.Add(new Diagnostic(DiagnosticSeverity.Error, DiagnosticCode.CombinationalCycle,
-                    "'" + definition.Name + "' contains a feedback loop. Truth tables describe combinational " +
-                    "circuits only: a loop can hold state or oscillate, so its outputs are not a function of the " +
-                    "current inputs."));
+                string reason = circuit.HasCombinationalCycles ? "contains a feedback loop" : "uses the clock";
+                report.Add(new Diagnostic(DiagnosticSeverity.Error, DiagnosticCode.SequentialCircuit,
+                    "'" + definition.Name + "' " + reason + ", so it is sequential: its outputs depend on stored " +
+                    "state, not only on the current inputs, and a truth table cannot describe it. Use Sequence " +
+                    "Analysis to run explicit input and clock steps from a chosen power-on state."));
             }
 
             if (inputs.Length > Limits.EffectiveMaxInputs)

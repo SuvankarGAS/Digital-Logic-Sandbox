@@ -194,8 +194,9 @@ CircuitDefinition ──CircuitCompiler──► CompiledCircuit (immutable, sha
    - Feedback loops in the flat gate graph are found with `CycleFinder` and reported as **warnings**
      (`CompiledCircuit.CombinationalCycles`); the engine guards them at runtime.
 2. **Context** (`Simulation.Context.SimulationContext`). Holds the net values, dirty flags, the ring-buffer
-   worklist and scratch spans, all sized from the compiled topology at construction. `Reset()` sets all nets
-   LOW, evaluates every gate once and settles (so NOT outputs start HIGH). This is the only whole-circuit
+   worklist and scratch spans, all sized from the compiled topology at construction. `Reset()` drives inputs
+   LOW, sets gate-driven nets unknown, evaluates every gate once and settles (so NOT outputs start HIGH), then
+   resolves feedback loops according to the power-on state (section 15). This is the only whole-circuit
    evaluation.
 3. **Propagate (event-driven).** `SetInput` writes the net and schedules only its readers. `Settle()` pops
    gates FIFO, evaluates them through `IPrimitiveComponent.Evaluate(span, span)`, and schedules fan-out only
@@ -207,11 +208,11 @@ CircuitDefinition ──CircuitCompiler──► CompiledCircuit (immutable, sha
    it and call `Clear()`. It is capped: if nobody drains it, `Overflowed` asks for a full refresh. Contexts
    used for analysis set `RecordChanges = false`. The engine never waits for a consumer.
 5. **Controls** (`SimulationRunner`). Running = settle on each input change. Paused = apply inputs, defer
-   propagation. Step = one wave. Play = resume and flush. Reset = all LOW. `Load(compiled)` swaps in a
+   propagation. Step = one wave. Play = resume and flush. Reset = power-on (inputs and clock LOW, loops re-initialised). `Load(compiled)` swaps in a
    recompiled circuit after an edit and **carries input values over by stable `PortId`**. A reload clears the
    change log, because it is a full refresh, not an animation.
-6. **Sequential extension point.** `Settle()` is the combinational phase. A future clock step will run
-   `Settle → commit ISequentialComponent state → Settle` around it without changing the propagation loop.
+6. **Sequential logic (Phase B).** Memory is built from feedback loops of AND/NOT gates, so the engine needs
+   no sequential primitive. The timing model, power-on state and clock are described in section 15.
 
 **Hierarchy map.** `CompiledInstance` mirrors the expanded scopes (root → child per custom node id) and maps
 each scope's output pins to dense nets. `GetInputPinNet` resolves an input pin through its connection, or to
@@ -366,8 +367,9 @@ TruthTableExporter`.
   - Work is sliced with `Advance(rows)` or `AdvanceFor(ms)` on the main thread; no threads are used.
   - `Cancel()` and `RunToCompletion(CancellationToken)` stop it, and produced rows stay valid.
 - **Storage.** Inputs are implied by the row index, and outputs are stored as one `Signal` byte per cell.
-- **Sequential circuits.** Circuits with feedback are refused with an explanation. A future sequential analysis
-  mode will need explicit initialization and clock sequences.
+- **Sequential circuits.** Circuits with feedback or a clock (`CompiledCircuit.IsSequential`) are refused with
+  the code `SequentialCircuit`. The explanation points to **sequence analysis** (section 15), which runs
+  explicit input and clock steps from a chosen power-on state.
 - **UI.**
   - `TruthTableJobDriver` (TruthTable.UI) is the only per-frame component.
   - `TruthTableDialog` (UI) has a fixed header and a virtualized list of 40 pooled rows, each one rich-text
@@ -379,7 +381,7 @@ TruthTableExporter`.
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "format": "DigitalLogicSandbox.Project",
   "app": { "name": "Digital Logic Sandbox", "version": "0.1.0" },
   "name": "My project",
@@ -387,7 +389,8 @@ TruthTableExporter`.
   "settings": { "gridVisible": true, "snapToGrid": true, "visualizationMode": "Standard",
                 "animation": { "enabled": true, "speed": 1.0, "showParticles": true, "maxBatchSeconds": 3.0 },
                 "truthTable": { "maxInputs": 16, "maxRows": 65536, "confirmRows": 1024 },
-                "camera": { "hasValue": true, "x": 0, "y": 0, "size": 12 } },
+                "camera": { "hasValue": true, "x": 0, "y": 0, "size": 12 },
+                "simulation": { "clockFrequency": 2.0, "clockEnabled": true, "powerOnState": "Resolved" } },
   "rootCircuit": { "id": "…", "version": 1, "nodes": [ … ], "connections": [ … ], "nextNodeId": 9, … },
   "definitions": [ { "id": "…", "version": 2, "published": true, "inputs": [ … ], "nodes": [ … ] } ],
   "inputValues": [ { "port": 1, "value": "High" } ]
@@ -399,7 +402,9 @@ TruthTableExporter`.
   `App.ProjectController` maps the editor state to and from a `ProjectDocument`. The UI only sees
   `UI.IProjectService`.
 - DTOs are separate from domain types; no Unity types are serialized. A node is `primitive`, `custom`
-  (definition id and version), `input` or `output` (interface port).
+  (definition id and version), `input` or `output` (interface port), or `clock`.
+- **Schema history:** v1 is the initial release. v2 (Phase B) adds `clock` nodes and `settings.simulation`,
+  and `AddSimulationSettingsMigration` fills in the defaults when opening v1 files.
 - Each `(id, version)` is written once, regardless of instance count. Instances reference definitions by id
   and version, so old versions stay pinned exactly as in memory.
 - **Loading:**
@@ -494,7 +499,8 @@ UI panels (toolbar, library) --> WorkspaceController --> CommandHistory --> Circ
 | Future feature | Extension point |
 |---|---|
 | New primitives (only if ever needed) | Implement `IPrimitiveComponent`, register it |
-| Sequential logic / clocks | `ISequentialComponent` + commit phase in the engine loop |
+| Sequential logic / clocks | Done (Phase B): gate-level feedback, unit delay, global clock net (section 15) |
+| Multiple clock domains | Named clocks: one compiled net per clock name instead of the single `ClockNet` |
 | Buses / multi-bit | `PortDefinition.Width`; net values become spans of `Signal` |
 | Tri-state, contention | `Signal.HighImpedance` + net resolver replacing the single-driver rule |
 | Displays (LED, 7-seg) | Output-side utility components with custom views; no logic change |
@@ -516,3 +522,46 @@ UI panels (toolbar, library) --> WorkspaceController --> CommandHistory --> Circ
   implementation details.
 - No `Update()` on per-gate/per-wire MonoBehaviours; a few central controllers tick everything.
 - Every phase ships with tests; `ArchitectureTests` must stay green.
+
+## 15. Sequential logic *(implemented – Phase B)*
+
+Memory is built from gates. A latch is two cross-coupled NANDs (AND + NOT), a flip-flop is two packaged
+latches, and so on. The engine has no sequential primitive. What makes this well-defined:
+
+- **Unit-delay waves.** `SimulationContext.RunWave` evaluates every gate queued for the wave against the net
+  values committed at the start of the wave. It writes their outputs to pending buffers
+  (`_pendingNets` / `_pendingValues`). `CommitWave` then applies the changes together and queues the readers
+  for the next wave. Every gate therefore has exactly one wave of delay, so races resolve the same way
+  whatever the gate creation order. Combinational results are unchanged, and the wave count equals the
+  logic depth. Budget checks happen once per wave.
+- **Power-on (`Reset`).** Gate-driven nets start `Unknown`, every gate is queued, and the circuit settles.
+  If the circuit has cycles and `PowerOnState.Resolved` is set (the default), `ResolveLoops` takes the
+  remaining unknown loop nets in compiled gate order, forces each one LOW and settles. This repeats until
+  none remain. Each forced net counts once (`ResolvedLoopNets`). The result is binary and repeatable for a
+  given circuit. `PowerOnState.Unknown` skips this step, so loops stay X until inputs drive them.
+- **Oscillation.** When a settle runs out of budget, `HandleOscillation` sets the outputs of the gates still
+  switching to `Unknown`. Since NOT X = X and AND with X is X unless another input is 0, the circuit settles.
+  The status is `Oscillating`, and `SimulationDiagnostics` reports an `Oscillation` warning.
+- **Clock.** `ComponentKind.Clock` is a utility node (`ComponentRef.IsUtility`) with no inputs and one output.
+  The compiler unions every clock node in the whole hierarchy into one net (`CompiledCircuit.ClockNet`), so
+  a packaged counter and the circuit around it share one clock. `SimulationContext.SetClock` drives that
+  net like an input.
+  - `SimulationRunner` owns time: `Advance(dt)` applies one edge per half period while it is running and the
+    clock is enabled. It is capped at 8 edges per call and drops any backlog.
+  - `TickClock()` applies a manual edge, and `Step()` starts the next edge when the circuit is idle.
+  - The workspace calls `Advance` for the shown level in `LateUpdate`, before `Sync`. Clock edges therefore
+    flow through the normal change log and animation pipeline. The simulation never waits for animation.
+- **Feedback is legal.** Validation and the compiler report loops as `FeedbackLoop` warnings, and
+  self-connections are allowed. `CompiledCircuit.IsSequential` (cycles or a clock) is what consumers check.
+- **Sequence analysis** (`TruthTable.Generation.SequenceAnalyzer`):
+  - It is the analysis mode for sequential circuits. The input is a `SequenceSpec`: per-input 0/1 patterns
+    (an input holds its last value), the step count, `PowerOnState`, and `PulseClock`.
+  - It compiles into a fresh, non-recording context; the live context is never touched. Row 0 is the
+    power-on state.
+  - Each step sets the inputs and settles. If the circuit is clocked, the step then drives the clock HIGH,
+    settles, drives it LOW and settles.
+  - Unstable rows are flagged. Each result describes one stimulus, not the whole circuit: the dialog and
+    the docs say so, and the truth table keeps refusing these circuits.
+- **Settings.** `ClockFrequency`, `ClockEnabled` and `PowerOnState` are project settings, stored in
+  `settings.simulation` (schema v2). The main and draft sessions share them through one `SimulationOptions`
+  instance and the navigator.

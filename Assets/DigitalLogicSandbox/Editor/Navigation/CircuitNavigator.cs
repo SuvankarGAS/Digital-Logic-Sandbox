@@ -38,9 +38,10 @@ namespace DigitalLogicSandbox.CircuitEditor.Navigation
         {
             _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
             _library = library ?? throw new ArgumentNullException(nameof(library));
-            _options = options;
+            // One options instance shared by every session, so the power-on mode is a single project setting.
+            _options = options ?? new SimulationOptions();
             MaxDepth = maxDepth;
-            _rootSession = new CircuitSession(catalog, options);
+            _rootSession = new CircuitSession(catalog, _options);
             _rootHistory = new CommandHistory();
             _rootSession.Rebuilt += RaiseActivity;
             _rootSession.Runner.StateChanged += OnRunnerStateChanged;
@@ -67,6 +68,54 @@ namespace DigitalLogicSandbox.CircuitEditor.Navigation
         public int CurrentIndex => _levels.Count - 1;
 
         public CircuitSession RootSession => _rootSession;
+
+        /// <summary>Clock frequency (full cycles per second) of every session's runner.</summary>
+        public float ClockFrequency
+        {
+            get => _rootSession.Runner.ClockFrequency;
+            set
+            {
+                _rootSession.Runner.ClockFrequency = value;
+                if (_draftSession != null)
+                {
+                    _draftSession.Runner.ClockFrequency = value;
+                }
+            }
+        }
+
+        /// <summary>Whether clocks tick in real time while a session is running.</summary>
+        public bool ClockEnabled
+        {
+            get => _rootSession.Runner.ClockEnabled;
+            set
+            {
+                _rootSession.Runner.ClockEnabled = value;
+                if (_draftSession != null)
+                {
+                    _draftSession.Runner.ClockEnabled = value;
+                }
+            }
+        }
+
+        /// <summary>Power-on state of feedback loops for every session (applies on the next load or reset).</summary>
+        public PowerOnState PowerOnState
+        {
+            get => _options.PowerOnState;
+            set
+            {
+                _rootSession.Runner.PowerOnState = value; // shared options instance
+                if (_draftSession != null)
+                {
+                    _draftSession.Runner.PowerOnState = value;
+                }
+            }
+        }
+
+        private void ApplyClockSettings(SimulationRunner runner)
+        {
+            runner.ClockFrequency = _rootSession.Runner.ClockFrequency;
+            runner.ClockEnabled = _rootSession.Runner.ClockEnabled;
+        }
 
         public CommandHistory RootHistory => _rootHistory;
 
@@ -274,6 +323,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Navigation
             NavigationLevel inspected = Current;
             CircuitDefinition draft = DefinitionVersioning.CreateDraft(_library, inspected.Circuit);
             _draftSession = new CircuitSession(_catalog, _options);
+            ApplyClockSettings(_draftSession.Runner);
             _draftSession.Rebuilt += RaiseActivity;
             _draftSession.Runner.StateChanged += OnRunnerStateChanged;
             _draftSession.Bind(draft);

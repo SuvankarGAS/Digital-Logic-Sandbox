@@ -400,7 +400,7 @@ namespace DigitalLogicSandbox.Tests.EditMode.Simulation
         }
 
         [Test]
-        public void OddNotRing_IsDetectedAsOscillationWithoutHanging()
+        public void OddNotRing_OscillationCollapsesToUnknownWithoutHanging()
         {
             var circuit = new CircuitDefinition(DefinitionId.New(), "Ring");
             NodeDefinition n1 = circuit.AddNode(Not, CircuitPoint.Zero);
@@ -412,21 +412,35 @@ namespace DigitalLogicSandbox.Tests.EditMode.Simulation
 
             CompileResult compiled = new CircuitCompiler(_env.Catalog).Compile(circuit);
             Assert.That(compiled.Succeeded, Is.True, "Loops compile (with a warning).");
-            Assert.That(compiled.Report.Contains(DiagnosticCode.CombinationalCycle), Is.True);
+            Assert.That(compiled.Report.Contains(DiagnosticCode.FeedbackLoop), Is.True);
             Assert.That(compiled.Circuit.HasCombinationalCycles, Is.True);
+            Assert.That(compiled.Circuit.IsSequential, Is.True);
 
+            // Resolved power-on forces a ring net LOW, which starts the oscillation.
             var options = new SimulationOptions { MinimumEvaluationBudget = 500 };
             var context = new SimulationContext(compiled.Circuit, options);
 
             Assert.That(context.LastResult.Status, Is.EqualTo(SettleStatus.Oscillating));
-            Assert.That(context.LastResult.Evaluations, Is.EqualTo(500));
+            Assert.That(context.LastResult.Evaluations, Is.GreaterThanOrEqualTo(500));
             Assert.That(context.UnstableGates.Count, Is.GreaterThan(0));
             Assert.That(context.HasPendingWork, Is.False, "Aborted work is cleared.");
+            for (int net = 1; net < compiled.Circuit.NetCount; net++)
+            {
+                Assert.That(context.GetNet(net), Is.EqualTo(Signal.Unknown), "The oscillating loop collapses to X.");
+            }
 
             var report = new ValidationReport();
             SimulationDiagnostics.ReportLastSettle(context, report);
-            Assert.That(report.HasErrors, Is.True);
+            Assert.That(report.Contains(DiagnosticCode.Oscillation), Is.True);
             Assert.That(report.Diagnostics[0].Message, Does.Contain("Ring"));
+
+            Assert.That(context.Settle().Status, Is.EqualTo(SettleStatus.Stable), "X is a fixed point.");
+
+            // With an unknown power-on state the ring never starts: it simply stays X.
+            var unknown = new SimulationContext(compiled.Circuit,
+                new SimulationOptions { MinimumEvaluationBudget = 500, PowerOnState = PowerOnState.Unknown });
+            Assert.That(unknown.LastResult.Status, Is.EqualTo(SettleStatus.Stable));
+            Assert.That(unknown.GetNet(1), Is.EqualTo(Signal.Unknown));
         }
 
         [Test]

@@ -74,7 +74,8 @@ namespace DigitalLogicSandbox.Rendering.Gates
             bool isCustom = geometry.Kind == ComponentKind.Custom;
             bool isInput = geometry.Kind == ComponentKind.InputBoundary;
             bool isOutput = geometry.Kind == ComponentKind.OutputBoundary;
-            bool isBoundary = isInput || isOutput;
+            bool isClock = geometry.Kind == ComponentKind.Clock;
+            bool isBoundary = isInput || isOutput || isClock; // utility box with a state indicator
 
             _fill.color = isBoundary ? _theme.BoundaryFill : isCustom ? _theme.CustomGateFill : _theme.GateFill;
 
@@ -85,7 +86,7 @@ namespace DigitalLogicSandbox.Rendering.Gates
             Vector2 statePosition = Vector2.zero;
             if (isBoundary)
             {
-                Vector2 pinOffset = isInput ? geometry.OutputPins[0] : geometry.InputPins[0];
+                Vector2 pinOffset = isOutput ? geometry.InputPins[0] : geometry.OutputPins[0];
                 statePosition = -pinOffset.normalized * (Mathf.Max(size.x, size.y) * 0.5f - indicator * 0.5f - 0.15f);
                 _state.transform.localPosition = statePosition;
                 _state.transform.localScale = Vector3.one * indicator;
@@ -357,7 +358,8 @@ namespace DigitalLogicSandbox.Rendering.Gates
                 return;
             }
 
-            Color fill = _geometry.Kind == ComponentKind.InputBoundary || _geometry.Kind == ComponentKind.OutputBoundary
+            Color fill = _geometry.Kind == ComponentKind.InputBoundary || _geometry.Kind == ComponentKind.OutputBoundary ||
+                _geometry.Kind == ComponentKind.Clock
                 ? _theme.BoundaryFill
                 : _geometry.Kind == ComponentKind.Custom ? _theme.CustomGateFill : _theme.GateFill;
             _fill.color = Tint(fill);
