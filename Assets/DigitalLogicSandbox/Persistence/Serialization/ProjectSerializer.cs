@@ -153,6 +153,10 @@ namespace DigitalLogicSandbox.Persistence.Serialization
                     case ComponentKind.TriState:
                         nodeDto.Kind = NodeDto.KindTriState;
                         break;
+                    case ComponentKind.Display:
+                        nodeDto.Kind = NodeDto.KindDisplay;
+                        nodeDto.Style = DisplayStyles.ToId(node.Component.DisplayStyle);
+                        break;
                     default:
                         throw new InvalidOperationException("Unknown component kind " + node.Component.Kind + ".");
                 }

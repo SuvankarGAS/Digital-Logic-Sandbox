@@ -35,6 +35,7 @@ namespace DigitalLogicSandbox.UI.Panels
         public const int DefaultJoinInputs = 2;
 
         private RectTransform _busRoot;
+        private RectTransform _displayRoot;
         private TMP_InputField _busWidthField;
         private TMP_InputField _joinInputsField;
         private int _busWidth = DefaultBusWidth;
@@ -221,6 +222,14 @@ namespace DigitalLogicSandbox.UI.Panels
             busLayout.childControlWidth = true;
             busLayout.childControlHeight = true;
             busLayout.childForceExpandHeight = false;
+
+            Section("Displays");
+            _displayRoot = UiFactory.CreateRect("Display Components", _content);
+            var displayLayout = _displayRoot.gameObject.AddComponent<VerticalLayoutGroup>();
+            displayLayout.spacing = 4f;
+            displayLayout.childControlWidth = true;
+            displayLayout.childControlHeight = true;
+            displayLayout.childForceExpandHeight = false;
             RebuildBusItems();
 
             Section("My Custom Gates");
@@ -262,6 +271,16 @@ namespace DigitalLogicSandbox.UI.Panels
                 _joinInputs + " drivers onto one " + bits + " bus");
             AddBusItem(ComponentRef.TriState(_busWidth), "Tri-state", bits + " driver with enable");
             AddBusItem(ComponentRef.TriState(1), "Tri-state (1-bit)", "driver with enable");
+
+            // Displays: LED and seven-segment have fixed single-bit inputs; the others follow the bus width.
+            AddDisplayItem(ComponentRef.Display(DisplayStyle.Led), "LED", "lamp, lit while HIGH");
+            AddDisplayItem(ComponentRef.Display(DisplayStyle.SevenSegment), "7-Segment", "one digit, inputs a-g and dp");
+            AddDisplayItem(ComponentRef.Display(DisplayStyle.Binary, _busWidth), "Binary Display", bits + " as lamps");
+            AddDisplayItem(ComponentRef.Display(DisplayStyle.Hex, _busWidth), "Hex Display", bits + " as hex digits");
+            AddDisplayItem(ComponentRef.Display(DisplayStyle.Decimal, _busWidth), "Decimal Display",
+                bits + " unsigned number");
+            AddDisplayItem(ComponentRef.Display(DisplayStyle.SignedDecimal, _busWidth), "Signed Display",
+                bits + " two's complement number");
             SetFilter(_filter);
         }
 
@@ -269,6 +288,13 @@ namespace DigitalLogicSandbox.UI.Panels
         {
             LibraryItemView item = AddItem(_busRoot, new PlacementRequest(component, title), title, detail, null,
                 "bus wiring");
+            _busItems.Add(item);
+        }
+
+        private void AddDisplayItem(ComponentRef component, string title, string detail)
+        {
+            LibraryItemView item = AddItem(_displayRoot ? _displayRoot : _busRoot, new PlacementRequest(component, title),
+                title, detail, null, "display output led seven segment hex decimal binary");
             _busItems.Add(item);
         }
 

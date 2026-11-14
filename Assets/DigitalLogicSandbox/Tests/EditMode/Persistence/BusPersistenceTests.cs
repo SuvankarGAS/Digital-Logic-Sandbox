@@ -95,7 +95,7 @@ namespace DigitalLogicSandbox.Tests.EditMode.Persistence
             }
 
             Assert.That((string)parsed["inputValues"][0]["value"], Is.EqualTo("High"));
-            Assert.That((int)parsed["schemaVersion"], Is.EqualTo(3));
+            Assert.That((int)parsed["schemaVersion"], Is.EqualTo(ProjectFormat.CurrentSchemaVersion));
         }
 
         [Test]

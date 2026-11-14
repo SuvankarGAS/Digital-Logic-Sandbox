@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using DigitalLogicSandbox.Core.Nodes;
 using DigitalLogicSandbox.Core.Ports;
+using DigitalLogicSandbox.Rendering.Displays;
 using UnityEngine;
 
 namespace DigitalLogicSandbox.Rendering.Gates
@@ -25,10 +26,19 @@ namespace DigitalLogicSandbox.Rendering.Gates
         /// <summary>Body width of splitters and mergers.</summary>
         public const float WiringWidth = 1.2f;
 
+        /// <summary>Unscaled size of one seven-segment digit of a hex/decimal display, and the gap between digits.</summary>
+        public const float DigitWidth = 1f;
+        public const float DigitHeight = 1.7f;
+        public const float DigitGap = 0.3f;
+
+        /// <summary>Distance between the lamps of a binary display.</summary>
+        public const float LampPitch = 0.5f;
+
         /// <param name="icon">Optional short user icon of a custom gate, shown before the pin summary.</param>
         public static GateGeometry Compute(ComponentKind kind, ComponentSignature signature, Rotation rotation,
-            string title, string icon = null)
+            string title, string icon = null, DisplayStyle display = DisplayStyle.Led)
         {
+            Rect displayArea = default;
             IReadOnlyList<PortDescriptor> inputs = signature.Inputs;
             IReadOnlyList<PortDescriptor> outputs = signature.Outputs;
             Vector2 size;
@@ -68,6 +78,12 @@ namespace DigitalLogicSandbox.Rendering.Gates
                 float edge = size.x * 0.5f;
                 PlacePins(inputPins, -edge);
                 PlacePins(outputPins, edge);
+            }
+            else if (kind == ComponentKind.Display)
+            {
+                // Inputs on the left (labelled a–g, dp on a seven-segment display); lamps or digits fill the body.
+                size = DisplaySize(display, busWidth, out displayArea);
+                PlacePins(inputPins, -size.x * 0.5f);
             }
             else if (boundary || kind == ComponentKind.Clock)
             {
@@ -116,6 +132,15 @@ namespace DigitalLogicSandbox.Rendering.Gates
                 size = new Vector2(size.y, size.x);
             }
 
+            if (kind == ComponentKind.Display)
+            {
+                Vector2 areaSize = rotation == Rotation.R90 || rotation == Rotation.R270
+                    ? new Vector2(displayArea.height, displayArea.width)
+                    : displayArea.size;
+                Vector2 areaCenter = Rotate(displayArea.center, rotation);
+                displayArea = new Rect(areaCenter - areaSize * 0.5f, areaSize);
+            }
+
             var inputPorts = new PortId[inputs.Count];
             for (int i = 0; i < inputPorts.Length; i++)
             {
@@ -145,7 +170,11 @@ namespace DigitalLogicSandbox.Rendering.Gates
             }
             string[] inputNames = null;
             string[] outputNames = null;
-            if (HasPinLabels(kind))
+            if (kind == ComponentKind.Display && display == DisplayStyle.SevenSegment)
+            {
+                inputNames = Names(inputs);
+            }
+            else if (HasPinLabels(kind))
             {
                 inputNames = Names(inputs);
                 outputNames = Names(outputs);
@@ -160,7 +189,46 @@ namespace DigitalLogicSandbox.Rendering.Gates
             }
 
             return new GateGeometry(kind, title, subtitle, size, rotation, inputPorts, inputPins, outputPorts, outputPins,
-                inputNames, outputNames, bitCells, busWidth);
+                inputNames, outputNames, bitCells, busWidth, display, displayArea);
+        }
+
+        /// <summary>
+        /// Unrotated body size of a display and the area its lamps or digits occupy (centred, node-local).
+        /// </summary>
+        public static Vector2 DisplaySize(DisplayStyle style, int width, out Rect area)
+        {
+            Vector2 size;
+            Vector2 center;
+            Vector2 content;
+            switch (style)
+            {
+                case DisplayStyle.Led:
+                    size = new Vector2(1.6f, 1.2f);
+                    center = new Vector2(0.15f, 0f);
+                    content = new Vector2(0.8f, 0.8f);
+                    break;
+                case DisplayStyle.SevenSegment:
+                    size = new Vector2(4f, 8f * PinSpacing);
+                    center = new Vector2(0.35f, 0f);
+                    content = new Vector2(2.4f, 6.4f);
+                    break;
+                case DisplayStyle.Binary:
+                    content = new Vector2(width * LampPitch, LampPitch);
+                    size = new Vector2(Mathf.Max(BoundarySize.x, content.x + 1.0f), 1.6f);
+                    center = new Vector2(0.1f, -0.25f);
+                    break;
+                default:
+                {
+                    int digits = DisplayEncoding.DigitCount(style, width);
+                    content = new Vector2(digits * (DigitWidth + DigitGap) - DigitGap, DigitHeight);
+                    size = new Vector2(Mathf.Max(BoundarySize.x, content.x + 1.2f), 2.7f);
+                    center = new Vector2(0.1f, -0.3f);
+                    break;
+                }
+            }
+
+            area = new Rect(center - content * 0.5f, content);
+            return size;
         }
 
         /// <summary>Kinds whose pins are labelled inside the body (their pins differ in meaning).</summary>

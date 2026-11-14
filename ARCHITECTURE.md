@@ -406,7 +406,8 @@ TruthTableExporter`.
 - **Schema history:** v1 is the initial release. v2 (Phase B) adds `clock` nodes and `settings.simulation`,
   and `AddSimulationSettingsMigration` fills in the defaults when opening v1 files. v3 (Phase C) adds optional
   node `width`/`arity`, the bus node kinds and decimal bus input values (`AddBusSupportMigration`, no-op).
-  See section 16.
+  See section 16. v4 (Phase D) adds the `display` node kind with a `style`
+  (`AddDisplaysMigration`, no-op); see section 17.
 - Each `(id, version)` is written once, regardless of instance count. Instances reference definitions by id
   and version, so old versions stay pinned exactly as in memory.
 - **Loading:**
@@ -506,7 +507,8 @@ UI panels (toolbar, library) --> WorkspaceController --> CommandHistory --> Circ
 | Buses / multi-bit | Done (Phase C): pin widths, splitter/merger, buses flattened to bit nets (section 16) |
 | Tri-state, contention | Done (Phase C): tri-state utility, bus join, shared-net resolver (section 16) |
 | Multi-bit primitives | Signatures with wide pins are bit-sliced by the compiler automatically |
-| Displays (LED, 7-seg) | Output-side utility components with custom views; no logic change |
+| Displays (LED, 7-seg, hex, decimal) | Done (Phase D): `Display` utility kind + `DisplayStyle`, presenter-driven views (section 17) |
+| New display styles | Add a `DisplayStyle`, its decoding in `DisplayEncoding`, a size in `GateLayout.DisplaySize` and a library entry |
 | New file schema | Add an `IMigration` |
 
 ---
@@ -621,3 +623,28 @@ latches, and so on. The engine has no sequential primitive. What makes this well
   - Optional node `width` and `arity`, and node kinds `splitter`, `merger`, `busjoin` and `tristate`.
   - Input values are "Low"/"High" for 0/1 and decimal otherwise, e.g.
     `{ "kind": "input", "port": 1, "width": 8 }` and `{ "port": 1, "value": "165" }`.
+
+## 17. Visual components *(implemented – Phase D)*
+
+- **Model.** `ComponentKind.Display` with a `DisplayStyle` on `ComponentRef` (`ComponentRef.Display(style,
+  width)`). Displays are utilities: no outputs, no internal circuit, no truth-table entry.
+
+  | Style | Inputs | Shows |
+  |---|---|---|
+  | `Led` | IN (1 bit) | one lamp |
+  | `SevenSegment` | a, b, c, d, e, f, g, dp (1 bit each) | one digit, raw segments |
+  | `Binary` | IN (w bits) | w lamps, MSB on the left |
+  | `Hex` | IN (w bits) | ceil(w/4) hex digits |
+  | `Decimal` | IN (w bits) | unsigned value, right-aligned |
+  | `SignedDecimal` | IN (w ≥ 2 bits) | two's-complement value with a minus sign |
+
+- **Data flow.** Displays are not compiled (they drive nothing). After each compile the presenter resolves the
+  nets a display reads (`CompiledInstance.GetInputPinNet`) and registers a `DisplayInputs` target on each
+  distinct net. Signal changes (or an animated wire arrival) push the input signals into `GateView`, which
+  decodes them with `DisplayEncoding` and recolours its pooled `DisplayVisual` sprites. Nothing in Core,
+  Simulation or TruthTable knows about display rendering.
+- **Decoding.** `DisplayEncoding` is pure: segment masks (bit 0 = a … bit 6 = g, bit 7 = dp), glyphs 0–F,
+  decimal and signed digits, dashes when a bit is X or Z, and `FormatValue` for the inspector and tests.
+- **Layout.** `GateLayout.DisplaySize` gives each style's body and content area; content is drawn upright and
+  scaled into the rotated `GateGeometry.DisplayArea`.
+- **Persistence (schema v4).** `{ "kind": "display", "style": "hex", "width": 8 }`.

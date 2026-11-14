@@ -9,6 +9,7 @@ using DigitalLogicSandbox.Core.Connections;
 using DigitalLogicSandbox.Core.Nodes;
 using DigitalLogicSandbox.Core.Ports;
 using DigitalLogicSandbox.Core.Signals;
+using DigitalLogicSandbox.Rendering.Gates;
 using DigitalLogicSandbox.Simulation.Engine;
 using TMPro;
 using UnityEngine;
@@ -333,6 +334,11 @@ namespace DigitalLogicSandbox.UI.Inspector
                 {
                     _ui.Property(_content, "Width", node.Component.Width + " bits");
                 }
+
+                if (node.Component.Kind == ComponentKind.Display)
+                {
+                    _liveValues.Add(LiveValue.ForDisplay(_ui.Property(_content, "Shows", "-"), node.Id));
+                }
             }
 
             _ui.Property(_content, "Position", node.Position.X.ToString("0.##", CultureInfo.InvariantCulture) + ", " +
@@ -548,6 +554,15 @@ namespace DigitalLogicSandbox.UI.Inspector
                     continue;
                 }
 
+                if (live.IsDisplay)
+                {
+                    live.Text.text = _workspace.Presenter.TryGetGateView(live.Node, out GateView display)
+                        ? display.DisplayText
+                        : "-";
+                    live.Text.color = _ui.Theme.TextPrimary;
+                    continue;
+                }
+
                 Signal value;
                 if (live.IsWire)
                 {
@@ -648,6 +663,8 @@ namespace DigitalLogicSandbox.UI.Inspector
                     return "Bus join (" + component.Arity + " drivers)";
                 case ComponentKind.TriState:
                     return "Tri-state driver";
+                case ComponentKind.Display:
+                    return DisplayStyles.DisplayName(component.DisplayStyle);
                 default:
                     return "Circuit output";
             }
@@ -674,8 +691,10 @@ namespace DigitalLogicSandbox.UI.Inspector
 
         private readonly struct LiveValue
         {
-            private LiveValue(TextMeshProUGUI text, NodeId node, bool input, PinRef wire, bool isWire, bool compact)
+            private LiveValue(TextMeshProUGUI text, NodeId node, bool input, PinRef wire, bool isWire, bool compact,
+                bool isDisplay = false)
             {
+                IsDisplay = isDisplay;
                 Compact = compact;
                 Text = text;
                 Node = node;
@@ -693,6 +712,14 @@ namespace DigitalLogicSandbox.UI.Inspector
             public PinRef Wire { get; }
 
             public bool IsWire { get; }
+
+            /// <summary>Reading of a display node (taken from its view).</summary>
+            public bool IsDisplay { get; }
+
+            public static LiveValue ForDisplay(TextMeshProUGUI text, NodeId node)
+            {
+                return new LiveValue(text, node, false, default, false, false, true);
+            }
 
             /// <summary>Show "0"/"1" instead of "0 (LOW)" (narrow columns).</summary>
             public bool Compact { get; }

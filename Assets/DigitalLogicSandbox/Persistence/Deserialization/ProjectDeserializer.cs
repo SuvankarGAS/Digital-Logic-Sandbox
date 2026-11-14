@@ -308,6 +308,17 @@ namespace DigitalLogicSandbox.Persistence.Deserialization
                     circuit.RestoreNode(id, ComponentRef.Utility(ComponentKind.TriState, WidthOf(node)), position,
                         rotation, node.Label);
                     break;
+                case NodeDto.KindDisplay:
+                {
+                    if (!DisplayStyles.TryParseId(node.Style, out DisplayStyle style))
+                    {
+                        throw new ArgumentException("Unknown display style '" + node.Style + "'.");
+                    }
+
+                    circuit.RestoreNode(id, ComponentRef.Utility(ComponentKind.Display, WidthOf(node), (int)style),
+                        position, rotation, node.Label);
+                    break;
+                }
                 case NodeDto.KindInput:
                 case NodeDto.KindOutput:
                 {

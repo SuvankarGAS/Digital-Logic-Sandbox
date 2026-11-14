@@ -233,8 +233,9 @@ namespace DigitalLogicSandbox.Core.Validation
                             "Output '" + PortName(circuit, node.InterfacePort) + "' is not driven and will read LOW.",
                             node.Id, pin));
                     }
-                    else if (_options.WarnUnconnectedInputs)
+                    else if (_options.WarnUnconnectedInputs && node.Component.Kind != ComponentKind.Display)
                     {
+                        // Displays are observers: an unused segment or decimal point is normal, not a mistake.
                         report.Add(new Diagnostic(DiagnosticSeverity.Warning, DiagnosticCode.UnconnectedInput,
                             "Input '" + inputs[p].Name + "' of node " + node.Id + " (" + node.Component +
                             ") is unconnected and will read LOW.", node.Id, pin));

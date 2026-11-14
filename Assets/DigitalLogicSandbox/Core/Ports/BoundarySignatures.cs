@@ -110,6 +110,32 @@ namespace DigitalLogicSandbox.Core.Ports
                 new[] { new PortDescriptor(TriStateOutput, "OUT", width) }));
         }
 
+        /// <summary>Segment input names of a seven-segment display, in pin order (pin id = index + 1).</summary>
+        public static readonly string[] SegmentNames = { "a", "b", "c", "d", "e", "f", "g", "dp" };
+
+        /// <summary>
+        /// Display pins: a seven-segment display has one input per segment (<see cref="BitPin"/>(0..7) = a–g, dp);
+        /// every other style has the single input <see cref="Pin"/> of the display width. Displays have no outputs.
+        /// </summary>
+        public static ComponentSignature Display(DisplayStyle style, int width)
+        {
+            return Cached(6, width, (int)style, () =>
+            {
+                if (style != DisplayStyle.SevenSegment)
+                {
+                    return new ComponentSignature(new[] { new PortDescriptor(Pin, "IN", width) }, null);
+                }
+
+                var segments = new PortDescriptor[SegmentNames.Length];
+                for (int i = 0; i < segments.Length; i++)
+                {
+                    segments[i] = new PortDescriptor(BitPin(i), SegmentNames[i]);
+                }
+
+                return new ComponentSignature(segments, null);
+            });
+        }
+
         /// <summary>The signature of any utility reference, or null for primitives and custom gates.</summary>
         public static ComponentSignature ForUtility(ComponentRef component)
         {
@@ -129,6 +155,8 @@ namespace DigitalLogicSandbox.Core.Ports
                     return BusJoin(component.Width, component.Arity);
                 case ComponentKind.TriState:
                     return TriState(component.Width);
+                case ComponentKind.Display:
+                    return Display(component.DisplayStyle, component.Width);
                 default:
                     return null;
             }

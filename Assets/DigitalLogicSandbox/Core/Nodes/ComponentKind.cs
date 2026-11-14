@@ -38,5 +38,12 @@ namespace DigitalLogicSandbox.Core.Nodes
         /// behaviour; it is evaluated bit by bit and appears under "Bus", not among the built-in logic gates.
         /// </summary>
         TriState = 8,
+
+        /// <summary>
+        /// Visual output utility (Phase D): LED, seven-segment, binary, hexadecimal or decimal display. Reads the
+        /// nets wired to its inputs and drives nothing, so it is ignored by the compiler and the truth table. The
+        /// <see cref="DisplayStyle"/> is carried by <see cref="ComponentRef.Display"/>.
+        /// </summary>
+        Display = 9,
     }
 }

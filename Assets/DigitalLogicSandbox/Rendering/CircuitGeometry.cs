@@ -89,7 +89,7 @@ namespace DigitalLogicSandbox.Rendering
                 _catalog.TryGetDefinition(component.Definition, out CircuitDefinition definition)
                     ? definition.Icon
                     : null;
-            return GateLayout.Compute(component.Kind, signature, Rotation.R0, title, icon);
+            return GateLayout.Compute(component.Kind, signature, Rotation.R0, title, icon, component.DisplayStyle);
         }
 
         public Vector2 GetPosition(NodeId id)
@@ -220,8 +220,28 @@ namespace DigitalLogicSandbox.Rendering
                     return "JOIN";
                 case ComponentKind.TriState:
                     return "TRI";
+                case ComponentKind.Display:
+                    return DisplayCaption(component.DisplayStyle);
                 default:
                     return "Output";
+            }
+        }
+
+        /// <summary>Small caption above a display's digits or lamps (none for LEDs and seven-segment digits).</summary>
+        public static string DisplayCaption(DisplayStyle style)
+        {
+            switch (style)
+            {
+                case DisplayStyle.Binary:
+                    return "BIN";
+                case DisplayStyle.Hex:
+                    return "HEX";
+                case DisplayStyle.Decimal:
+                    return "DEC";
+                case DisplayStyle.SignedDecimal:
+                    return "SIGNED";
+                default:
+                    return string.Empty;
             }
         }
 
@@ -239,7 +259,8 @@ namespace DigitalLogicSandbox.Rendering
                 icon = definition.Icon;
             }
 
-            return GateLayout.Compute(node.Component.Kind, signature, node.Rotation, TitleOf(node), icon);
+            return GateLayout.Compute(node.Component.Kind, signature, node.Rotation, TitleOf(node), icon,
+                node.Component.DisplayStyle);
         }
 
         private void InvalidateWiresOf(NodeId node)

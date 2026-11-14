@@ -74,6 +74,7 @@ namespace DigitalLogicSandbox.Persistence.Serialization
         public const string KindMerger = "merger";
         public const string KindBusJoin = "busjoin";
         public const string KindTriState = "tristate";
+        public const string KindDisplay = "display";
 
         public int Id;
         public string Kind;
@@ -98,6 +99,10 @@ namespace DigitalLogicSandbox.Persistence.Serialization
         /// <summary>Number of driver inputs of a bus join.</summary>
         [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
         public int? Arity;
+
+        /// <summary>What a display node shows (see <c>DisplayStyles.ToId</c>).</summary>
+        [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+        public string Style;
 
         public float X;
         public float Y;

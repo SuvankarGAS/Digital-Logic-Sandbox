@@ -32,6 +32,7 @@ namespace DigitalLogicSandbox.Rendering.Gates
         private SpriteRenderer _stateRing;
         private TextMeshPro _title;
         private TextMeshPro _subtitle;
+        private DisplayVisual _display;
         private GateGeometry _geometry;
         private Signal _stateSignal;
         private bool _selected;
@@ -61,6 +62,7 @@ namespace DigitalLogicSandbox.Rendering.Gates
             view._state = CreateSprite(go.transform, "State", RenderAssets.Circle, theme, SortingOrders.GateState + 1);
             view._title = CreateText(go.transform, "Title", 3.6f, FontStyles.Bold);
             view._subtitle = CreateText(go.transform, "Subtitle", 2.2f, FontStyles.Normal);
+            view._display = new DisplayVisual(go.transform, theme);
             return view;
         }
 
@@ -81,7 +83,7 @@ namespace DigitalLogicSandbox.Rendering.Gates
             bool isBus = geometry.IsBusBoundary;
             bool isBoundary = (isInput || isOutput || isClock) && !isBus; // utility box with a state indicator
 
-            _fill.color = isBoundary || isBus ? _theme.BoundaryFill : isCustom ? _theme.CustomGateFill : _theme.GateFill;
+            _fill.color = isBoundary || isBus || geometry.IsDisplay ? _theme.BoundaryFill : isCustom ? _theme.CustomGateFill : _theme.GateFill;
 
             // Boundary state indicator sits at the end away from the pin.
             _state.gameObject.SetActive(isBoundary);
@@ -110,6 +112,13 @@ namespace DigitalLogicSandbox.Rendering.Gates
                     -statePosition.normalized.y * shift, 0f);
                 _title.fontSize = 3.0f;
             }
+            else if (geometry.IsDisplay)
+            {
+                // Display: a small caption (BIN/HEX/DEC/SIGNED) along the top edge.
+                _title.transform.localPosition = new Vector3(0.1f, size.y * 0.5f - 0.3f, 0f);
+                _title.rectTransform.sizeDelta = new Vector2(size.x, 0.5f);
+                _title.fontSize = 2.2f;
+            }
             else if (isBus)
             {
                 // Bus boundary: "NAME = value" above the bit cells.
@@ -133,6 +142,7 @@ namespace DigitalLogicSandbox.Rendering.Gates
             ConfigureLabels(_inputLabels, geometry.InputNames, geometry.InputPins, "InLabel");
             ConfigureLabels(_outputLabels, geometry.OutputNames, geometry.OutputPins, "OutLabel");
             ConfigureBitCells(geometry.BitCells);
+            _display.Configure(geometry);
 
             ApplyOutline();
             ApplyState();
@@ -185,6 +195,7 @@ namespace DigitalLogicSandbox.Rendering.Gates
                 _bitCells[i].sortingOrder = SortingOrders.GateState + offset;
             }
 
+            _display.SetGhost(ghost, offset);
             ApplyOutline();
             ApplyGhostTint();
         }
@@ -240,6 +251,49 @@ namespace DigitalLogicSandbox.Rendering.Gates
         public Signal GetBitSignal(int bit)
         {
             return _bitSignals[bit];
+        }
+
+        /// <summary>True when this view draws a display (LED, seven-segment, binary, hex or decimal).</summary>
+        public bool IsDisplay => _display.IsActive;
+
+        /// <summary>Input bits a display reads (8 for seven-segment: a–g, dp).</summary>
+        public int DisplayInputCount => _display.InputCount;
+
+        /// <summary>Seven-segment digits a display draws.</summary>
+        public int DisplayDigitCount => _display.DigitCount;
+
+        /// <summary>Plain-text reading of a display, e.g. "ON", "A5", "-91", "1010" or "?".</summary>
+        public string DisplayText => _display.Text;
+
+        /// <summary>Sets one display input; call <see cref="CommitDisplay"/> after the last change.</summary>
+        public void SetDisplayInput(int index, Signal signal)
+        {
+            _display.SetInput(index, signal);
+        }
+
+        /// <summary>Decodes the display inputs and redraws lamps or digits.</summary>
+        public void CommitDisplay()
+        {
+            _display.Commit();
+        }
+
+        public void ResetDisplay()
+        {
+            if (_display.IsActive)
+            {
+                _display.Reset();
+            }
+        }
+
+        public Signal GetDisplayInput(int index)
+        {
+            return _display.GetInput(index);
+        }
+
+        /// <summary>Segment mask of one display digit (0 = leftmost; bit 0 = a … bit 6 = g).</summary>
+        public byte GetDisplayDigit(int index)
+        {
+            return _display.GetDigit(index);
         }
 
         /// <summary>The readout shown on a bus boundary, e.g. "A = 10" or "A = ?" when a bit is not binary.</summary>
@@ -473,7 +527,7 @@ namespace DigitalLogicSandbox.Rendering.Gates
             }
 
             Color fill = _geometry.Kind == ComponentKind.InputBoundary || _geometry.Kind == ComponentKind.OutputBoundary ||
-                _geometry.Kind == ComponentKind.Clock
+                _geometry.Kind == ComponentKind.Clock || _geometry.Kind == ComponentKind.Display
                 ? _theme.BoundaryFill
                 : _geometry.Kind == ComponentKind.Custom ? _theme.CustomGateFill : _theme.GateFill;
             _fill.color = Tint(fill);

@@ -16,6 +16,7 @@
 | 9 | Polish & optimization | ✅ Complete (2026-11-14) |
 | B | Sequential logic (future-expansion phase B) | ✅ Complete (2026-11-14) |
 | C | Multi-bit logic: buses, tri-state, contention (future-expansion phase C) | ✅ Complete (2026-11-14) |
+| D | Visual components: LED, seven-segment, binary, hex, decimal displays (future-expansion phase D) | ✅ Complete (2026-11-14) |
 
 ---
 
@@ -1001,3 +1002,68 @@ is still exactly AND and NOT; every bus component is a circuit utility, like the
 - Bus widths up to 32 bits. Truth tables of bus circuits count each bit as an input, so the normal limits
   apply.
 
+## Phase D – Visual components (2026-11-14)
+
+LEDs, seven-segment displays, binary displays, hexadecimal displays and numeric (decimal) displays. Displays
+are pure observers: they read the nets wired to their inputs and drive nothing. The simulation engine,
+compiler, truth tables and the built-in gate library (still exactly AND and NOT) are unchanged.
+
+### Implemented
+- **Model.** One new utility kind, `ComponentKind.Display = 9`, with a `DisplayStyle`
+  (`Led`, `SevenSegment`, `Binary`, `Hex`, `Decimal`, `SignedDecimal`) stored on `ComponentRef`
+  (`ComponentRef.Display(style, width)`, `ComponentRef.DisplayStyle`). `DisplayStyles` gives width limits,
+  persistence ids and display names. `IsUtility` covers displays, so they never appear in truth tables or gate
+  counts.
+- **Signatures** (`BoundarySignatures.Display`): a seven-segment display has eight single-bit inputs
+  a, b, c, d, e, f, g, dp (`BitPin(0..7)`); an LED has one input; the bus styles have one input of the display
+  width (1–32 bits, signed decimal 2–32). No outputs. Width-mismatched connections are rejected as for buses.
+- **Compiler and engine:** nothing to do. A display has no outputs, so it compiles to nothing; the presenter
+  reads its input nets through `CompiledInstance.GetInputPinNet` (unconnected inputs read the floating LOW net).
+- **Validation:** unconnected display inputs (e.g. an unused decimal point) are not reported as warnings.
+- **Decoding** (`Rendering.Displays.DisplayEncoding`, pure and allocation-free): conventional seven-segment
+  glyphs for 0–F, digit/lamp/input counts per style, right-aligned unsigned and two's-complement decimal digits
+  with a minus sign, dashes when a bus bit is UNKNOWN or Z, and a plain-text reading (`FormatValue`: "ON",
+  "b c", "10100101", "A5", "165", "-91", "?").
+- **Rendering.**
+  - `GateLayout.DisplaySize` sizes each style; `GateGeometry` carries `DisplayStyle` and a rotated
+    `DisplayArea`. Seven-segment displays label their pins a–g, dp.
+  - `DisplayVisual` (owned and pooled by `GateView`) draws lamps (LED, binary; MSB on the left) or
+    seven-segment digits on a dark screen, scaled upright into the display area. Lit segments use the HIGH
+    colour and unlit ones a dim tone; a raw segment that is X or Z uses that signal's colour; an unreadable bus
+    value shows dashes in the UNKNOWN colour. Sprites are created only when a larger display needs more.
+  - `CircuitPresenter` registers one `DisplayInputs` target on every distinct net a display reads; any change
+    re-reads those nets and redraws the display. With animation on, a display updates when the signal arrives
+    over its wire (a seven-segment display per segment, bus displays as a whole).
+- **Editor UI.** A "Displays" library section: LED, 7-Segment, and Binary/Hex/Decimal/Signed displays that
+  follow the *Bus width* field. The inspector shows the display type, width and a live "Shows" reading.
+- **Persistence (schema v4).** Node kind `display` with `style` (`led`, `sevensegment`, `binary`, `hex`,
+  `decimal`, `signeddecimal`) and the usual optional `width`. `AddDisplaysMigration` (v3→v4) is a no-op step.
+
+### Decisions
+- **One `Display` kind with a style** instead of five kinds: one switch case per site, and a new style only
+  touches `DisplayStyles`, `DisplayEncoding`, the layout and the library.
+- **Displays read the model, not the engine.** No simulation change and no evaluation cost, and displays work
+  at every hierarchy level (a display inside a custom gate shows that instance's values when inspected).
+- **Raw-segment seven-segment display plus decoded hex/decimal displays.** Users can build their own BCD or
+  hex decoders from AND/NOT and drive the raw segments, or show a bus value directly.
+- **Decoding is pure and kept apart from the views,** so it is unit-tested without a scene.
+
+### Test results
+- EditMode: **346 / 346 passed** (11 new, `DisplayTests`): references and width limits (primitives still 2),
+  signatures, hex glyphs, digit counts, hex/decimal/signed encoding including -128, dashes for unreadable
+  values, text readings, layout (labelled seven-segment pins, rotated display area), validation (no unused-input
+  warnings, width mismatch rejected, still compiles), v4 round trip, and v3 files still load.
+- PlayMode: **66 / 66 passed** (5 new, `DisplayWorkspaceTests`): library entries follow the bus width; hex,
+  decimal, signed and binary displays show 0xA5 as A5 / 165 / -91 / 10100101 and follow undo; LED and
+  seven-segment follow single-bit inputs; displays update when an animated signal arrives; a display project
+  survives Save, New Project and Open.
+- Manual: play-mode screenshot of an 8-bit input driving hex, decimal, signed and binary displays, an LED, and
+  a seven-segment digit drawing "3" with the decimal point.
+
+### Known issues / deferred
+- A display's style and width are fixed when it is placed (as for bus components); place a new one to change
+  them.
+- LEDs have a single colour (the HIGH signal colour); per-LED colours would need one more `ComponentRef`
+  parameter.
+- Decimal displays are integer only (no fixed-point or BCD input mode); BCD can be shown with 4-bit hex
+  displays, one per digit.

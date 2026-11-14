@@ -29,7 +29,7 @@ namespace DigitalLogicSandbox.Core.Nodes
             PrimitiveId = primitiveId;
             Definition = definition;
             _widthMinusOne = (byte)(Math.Max(1, Math.Min(PortDescriptor.MaxWidth, width)) - 1);
-            _arity = (byte)Math.Max(0, Math.Min(MaxBusJoinInputs, arity));
+            _arity = (byte)Math.Max(0, Math.Min(byte.MaxValue, arity));
         }
 
         public ComponentKind Kind { get; }
@@ -44,7 +44,10 @@ namespace DigitalLogicSandbox.Core.Nodes
         public int Width => _widthMinusOne + 1;
 
         /// <summary>Number of driver inputs of a bus join (0 for everything else).</summary>
-        public int Arity => _arity;
+        public int Arity => Kind == ComponentKind.BusJoin ? _arity : 0;
+
+        /// <summary>What a <see cref="ComponentKind.Display"/> node shows (LED for every other kind).</summary>
+        public DisplayStyle DisplayStyle => Kind == ComponentKind.Display ? (DisplayStyle)_arity : DisplayStyle.Led;
 
         public bool IsBoundary => Kind == ComponentKind.InputBoundary || Kind == ComponentKind.OutputBoundary;
 
@@ -55,7 +58,8 @@ namespace DigitalLogicSandbox.Core.Nodes
         /// Circuit utilities (boundaries, clock, bus wiring, tri-state drivers): not logic gates from the gate
         /// library, no internal circuit to inspect, no truth table entry.
         /// </summary>
-        public bool IsUtility => IsBoundary || Kind == ComponentKind.Clock || IsWiring || Kind == ComponentKind.TriState;
+        public bool IsUtility => IsBoundary || Kind == ComponentKind.Clock || IsWiring || Kind == ComponentKind.TriState ||
+            Kind == ComponentKind.Display;
 
         public static ComponentRef Primitive(string primitiveId)
         {
@@ -126,6 +130,28 @@ namespace DigitalLogicSandbox.Core.Nodes
         }
 
         /// <summary>
+        /// A visual display. LED and seven-segment displays have fixed single-bit inputs (width 1); the bus styles
+        /// read one <paramref name="width"/>-bit input (signed decimal needs at least 2 bits).
+        /// </summary>
+        public static ComponentRef Display(DisplayStyle style, int width = 1)
+        {
+            if (style > DisplayStyles.Last)
+            {
+                throw new ArgumentOutOfRangeException(nameof(style), style, "Unknown display style.");
+            }
+
+            int min = DisplayStyles.MinWidth(style);
+            int max = DisplayStyles.MaxWidth(style);
+            if (width < min || width > max)
+            {
+                throw new ArgumentOutOfRangeException(nameof(width), width,
+                    DisplayStyles.DisplayName(style) + " width must be between " + min + " and " + max + ".");
+            }
+
+            return new ComponentRef(ComponentKind.Display, null, default, width, (int)style);
+        }
+
+        /// <summary>
         /// Rebuilds a utility reference from persisted parameters (lenient: out-of-range values are clamped so a
         /// damaged file still loads).
         /// </summary>
@@ -142,7 +168,13 @@ namespace DigitalLogicSandbox.Core.Nodes
                 case ComponentKind.Merger:
                     return new ComponentRef(kind, null, default, Math.Max(2, width));
                 case ComponentKind.BusJoin:
-                    return new ComponentRef(kind, null, default, width, Math.Max(2, arity));
+                    return new ComponentRef(kind, null, default, width, Math.Max(2, Math.Min(MaxBusJoinInputs, arity)));
+                case ComponentKind.Display:
+                {
+                    DisplayStyle style = arity >= 0 && arity <= (int)DisplayStyles.Last ? (DisplayStyle)arity : DisplayStyle.Led;
+                    int clamped = Math.Max(DisplayStyles.MinWidth(style), Math.Min(DisplayStyles.MaxWidth(style), width));
+                    return new ComponentRef(kind, null, default, clamped, (int)style);
+                }
                 default:
                     throw new ArgumentException("Not a utility kind: " + kind + ".", nameof(kind));
             }
@@ -195,6 +227,8 @@ namespace DigitalLogicSandbox.Core.Nodes
                     return "custom:" + Definition;
                 case ComponentKind.BusJoin:
                     return "BusJoin[" + Width + "x" + Arity + "]";
+                case ComponentKind.Display:
+                    return "Display:" + DisplayStyles.ToId(DisplayStyle) + (Width > 1 ? "[" + Width + "]" : string.Empty);
                 default:
                     return Width > 1 ? Kind + "[" + Width + "]" : Kind.ToString();
             }

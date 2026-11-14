@@ -31,6 +31,7 @@ namespace DigitalLogicSandbox.Rendering
         private readonly Dictionary<PinRef, WireView> _wires = new Dictionary<PinRef, WireView>();
         private readonly Dictionary<int, List<NetTarget>> _netTargets = new Dictionary<int, List<NetTarget>>();
         private readonly Dictionary<PinRef, int[]> _busWireNets = new Dictionary<PinRef, int[]>();
+        private readonly Dictionary<NodeId, int[]> _displayNets = new Dictionary<NodeId, int[]>();
         private readonly HashSet<NodeId> _selectedNodes = new HashSet<NodeId>();
         private readonly List<ConnectionDefinition> _scratchConnections = new List<ConnectionDefinition>();
         private readonly List<PinRef> _highlightedPins = new List<PinRef>();
@@ -257,6 +258,7 @@ namespace DigitalLogicSandbox.Rendering
             _wires.Clear();
             _netTargets.Clear();
             _busWireNets.Clear();
+            _displayNets.Clear();
             _selectedNodes.Clear();
             _highlightedPins.Clear();
             _selectedWire = null;
@@ -288,6 +290,7 @@ namespace DigitalLogicSandbox.Rendering
             _scope = null;
             _netTargets.Clear();
             _busWireNets.Clear();
+            _displayNets.Clear();
             RefreshAllSignals();
         }
 
@@ -325,6 +328,12 @@ namespace DigitalLogicSandbox.Rendering
             for (int i = 0; i < targets.Count; i++)
             {
                 NetTarget target = targets[i];
+                if (target.Kind == NetTargetKind.DisplayInputs)
+                {
+                    RefreshDisplay(target.Node, target.Bus);
+                    continue;
+                }
+
                 Signal value = target.Bus != null ? Aggregate(target.Bus) : signal;
                 switch (target.Kind)
                 {
@@ -418,9 +427,45 @@ namespace DigitalLogicSandbox.Rendering
             return _scope.TryGetOutputPinNet(connection.Source, out int net) ? net : -1;
         }
 
+        /// <summary>Reads every input of a display from the model and redraws it.</summary>
+        private void RefreshDisplay(NodeId node, int[] nets)
+        {
+            if (_context == null || !_gates.TryGetValue(node, out GateView view))
+            {
+                return;
+            }
+
+            for (int i = 0; i < nets.Length; i++)
+            {
+                view.SetDisplayInput(i, _context.GetNet(nets[i]));
+            }
+
+            view.CommitDisplay();
+        }
+
+        /// <summary>
+        /// Nets read by a display, in display-input order: segments a–g and dp of a seven-segment display, otherwise
+        /// the bits of its single input (bit 0 first). Unconnected inputs read the floating (LOW) net.
+        /// </summary>
+        private int[] DisplayNets(NodeId node, GateGeometry geometry)
+        {
+            int count = Displays.DisplayEncoding.InputCount(geometry.DisplayStyle, geometry.BusWidth);
+            var nets = new int[count];
+            for (int i = 0; i < count; i++)
+            {
+                nets[i] = geometry.DisplayStyle == DisplayStyle.SevenSegment
+                    ? _scope.GetInputPinNet(new PinRef(node, BoundarySignatures.BitPin(i)))
+                    : _scope.GetInputPinNet(new PinRef(node, BoundarySignatures.Pin), i);
+            }
+
+            return nets;
+        }
+
         private void RebuildNetIndex()
         {
             _netTargets.Clear();
+            _busWireNets.Clear();
+            _displayNets.Clear();
             if (_scope == null || _circuit == null)
             {
                 return;
@@ -440,6 +485,26 @@ namespace DigitalLogicSandbox.Rendering
                     if (node.Component.Kind == ComponentKind.OutputBoundary && !busBoundary)
                     {
                         AddTarget(_scope.GetInputPinNet(pin), new NetTarget(NetTargetKind.LampState, node.Id, 0, default));
+                    }
+                }
+
+                if (geometry.IsDisplay)
+                {
+                    int[] nets = DisplayNets(node.Id, geometry);
+                    _displayNets[node.Id] = nets;
+                    var target = new NetTarget(NetTargetKind.DisplayInputs, node.Id, 0, default, nets);
+                    for (int bit = 0; bit < nets.Length; bit++)
+                    {
+                        bool duplicate = false;
+                        for (int j = 0; j < bit; j++)
+                        {
+                            duplicate |= nets[j] == nets[bit];
+                        }
+
+                        if (!duplicate)
+                        {
+                            AddTarget(nets[bit], target);
+                        }
                     }
                 }
 
@@ -671,6 +736,20 @@ namespace DigitalLogicSandbox.Rendering
             {
                 gate.SetStateSignal(signal);
             }
+
+            if (gate.IsDisplay && _displayNets.TryGetValue(destination.Node, out int[] displayNets))
+            {
+                if (gate.Geometry.DisplayStyle == DisplayStyle.SevenSegment)
+                {
+                    // Each segment lights as its own wire's signal arrives.
+                    gate.SetDisplayInput(BoundarySignatures.IndexOfBitPin(destination.Port), signal);
+                    gate.CommitDisplay();
+                }
+                else
+                {
+                    RefreshDisplay(destination.Node, displayNets);
+                }
+            }
         }
 
         private void RefreshAllSignals()
@@ -697,6 +776,7 @@ namespace DigitalLogicSandbox.Rendering
                     }
 
                     gate.SetStateSignal(Signal.Low);
+                    gate.ResetDisplay();
                     for (int bit = 0; bit < gate.BitCount; bit++)
                     {
                         gate.SetBitSignal(bit, Signal.Low);
@@ -737,6 +817,11 @@ namespace DigitalLogicSandbox.Rendering
                 {
                     view.SetOutputSignal(p, Aggregate(nets));
                 }
+            }
+
+            if (geometry.IsDisplay && _displayNets.TryGetValue(node, out int[] displayNets))
+            {
+                RefreshDisplay(node, displayNets);
             }
 
             if (geometry.IsBusBoundary)
@@ -934,6 +1019,9 @@ namespace DigitalLogicSandbox.Rendering
 
             /// <summary>One bit cell of a bus output (receiving side); <c>Index</c> is the bit.</summary>
             LampBit,
+
+            /// <summary>A display (Phase D); <c>Bus</c> holds all nets it reads, and any change redraws it.</summary>
+            DisplayInputs,
         }
 
         private readonly struct NetTarget

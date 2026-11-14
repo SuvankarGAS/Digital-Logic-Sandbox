@@ -12,8 +12,11 @@ namespace DigitalLogicSandbox.Rendering.Gates
     {
         public GateGeometry(ComponentKind kind, string title, string subtitle, Vector2 size, Rotation rotation,
             PortId[] inputPorts, Vector2[] inputPins, PortId[] outputPorts, Vector2[] outputPins,
-            string[] inputNames = null, string[] outputNames = null, Vector2[] bitCells = null, int busWidth = 1)
+            string[] inputNames = null, string[] outputNames = null, Vector2[] bitCells = null, int busWidth = 1,
+            DisplayStyle displayStyle = DisplayStyle.Led, Rect displayArea = default)
         {
+            DisplayStyle = displayStyle;
+            DisplayArea = displayArea;
             BitCells = bitCells ?? System.Array.Empty<Vector2>();
             BusWidth = busWidth;
             InputNames = inputNames ?? System.Array.Empty<string>();
@@ -46,6 +49,15 @@ namespace DigitalLogicSandbox.Rendering.Gates
 
         /// <summary>True for bus input/output boundaries (drawn with bit cells and a value readout).</summary>
         public bool IsBusBoundary => BitCells.Length > 0;
+
+        /// <summary>True for visual display nodes (Phase D).</summary>
+        public bool IsDisplay => Kind == ComponentKind.Display;
+
+        /// <summary>What a display node shows (meaningless for other kinds).</summary>
+        public DisplayStyle DisplayStyle { get; }
+
+        /// <summary>Node-local area (rotation applied) holding a display's lamps or digits.</summary>
+        public Rect DisplayArea { get; }
 
         /// <summary>Widest pin of the node in bits (1 for single-bit nodes).</summary>
         public int BusWidth { get; }

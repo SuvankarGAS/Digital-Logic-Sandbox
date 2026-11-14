@@ -65,6 +65,7 @@ namespace DigitalLogicSandbox.Persistence.Migration
             {
                 new AddSimulationSettingsMigration(),
                 new AddBusSupportMigration(),
+                new AddDisplaysMigration(),
             });
         }
 
