@@ -25,6 +25,15 @@ namespace DigitalLogicSandbox.UI.Toolbar
         private Button _inspect;
         private Button _truthTable;
 
+        /// <summary>Project buttons: New, Open, Save, Save As.</summary>
+        public event System.Action NewRequested;
+
+        public event System.Action OpenRequested;
+
+        public event System.Action SaveRequested;
+
+        public event System.Action SaveAsRequested;
+
         /// <summary>Raised by the "Signals" button (signal visualization settings).</summary>
         public event System.Action SignalSettingsRequested;
 
@@ -35,6 +44,17 @@ namespace DigitalLogicSandbox.UI.Toolbar
         public event System.Action TruthTableRequested;
 
         public Button CreateGateButton => _createGate;
+
+        public Button NewButton { get; private set; }
+
+        public Button OpenButton { get; private set; }
+
+        public Button SaveButton { get; private set; }
+
+        public Button SaveAsButton { get; private set; }
+
+        /// <summary>Project name with a "*" while there are unsaved changes.</summary>
+        public string TitleText => _title.text;
 
         public Button InspectButton => _inspect;
 
@@ -64,9 +84,13 @@ namespace DigitalLogicSandbox.UI.Toolbar
             var view = background.gameObject.AddComponent<ToolbarView>();
             view._workspace = workspace;
 
-            view._title = ui.Text("Title", rect, "Digital Logic Sandbox", 15f, ui.Theme.TextPrimary,
+            view._title = ui.Text("Title", rect, "Untitled", 15f, ui.Theme.TextPrimary,
                 TextAlignmentOptions.MidlineLeft, FontStyles.Bold);
-            view._title.gameObject.AddComponent<LayoutElement>().preferredWidth = 190f;
+            view._title.gameObject.AddComponent<LayoutElement>().preferredWidth = 150f;
+            view.NewButton = ui.Button("New", rect, "New", () => view.NewRequested?.Invoke());
+            view.OpenButton = ui.Button("Open", rect, "Open", () => view.OpenRequested?.Invoke());
+            view.SaveButton = ui.Button("Save", rect, "Save", () => view.SaveRequested?.Invoke());
+            view.SaveAsButton = ui.Button("SaveAs", rect, "Save As", () => view.SaveAsRequested?.Invoke());
             ui.Separator(rect, vertical: true);
 
             view._undo = ui.Button("Undo", rect, "Undo", () => workspace.Undo());
@@ -96,6 +120,12 @@ namespace DigitalLogicSandbox.UI.Toolbar
             workspace.StatusChanged += view.Refresh;
             view.Refresh();
             return view;
+        }
+
+        /// <summary>Shows the project name; <paramref name="dirty"/> appends "*".</summary>
+        public void SetProjectTitle(string name, bool dirty)
+        {
+            _title.text = (string.IsNullOrEmpty(name) ? "Untitled" : name) + (dirty ? " *" : string.Empty);
         }
 
         public void Refresh()

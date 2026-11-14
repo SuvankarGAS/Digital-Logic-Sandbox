@@ -34,6 +34,12 @@ namespace DigitalLogicSandbox.App
         [Tooltip("Truth table limits: maximum inputs and rows, confirmation threshold and per-frame time budget.")]
         [SerializeField] private TruthTableLimits _truthTableLimits = new TruthTableLimits();
 
+        [Tooltip("Editor only: reopen the last project and offer autosave recovery when entering play mode. Builds always do.")]
+        [SerializeField] private bool _restoreLastSessionInEditor;
+
+        [Tooltip("Seconds between autosaves while there are unsaved changes.")]
+        [SerializeField] private float _autosaveIntervalSeconds = 60f;
+
         private WorkspaceControls _controls;
 
         public static AppBootstrap Instance { get; private set; }
@@ -45,6 +51,10 @@ namespace DigitalLogicSandbox.App
         public WorkspaceController Workspace { get; private set; }
 
         public AppShell Shell { get; private set; }
+
+        public ProjectController Projects { get; private set; }
+
+        public TruthTableLimits TruthTableLimits => _truthTableLimits;
 
         public VisualTheme Theme => _theme;
 
@@ -88,15 +98,23 @@ namespace DigitalLogicSandbox.App
                 SignalAnimation = _signalAnimation ?? new SignalAnimationSettings(),
             });
 
-            Shell = AppShell.Create(_theme, Workspace, Catalog, Library, _truthTableLimits ?? new TruthTableLimits());
-            NewCircuit();
+            _truthTableLimits ??= new TruthTableLimits();
+            Projects = gameObject.AddComponent<ProjectController>();
+            Projects.AutosaveIntervalSeconds = _autosaveIntervalSeconds;
+            Projects.Initialize(Workspace, Library, Catalog.Primitives, Workspace.AnimationSettings, _truthTableLimits);
+
+            Shell = AppShell.Create(_theme, Workspace, Catalog, Library, _truthTableLimits, Projects);
+
+            // Builds reopen the last project and offer to recover autosaved work. In the editor this is opt-in so
+            // entering play mode (and automated tests) always start from a clean, empty project.
+            bool restore = !Application.isEditor || _restoreLastSessionInEditor;
+            Projects.RememberLastProject = restore;
+            Projects.Startup(restore, restore ? AskRecover : null);
         }
 
-        /// <summary>Starts an empty main circuit.</summary>
-        public void NewCircuit()
+        private void AskRecover(string description, System.Action recover, System.Action discard)
         {
-            Workspace.LoadCircuit(new CircuitDefinition(DefinitionId.New(), WorkspaceController.DefaultCircuitName));
-            Workspace.ResetCamera();
+            Shell.Confirm.Show("Recover unsaved work?", description, "Recover", recover, "Discard", discard, null);
         }
 
         private void OnDestroy()

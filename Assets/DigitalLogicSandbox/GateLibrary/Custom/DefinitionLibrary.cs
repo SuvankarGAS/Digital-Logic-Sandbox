@@ -88,6 +88,41 @@ namespace DigitalLogicSandbox.GateLibrary.Custom
             return true;
         }
 
+        /// <summary>Raised after a published definition's metadata (e.g. its name) changed.</summary>
+        public event Action<CircuitDefinition> DefinitionUpdated;
+
+        /// <summary>Announces a metadata change of a published definition (see <see cref="CircuitDefinition.UpdateMetadata"/>).</summary>
+        public void NotifyUpdated(CircuitDefinition definition)
+        {
+            if (definition != null && Contains(definition.Reference))
+            {
+                DefinitionUpdated?.Invoke(definition);
+            }
+        }
+
+        /// <summary>
+        /// Removes every definition (new project / loading a project). Raises <see cref="DefinitionRemoved"/> for
+        /// each version, latest publications first. Callers must not keep circuits that reference them.
+        /// </summary>
+        public void Clear()
+        {
+            for (int i = _all.Count - 1; i >= 0; i--)
+            {
+                CircuitDefinition definition = _all[i];
+                _all.RemoveAt(i);
+                if (_versions.TryGetValue(definition.Id, out SortedList<int, CircuitDefinition> versions))
+                {
+                    versions.Remove(definition.Version);
+                    if (versions.Count == 0)
+                    {
+                        _versions.Remove(definition.Id);
+                    }
+                }
+
+                DefinitionRemoved?.Invoke(definition);
+            }
+        }
+
         /// <summary>First published definition that directly contains an instance of <paramref name="reference"/>, or null.</summary>
         public CircuitDefinition FindReferencingDefinition(DefinitionRef reference)
         {

@@ -130,6 +130,54 @@ namespace DigitalLogicSandbox.Core.Circuit
             ModifiedUtc = modifiedUtc;
         }
 
+        /// <summary>Next node id value that <see cref="AddNode"/> would allocate (persisted so ids are never reused).</summary>
+        public int NextNodeIdValue => _nextNodeId;
+
+        /// <summary>Next interface port id value that a new boundary would allocate.</summary>
+        public int NextPortIdValue => _nextPortId;
+
+        /// <summary>
+        /// Restores the id allocators after deserialization. Values can only move forward, so ids that were used
+        /// by deleted nodes or ports (and may still be referenced by older versions) are never handed out again.
+        /// </summary>
+        public void RestoreIdAllocators(int nextNodeId, int nextPortId)
+        {
+            EnsureMutable();
+            _nextNodeId = Math.Max(_nextNodeId, nextNodeId);
+            _nextPortId = Math.Max(_nextPortId, nextPortId);
+        }
+
+        /// <summary>
+        /// Changes the presentation metadata (name, description, category, icon). Unlike structural edits this
+        /// is allowed on published definitions: metadata never affects behaviour, and gate behaviour never depends
+        /// on names, so renaming a custom gate needs no new version.
+        /// </summary>
+        public void UpdateMetadata(string name, string description, string category, string icon)
+        {
+            name ??= string.Empty;
+            description ??= string.Empty;
+            category ??= string.Empty;
+            icon ??= string.Empty;
+            if (string.Equals(_name, name, StringComparison.Ordinal) &&
+                string.Equals(_description, description, StringComparison.Ordinal) &&
+                string.Equals(_category, category, StringComparison.Ordinal) &&
+                string.Equals(_icon, icon, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _name = name;
+            _description = description;
+            _category = category;
+            _icon = icon;
+            if (!IsReadOnly)
+            {
+                Touch();
+            }
+
+            Raise(new CircuitChange(CircuitChangeKind.PropertiesChanged));
+        }
+
         /// <summary>
         /// Deep copy with a new identity and/or version. The copy is mutable, has no subscribers and shares no
         /// state with the original. Node and port ids are preserved, so layouts and references stay valid.

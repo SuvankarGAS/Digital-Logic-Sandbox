@@ -89,6 +89,7 @@ namespace DigitalLogicSandbox.UI.Inspector
             workspace.NavigationChanged += panel.MarkRebuild;
             workspace.Library.DefinitionAdded += panel.OnLibraryChanged;
             workspace.Library.DefinitionRemoved += panel.OnLibraryChanged;
+            workspace.Library.DefinitionUpdated += panel.OnLibraryChanged;
             panel.Rebuild();
             return panel;
         }
@@ -254,6 +255,14 @@ namespace DigitalLogicSandbox.UI.Inspector
                     value => _workspace.RenameInterfacePort(port.Id, value.Trim()), 28f);
                 field.characterLimit = 16;
                 field.interactable = _workspace.IsEditable;
+                if (_workspace.IsEditable && ports.Count > 1)
+                {
+                    int index = i;
+                    Button up = _ui.Button("Up", field.transform.parent, "^", () => _workspace.MoveInterfacePort(port.Id, index - 1), 24f, 12f);
+                    up.interactable = i > 0;
+                    Button down = _ui.Button("Down", field.transform.parent, "v", () => _workspace.MoveInterfacePort(port.Id, index + 1), 24f, 12f);
+                    down.interactable = i < ports.Count - 1;
+                }
                 if (circuit.TryGetBoundaryNode(port.Id, out NodeId node))
                 {
                     TextMeshProUGUI value = _ui.Text("Value", field.transform.parent, "0", 12.5f, _ui.Theme.TextPrimary,
@@ -349,7 +358,15 @@ namespace DigitalLogicSandbox.UI.Inspector
                 return;
             }
 
-            _ui.Property(_content, "Gate", definition.Name);
+            DefinitionId gateId = definition.Id;
+            TMP_InputField gateName = _ui.FieldRow(_content, "Gate", definition.Name, value =>
+            {
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    _workspace.RenameCustomGate(gateId, value.Trim());
+                }
+            });
+            gateName.characterLimit = 32;
             _ui.Property(_content, "Version", definition.Version.ToString(CultureInfo.InvariantCulture));
             if (!string.IsNullOrEmpty(definition.Category))
             {
@@ -551,6 +568,7 @@ namespace DigitalLogicSandbox.UI.Inspector
             {
                 _workspace.Library.DefinitionAdded -= OnLibraryChanged;
                 _workspace.Library.DefinitionRemoved -= OnLibraryChanged;
+                _workspace.Library.DefinitionUpdated -= OnLibraryChanged;
             }
         }
 

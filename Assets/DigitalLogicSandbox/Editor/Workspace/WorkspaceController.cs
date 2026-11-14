@@ -55,6 +55,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
 
         private WorkspaceSetup _setup;
         private ComponentCatalog _catalog;
+        private bool _snapToGrid = true;
         private DefinitionLibrary _library;
         private CircuitPackager _packager;
         private CircuitNavigator _navigator;
@@ -88,6 +89,9 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
 
         /// <summary>Raised on a right-click without dragging.</summary>
         public event Action<ContextMenuRequest> ContextMenuRequested;
+
+        /// <summary>Raised when a persisted workspace setting changes (grid, snapping, visualization mode).</summary>
+        public event Action SettingsChanged;
 
         public bool IsInitialized => _navigator != null;
 
@@ -134,10 +138,11 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             get => _presenter != null ? _presenter.VisualizationMode : SignalVisualizationMode.Standard;
             set
             {
-                if (_presenter != null)
+                if (_presenter != null && _presenter.VisualizationMode != value)
                 {
                     _presenter.SetVisualizationMode(value);
                     MarkStatusDirty();
+                    SettingsChanged?.Invoke();
                 }
             }
         }
@@ -175,7 +180,18 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
 
         public SelectionRectView SelectionRect => _selectionRect;
 
-        public bool SnapToGrid { get; set; } = true;
+        public bool SnapToGrid
+        {
+            get => _snapToGrid;
+            set
+            {
+                if (_snapToGrid != value)
+                {
+                    _snapToGrid = value;
+                    SettingsChanged?.Invoke();
+                }
+            }
+        }
 
         public bool IsPlacing => _placement.HasValue;
 
@@ -188,9 +204,10 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             get => _grid != null && _grid.Visible;
             set
             {
-                if (_grid != null)
+                if (_grid != null && _grid.Visible != value)
                 {
                     _grid.Visible = value;
+                    SettingsChanged?.Invoke();
                 }
             }
         }
@@ -212,6 +229,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             _packager = new CircuitPackager(_catalog, _library);
             _library.DefinitionAdded += OnLibraryChanged;
             _library.DefinitionRemoved += OnLibraryChanged;
+            _library.DefinitionUpdated += OnLibraryMetadataChanged;
             if (setup.Theme == null)
             {
                 throw new ArgumentException("A visual theme is required.", nameof(setup));
@@ -301,6 +319,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             {
                 _library.DefinitionAdded -= OnLibraryChanged;
                 _library.DefinitionRemoved -= OnLibraryChanged;
+                _library.DefinitionUpdated -= OnLibraryMetadataChanged;
             }
 
             if (_camera != null && _camera.Camera != null)
@@ -459,7 +478,10 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             return error;
         }
 
-        /// <summary>Flips an input boundary switch (live simulation state; not part of the undo history).</summary>
+        /// <summary>
+        /// Flips an input boundary switch as an undoable step ("Change input value"). Returns false when the node
+        /// is not a simulated input or inputs cannot be changed at this level.
+        /// </summary>
         public bool ToggleInput(NodeId boundary)
         {
             EnsureInitialized();
@@ -469,15 +491,21 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             }
 
             Sync(); // edits made earlier this frame must be compiled before the input can be addressed
-            bool toggled = Session.ToggleInput(boundary);
-            if (toggled)
+            CircuitSession session = Session;
+            if (!session.IsSimulating || !Circuit.TryGetNode(boundary, out NodeDefinition node) ||
+                node.Component.Kind != ComponentKind.InputBoundary)
             {
-                MarkStatusDirty();
+                return false;
             }
 
-            return toggled;
+            Signal next = session.GetInputValue(boundary) == Signal.High ? Signal.Low : Signal.High;
+            string name = Circuit.TryGetInterfacePort(node.InterfacePort, out InterfacePort port) ? port.Name : null;
+            History.Execute(new SetInputValueCommand(session, boundary, next, name));
+            MarkStatusDirty();
+            return true;
         }
 
+        /// <summary>Sets an input switch directly, without an undo step (loading projects, tests, tools).</summary>
         public void SetInput(NodeId boundary, Signal value)
         {
             EnsureInitialized();
@@ -625,6 +653,45 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             {
                 History.Execute(new RenameInterfacePortCommand(Circuit, port, name));
             }
+        }
+
+        /// <summary>Moves an external port within the interface order of the current circuit (undoable).</summary>
+        public bool MoveInterfacePort(PortId port, int newIndex)
+        {
+            EnsureCircuit();
+            int index = Circuit.IndexOfInput(port);
+            int count = Circuit.Inputs.Count;
+            if (index < 0)
+            {
+                index = Circuit.IndexOfOutput(port);
+                count = Circuit.Outputs.Count;
+            }
+
+            if (index < 0 || newIndex < 0 || newIndex >= count || newIndex == index || !CheckEditable())
+            {
+                return false;
+            }
+
+            History.Execute(new MoveInterfacePortCommand(Circuit, port, newIndex));
+            MarkStatusDirty();
+            return true;
+        }
+
+        /// <summary>
+        /// Renames a custom gate in the library (all versions; metadata only, so every instance keeps working).
+        /// Recorded in the main circuit's history. Returns false for empty or unchanged names.
+        /// </summary>
+        public bool RenameCustomGate(DefinitionId id, string name)
+        {
+            EnsureInitialized();
+            if (string.IsNullOrWhiteSpace(name) || !_library.TryGetLatest(id, out CircuitDefinition latest) ||
+                string.Equals(latest.Name, name.Trim(), StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            _navigator.RootHistory.Execute(new RenameCustomGateCommand(_library, id, name));
+            return true;
         }
 
         /// <summary>Changes name, description and category of the current circuit (undoable).</summary>
@@ -1143,6 +1210,20 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
         {
             // Instances may have become resolvable (redo) or unresolvable (undo of a publication).
             _navigator?.MarkAllDirty();
+            MarkStatusDirty();
+        }
+
+        private void OnLibraryMetadataChanged(CircuitDefinition definition)
+        {
+            // Gate titles come from definition names: rebuild the views (cheap; no recompilation needed).
+            if (_shownLevel != null)
+            {
+                _presenter.Bind(_shownLevel.Circuit);
+                _presenter.SetSelection(_selection.Nodes, _selection.Wire);
+                _scopeDirty = true;
+            }
+
+            NavigationChanged?.Invoke();
             MarkStatusDirty();
         }
 

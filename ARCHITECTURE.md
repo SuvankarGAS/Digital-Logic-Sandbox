@@ -375,29 +375,68 @@ TruthTableExporter`.
   - Tables above the confirmation threshold wait for "Generate".
   - Export: CSV written atomically to `persistentDataPath/Exports`; tab-separated text copied to the clipboard.
 
-## 10. Persistence format *(planned – Phase 8)*
+## 10. Persistence format *(implemented – Phase 8)*
 
 ```json
 {
   "schemaVersion": 1,
+  "format": "DigitalLogicSandbox.Project",
   "app": { "name": "Digital Logic Sandbox", "version": "0.1.0" },
-  "settings": { "grid": {}, "animation": { "enabled": true, "speed": 1.0 }, "truthTable": {} },
-  "rootCircuit": { "...CircuitDefinition DTO..." },
-  "definitions": [ { "id": "…", "version": 2, "...": "..." } ]
+  "name": "My project",
+  "savedUtc": "2026-11-14T10:00:00Z",
+  "settings": { "gridVisible": true, "snapToGrid": true, "visualizationMode": "Standard",
+                "animation": { "enabled": true, "speed": 1.0, "showParticles": true, "maxBatchSeconds": 3.0 },
+                "truthTable": { "maxInputs": 16, "maxRows": 65536, "confirmRows": 1024 },
+                "camera": { "hasValue": true, "x": 0, "y": 0, "size": 12 } },
+  "rootCircuit": { "id": "…", "version": 1, "nodes": [ … ], "connections": [ … ], "nextNodeId": 9, … },
+  "definitions": [ { "id": "…", "version": 2, "published": true, "inputs": [ … ], "nodes": [ … ] } ],
+  "inputValues": [ { "port": 1, "value": "High" } ]
 }
 ```
 
-- DTOs are separate from domain types; no Unity types are serialized.
-- Each `(id, version)` is written once, regardless of instance count.
-- Loading runs `IMigration` steps `vN → vN+1` over `JObject` before binding, then validates references.
-- Saves are atomic: write `*.tmp`, flush, then `File.Replace` keeping `*.bak`. Autosave writes a separate
-  recovery file; on startup an autosave newer than the project file is offered for recovery.
+- **Modules:** `Persistence.Serialization` (DTOs and writer), `Persistence.Deserialization` (reader and
+  binder), `Persistence.Migration` (schema steps), `Persistence.Recovery` (file store).
+  `App.ProjectController` maps the editor state to and from a `ProjectDocument`. The UI only sees
+  `UI.IProjectService`.
+- DTOs are separate from domain types; no Unity types are serialized. A node is `primitive`, `custom`
+  (definition id and version), `input` or `output` (interface port).
+- Each `(id, version)` is written once, regardless of instance count. Instances reference definitions by id
+  and version, so old versions stay pinned exactly as in memory.
+- **Loading:**
+  1. Parse.
+  2. Check the format tag.
+  3. Run the `IProjectMigration` steps `vN → vN+1` over the `JObject`.
+  4. Bind the DTOs. Ids, interface order, timestamps and id allocators are restored, so a round trip is exact.
+  5. Validate references and freeze published definitions.
+  - Fatal problems raise `ProjectFormatException`. Recoverable ones become `ValidationReport` warnings:
+    a missing gate, an unknown primitive, a dangling connection.
+- **Saving** is atomic: write `*.tmp`, flush, then `File.Replace` keeping `*.bak`. Opening falls back to
+  `.tmp`, then `.bak`.
+- **Autosave** writes `<project>.autosave`, or `Autosave/Untitled.dlsproj.autosave` for untitled projects.
+  - At start-up, an autosave newer than its project is offered for recovery (Recover / Discard).
+  - Saving deletes the autosave.
+  - Leaving a project deliberately (Don't save) also deletes it.
+- **Adding a schema change:** bump `ProjectFormat.CurrentSchemaVersion`, add an `IProjectMigration` with
+  `FromVersion = old`, and register it in `ProjectMigrator.CreateDefault()`.
 
-## 11. Undo / redo *(editing commands implemented – Phase 3; remaining commands – Phase 8)*
+## 11. Undo / redo *(implemented – Phases 3–8)*
 
 `ICommand { Execute(); Undo(); }` operating on the **model only**; views re-sync from model change events,
 so undo restores the visual state automatically. Large operations (packaging, publishing a version) use
 composite commands holding targeted snapshots, never whole-project serialization.
+
+- **Commands covered:**
+  - Add, remove, move and duplicate gates.
+  - Connect and disconnect.
+  - Rename nodes and interface ports; reorder the interface.
+  - Change an input value: `SetInputValueCommand` acts on the `CircuitSession`.
+  - Package a circuit; publish a gate version; retarget references.
+  - Rename a custom gate: `RenameCustomGateCommand` updates the metadata of every version without creating
+    a new version.
+  - Change circuit properties.
+- Each navigation level has its own history. Library-wide operations (packaging, renaming a gate) run on the
+  root history.
+- History is cleared when a project is opened or created.
 
 ## 12. Editor interaction *(implemented – Phase 3)*
 

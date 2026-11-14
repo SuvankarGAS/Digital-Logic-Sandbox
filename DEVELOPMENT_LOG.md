@@ -12,8 +12,8 @@
 | 5 | Hierarchical composition & inspection | ✅ Complete (2026-11-14) |
 | 6 | Animated signal visualization | ✅ Complete (2026-11-14) |
 | 7 | Truth table generator | ✅ Complete (2026-11-14) |
-| 8 | Persistence & undo/redo | ⏳ Next |
-| 9 | Polish & optimization | — |
+| 8 | Persistence & undo/redo | ✅ Complete (2026-11-14) |
+| 9 | Polish & optimization | ⏳ Next |
 
 ---
 
@@ -605,3 +605,88 @@ Delivered – see the Phase 3 section below.
 - No sequential analysis mode yet. It needs clocked components, which arrive with sequential logic.
 - Very wide tables (many long port names) scroll horizontally. Columns are capped at 150 px and names are
   truncated with an ellipsis.
+
+---
+
+## Phase 8 – Persistence and undo/redo (2026-11-14)
+
+### Implemented
+- **Versioned JSON project format** (`Persistence`):
+  - `ProjectFormat`: schema v1, `.dlsproj` extension, format tag.
+  - `ProjectDocument` + `ProjectSettingsData`: grid, snapping, visualization mode, animation, truth table
+    limits, camera.
+  - Internal DTOs (`ProjectDto`, `CircuitDto`, `NodeDto`, `ConnectionDto`) kept separate from domain types.
+    No Unity types are serialized.
+  - `ProjectSerializer`: camelCase and indented output; each `(definition id, version)` is written once,
+    however many instances exist; input values are sorted for stable diffs.
+  - `ProjectDeserializer`:
+    - Parse, then check the format tag, then migrate on `JObject`, then bind.
+    - Validates references and freezes published definitions last.
+    - Damaged or foreign files raise `ProjectFormatException` with a readable message.
+    - Recoverable problems become warnings and the project still loads: a missing custom gate, an unknown
+      primitive, a dangling connection, a duplicate definition.
+  - `ProjectMigrator` / `IProjectMigration`: steps `vN → vN+1`. Newer files and missing steps are refused.
+  - `ProjectFileStore`:
+    - Atomic save: `*.tmp`, flush, `File.Replace` keeping `*.bak`.
+    - Load falls back to `.tmp` (interrupted save), then `.bak` (backup).
+    - Autosave files, recovery candidates, project listing.
+- **Exact round trip:** node, port and definition ids, interface order, timestamps and id allocators are all
+  restored (`CircuitDefinition.RestoreIdAllocators`). Deleted ids are never reused, so port retargeting
+  across versions stays correct after a reload.
+- **App/ProjectController** (implements `UI.IProjectService`):
+  - New, Open, Save, Save As.
+  - Dirty tracking from history, settings, library and animation changes.
+  - Autosave every 60 s to `<project>.autosave` (`Autosave/Untitled.dlsproj.autosave` for untitled projects).
+  - Start-up recovery prompt; the last project reopens in builds.
+  - In the editor, restoring is opt-in (`AppBootstrap._restoreLastSessionInEditor`) so play-mode sessions and
+    tests start clean.
+- **UI:**
+  - Toolbar New / Open / Save / Save As, and the project title with a `*` marker for unsaved changes.
+  - Ctrl+N, Ctrl+O, Ctrl+S and Ctrl+Shift+S.
+  - `ConfirmDialog` (Save / Don't save / Cancel; Recover / Discard).
+  - `ProjectFileDialog`: in-app picker, because the Unity runtime has no native file dialogs. It lists the
+    projects folder newest first, asks before overwriting, and accepts a bare name or a full path.
+- **Undo/redo completion:**
+  - `SetInputValueCommand`: input toggles are now undoable.
+  - `RenameCustomGateCommand`: renames every version through `CircuitDefinition.UpdateMetadata`. Metadata
+    can change on published definitions without a new version, because behaviour is unchanged.
+  - Interface reordering in the inspector (`MoveInterfacePortCommand`, ^/v buttons).
+  - Gate rename from the inspector.
+  - `DefinitionLibrary.DefinitionUpdated` and `Clear()`.
+
+### Decisions
+- **Metadata is not versioned.** Name, description, category and icon never affect behaviour. Renaming a
+  gate therefore updates all its versions in place instead of forcing a new version on every dependent.
+- **The project owns the custom gate library.** New and Open replace the library, so projects are
+  self-contained.
+- **History resets on open/new.** Undo does not cross project boundaries.
+- **Input values are saved for the main circuit only.** Inner levels are derived simulation state.
+- **In-app file dialog.** It avoids a platform-specific dependency. A full path still works for any folder.
+
+### Test results
+- EditMode: **283 / 283 passed** (25 new):
+  - `ProjectSerializationTests`:
+    - Round trips: exact round trip; definitions, versions and metadata; one copy per definition version;
+      loaded nested gates simulate; references to older versions kept; settings and input values.
+    - Load problems: missing gate; invalid connection; unknown primitive; damaged files.
+    - Migrations: migration applied; newer schema and missing step refused; shipped migrator.
+  - `ProjectFileStoreTests`: atomic save with backup; recovery from `.bak` and `.tmp`; unreadable file;
+    autosave offered only when newer; listing.
+  - `ProjectCommandTests`: rename across versions with undo; metadata allowed on published definitions but
+    structural edits refused; interface reorder; input value undo; library clear order; id allocators.
+- PlayMode: **48 / 48 passed** (8 new, `ProjectPersistenceTests`, real Main scene):
+  - Round trip: Save As, then New, then Open restores circuit, library, inputs, settings and a clean
+    history, and the loaded gate can still be opened.
+  - Prompts: unsaved-changes prompt (Cancel and Don't save); Save from the prompt on an untitled project.
+  - File dialog: overwrite confirmation and the Open list.
+  - Undo: undoable input toggle; gate rename shown in the library, and undo.
+  - Autosave: recover; discard.
+- Fixed during testing: the file dialog filled its list while still inactive, so TMP could not measure the
+  item labels (NullReferenceException once a project existed). It now activates before populating.
+- Manual: play-mode screenshot of the toolbar (title `Untitled *`) and the Save As dialog.
+
+### Known issues / deferred
+- No native OS file dialog (see Decisions).
+- An unsaved draft of a gate being edited is not part of the saved project until Save Version. Saving shows
+  a reminder.
+- Autosave runs on the main thread. Projects are small JSON files, so this is fine; profile in Phase 9.

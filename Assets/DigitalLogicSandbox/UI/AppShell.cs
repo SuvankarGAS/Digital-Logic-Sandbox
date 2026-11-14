@@ -11,6 +11,7 @@ using DigitalLogicSandbox.UI.Toolbar;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.InputSystem;
 using UnityEngine.UI;
 
 namespace DigitalLogicSandbox.UI
@@ -47,10 +48,21 @@ namespace DigitalLogicSandbox.UI
 
         public TruthTableDialog TruthTable { get; private set; }
 
+        /// <summary>Generic question dialog (unsaved changes, recovery).</summary>
+        public ConfirmDialog Confirm { get; private set; }
+
+        /// <summary>Open / Save As picker. Null when no project service is attached.</summary>
+        public ProjectFileDialog ProjectFiles { get; private set; }
+
+        /// <summary>Project file operations, or null (UI-only setups such as some tests).</summary>
+        public IProjectService Projects { get; private set; }
+
+        private WorkspaceController _workspace;
+
         public Canvas Canvas => _canvas;
 
         public static AppShell Create(VisualTheme theme, WorkspaceController workspace, ComponentCatalog catalog,
-            DefinitionLibrary library, TruthTableLimits truthTableLimits = null)
+            DefinitionLibrary library, TruthTableLimits truthTableLimits = null, IProjectService projects = null)
         {
             var go = new GameObject("UI", typeof(RectTransform));
             go.layer = 5;
@@ -75,6 +87,9 @@ namespace DigitalLogicSandbox.UI
             shell.PackagingDialog = PackagingDialog.Create(go.transform, shell.Factory, workspace);
             shell.VersionSaveDialog = VersionSaveDialog.Create(go.transform, shell.Factory, workspace);
             shell.TruthTable = TruthTableDialog.Create(go.transform, shell.Factory, workspace, truthTableLimits);
+            shell.Confirm = ConfirmDialog.Create(go.transform, shell.Factory, workspace);
+            shell._workspace = workspace;
+            shell.AttachProjects(projects);
 
             shell.Toolbar.SignalSettingsRequested += shell.SignalSettings.Toggle;
             shell.Toolbar.CreateGateRequested += () => shell.PackagingDialog.Open(selectionOnly: false);
@@ -88,6 +103,155 @@ namespace DigitalLogicSandbox.UI
             shell.Inspector.NodeTruthTableRequested += node => shell.TruthTable.OpenForNode(node);
             shell.ContextMenu.NodeTruthTableRequested += node => shell.TruthTable.OpenForNode(node);
             return shell;
+        }
+
+        // ------------------------------------------------------------------------------------------------
+        // Project commands (toolbar, shortcuts)
+        // ------------------------------------------------------------------------------------------------
+
+        /// <summary>New project, asking to save unsaved changes first.</summary>
+        public void RequestNew()
+        {
+            if (Projects != null)
+            {
+                ConfirmDiscard("starting a new project", Projects.NewProject);
+            }
+        }
+
+        /// <summary>Open dialog, asking to save unsaved changes first.</summary>
+        public void RequestOpen()
+        {
+            if (Projects != null)
+            {
+                ConfirmDiscard("opening another project", () => ProjectFiles.Show(ProjectFileDialogMode.Open));
+            }
+        }
+
+        /// <summary>Saves to the current file, or asks for a name when the project was never saved.</summary>
+        public void RequestSave()
+        {
+            if (Projects == null)
+            {
+                return;
+            }
+
+            if (Projects.CurrentPath == null)
+            {
+                ProjectFiles.Show(ProjectFileDialogMode.SaveAs);
+                return;
+            }
+
+            Projects.Save(out string message);
+            _workspace.PostNotification(message);
+        }
+
+        public void RequestSaveAs()
+        {
+            ProjectFiles?.Show(ProjectFileDialogMode.SaveAs);
+        }
+
+        private void AttachProjects(IProjectService projects)
+        {
+            Projects = projects;
+            bool available = projects != null;
+            Toolbar.NewButton.gameObject.SetActive(available);
+            Toolbar.OpenButton.gameObject.SetActive(available);
+            Toolbar.SaveButton.gameObject.SetActive(available);
+            Toolbar.SaveAsButton.gameObject.SetActive(available);
+            if (!available)
+            {
+                Toolbar.SetProjectTitle("Digital Logic Sandbox", false);
+                return;
+            }
+
+            ProjectFiles = ProjectFileDialog.Create(transform, Factory, _workspace, projects);
+            Toolbar.NewRequested += RequestNew;
+            Toolbar.OpenRequested += RequestOpen;
+            Toolbar.SaveRequested += RequestSave;
+            Toolbar.SaveAsRequested += RequestSaveAs;
+            projects.Changed += RefreshProjectTitle;
+            RefreshProjectTitle();
+        }
+
+        private void RefreshProjectTitle()
+        {
+            Toolbar.SetProjectTitle(Projects.DisplayName, Projects.IsDirty);
+        }
+
+        private void ConfirmDiscard(string action, System.Action proceed)
+        {
+            if (!Projects.IsDirty)
+            {
+                proceed();
+                return;
+            }
+
+            Confirm.Show("Unsaved changes",
+                "Save the changes to '" + Projects.DisplayName + "' before " + action + "?",
+                "Save", () => SaveThen(proceed),
+                "Don't save", proceed,
+                "Cancel", null);
+        }
+
+        private void SaveThen(System.Action proceed)
+        {
+            if (Projects.CurrentPath == null)
+            {
+                ProjectFiles.Show(ProjectFileDialogMode.SaveAs, proceed);
+                return;
+            }
+
+            bool saved = Projects.Save(out string message);
+            _workspace.PostNotification(message);
+            if (saved)
+            {
+                proceed();
+            }
+        }
+
+        private void Update()
+        {
+            Keyboard keyboard = Keyboard.current;
+            if (Projects == null || keyboard == null || _workspace == null || _workspace.InputSuspended ||
+                IsTextInputFocused())
+            {
+                return;
+            }
+
+            bool control = keyboard.leftCtrlKey.isPressed || keyboard.rightCtrlKey.isPressed;
+            if (!control)
+            {
+                return;
+            }
+
+            bool shift = keyboard.leftShiftKey.isPressed || keyboard.rightShiftKey.isPressed;
+            if (keyboard.sKey.wasPressedThisFrame)
+            {
+                if (shift)
+                {
+                    RequestSaveAs();
+                }
+                else
+                {
+                    RequestSave();
+                }
+            }
+            else if (keyboard.oKey.wasPressedThisFrame)
+            {
+                RequestOpen();
+            }
+            else if (keyboard.nKey.wasPressedThisFrame)
+            {
+                RequestNew();
+            }
+        }
+
+        private void OnDestroy()
+        {
+            if (Projects != null)
+            {
+                Projects.Changed -= RefreshProjectTitle;
+            }
         }
 
         /// <summary>True while the pointer is over any UI element that blocks raycasts.</summary>

@@ -1,0 +1,179 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using DigitalLogicSandbox.Core.Circuit;
+using DigitalLogicSandbox.Core.Connections;
+using DigitalLogicSandbox.Core.Nodes;
+using DigitalLogicSandbox.Core.Ports;
+using DigitalLogicSandbox.Core.Signals;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Serialization;
+
+namespace DigitalLogicSandbox.Persistence.Serialization
+{
+    /// <summary>
+    /// Writes a <see cref="ProjectDocument"/> as versioned, human-readable JSON. Only plain data is written: no
+    /// Unity objects, no object graphs. Each custom gate version appears once in <c>definitions</c>; instances
+    /// refer to it by (id, version).
+    /// </summary>
+    public static class ProjectSerializer
+    {
+        internal static JsonSerializerSettings Settings { get; } = new JsonSerializerSettings
+        {
+            ContractResolver = new CamelCasePropertyNamesContractResolver(),
+            Formatting = Formatting.Indented,
+            DateTimeZoneHandling = DateTimeZoneHandling.Utc,
+            MissingMemberHandling = MissingMemberHandling.Ignore,
+            NullValueHandling = NullValueHandling.Include,
+        };
+
+        public static string ToJson(ProjectDocument document)
+        {
+            var writer = new StringWriter();
+            Write(document, writer);
+            return writer.ToString();
+        }
+
+        public static void Write(ProjectDocument document, TextWriter writer)
+        {
+            if (document == null)
+            {
+                throw new ArgumentNullException(nameof(document));
+            }
+
+            if (document.RootCircuit == null)
+            {
+                throw new ArgumentException("A project needs a main circuit.", nameof(document));
+            }
+
+            if (document.SavedUtc == default)
+            {
+                document.SavedUtc = DateTime.UtcNow;
+            }
+
+            var dto = new ProjectDto
+            {
+                SchemaVersion = ProjectFormat.CurrentSchemaVersion,
+                Format = ProjectFormat.FormatName,
+                App = new AppInfoDto { Name = ProjectFormat.AppName, Version = ProjectFormat.AppVersion },
+                Name = document.Name,
+                SavedUtc = document.SavedUtc,
+                Settings = document.Settings ?? new ProjectSettingsData(),
+                RootCircuit = ToDto(document.RootCircuit, published: false),
+                Definitions = new List<CircuitDto>(document.Definitions.Count),
+                InputValues = new List<InputValueDto>(document.InputValues.Count),
+            };
+
+            var written = new HashSet<DefinitionRef>();
+            for (int i = 0; i < document.Definitions.Count; i++)
+            {
+                CircuitDefinition definition = document.Definitions[i];
+                if (definition != null && written.Add(definition.Reference))
+                {
+                    dto.Definitions.Add(ToDto(definition, published: true));
+                }
+            }
+
+            var ports = new List<PortId>(document.InputValues.Keys);
+            ports.Sort();
+            for (int i = 0; i < ports.Count; i++)
+            {
+                dto.InputValues.Add(new InputValueDto { Port = ports[i].Value, Value = document.InputValues[ports[i]].ToString() });
+            }
+
+            JsonSerializer.Create(Settings).Serialize(writer, dto);
+        }
+
+        internal static CircuitDto ToDto(CircuitDefinition circuit, bool published)
+        {
+            var dto = new CircuitDto
+            {
+                Id = circuit.Id.Value,
+                Version = circuit.Version,
+                Name = circuit.Name,
+                Description = circuit.Description,
+                Category = circuit.Category,
+                Icon = circuit.Icon,
+                CreatedUtc = circuit.CreatedUtc,
+                ModifiedUtc = circuit.ModifiedUtc,
+                Published = published,
+                NextNodeId = circuit.NextNodeIdValue,
+                NextPortId = circuit.NextPortIdValue,
+                Inputs = Ports(circuit.Inputs),
+                Outputs = Ports(circuit.Outputs),
+                Nodes = new List<NodeDto>(circuit.Nodes.Count),
+                Connections = new List<ConnectionDto>(circuit.Connections.Count),
+            };
+
+            IReadOnlyList<NodeDefinition> nodes = circuit.Nodes;
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                NodeDefinition node = nodes[i];
+                var nodeDto = new NodeDto
+                {
+                    Id = node.Id.Value,
+                    X = node.Position.X,
+                    Y = node.Position.Y,
+                    Rotation = node.Rotation.ToString(),
+                    Label = string.IsNullOrEmpty(node.Label) ? null : node.Label,
+                };
+
+                switch (node.Component.Kind)
+                {
+                    case ComponentKind.Primitive:
+                        nodeDto.Kind = NodeDto.KindPrimitive;
+                        nodeDto.Primitive = node.Component.PrimitiveId;
+                        break;
+                    case ComponentKind.Custom:
+                        nodeDto.Kind = NodeDto.KindCustom;
+                        nodeDto.Definition = node.Component.Definition.Id.Value;
+                        nodeDto.DefinitionVersion = node.Component.Definition.Version;
+                        break;
+                    case ComponentKind.InputBoundary:
+                        nodeDto.Kind = NodeDto.KindInput;
+                        nodeDto.Port = node.InterfacePort.Value;
+                        break;
+                    case ComponentKind.OutputBoundary:
+                        nodeDto.Kind = NodeDto.KindOutput;
+                        nodeDto.Port = node.InterfacePort.Value;
+                        break;
+                    default:
+                        throw new InvalidOperationException("Unknown component kind " + node.Component.Kind + ".");
+                }
+
+                dto.Nodes.Add(nodeDto);
+            }
+
+            IReadOnlyList<ConnectionDefinition> connections = circuit.Connections;
+            for (int i = 0; i < connections.Count; i++)
+            {
+                ConnectionDefinition connection = connections[i];
+                dto.Connections.Add(new ConnectionDto
+                {
+                    FromNode = connection.Source.Node.Value,
+                    FromPort = connection.Source.Port.Value,
+                    ToNode = connection.Destination.Node.Value,
+                    ToPort = connection.Destination.Port.Value,
+                });
+            }
+
+            return dto;
+        }
+
+        private static List<PortDto> Ports(IReadOnlyList<InterfacePort> ports)
+        {
+            var list = new List<PortDto>(ports.Count);
+            for (int i = 0; i < ports.Count; i++)
+            {
+                list.Add(new PortDto { Id = ports[i].Id.Value, Name = ports[i].Name });
+            }
+
+            return list;
+        }
+
+        internal static bool TryParseSignal(string text, out Signal signal)
+        {
+            return Enum.TryParse(text, ignoreCase: true, out signal) && Enum.IsDefined(typeof(Signal), signal);
+        }
+    }
+}

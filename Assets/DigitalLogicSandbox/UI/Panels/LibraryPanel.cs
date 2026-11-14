@@ -67,6 +67,7 @@ namespace DigitalLogicSandbox.UI.Panels
             panel.Build(rect);
             library.DefinitionAdded += panel.OnDefinitionAdded;
             library.DefinitionRemoved += panel.OnDefinitionAdded;
+            library.DefinitionUpdated += panel.OnDefinitionAdded;
             return panel;
         }
 
@@ -224,6 +225,7 @@ namespace DigitalLogicSandbox.UI.Panels
             {
                 _library.DefinitionAdded -= OnDefinitionAdded;
                 _library.DefinitionRemoved -= OnDefinitionAdded;
+                _library.DefinitionUpdated -= OnDefinitionAdded;
             }
         }
 
