@@ -151,8 +151,7 @@ namespace DigitalLogicSandbox.Rendering.Gates
 
             ConfigurePins(_inputPins, _inputRings, _inputSignals, geometry.InputPins, "In");
             ConfigurePins(_outputPins, _outputRings, _outputSignals, geometry.OutputPins, "Out");
-            ConfigureLabels(_inputLabels, geometry.InputNames, geometry.InputPins, "InLabel");
-            ConfigureLabels(_outputLabels, geometry.OutputNames, geometry.OutputPins, "OutLabel");
+            ConfigureTexts(size, isBoundary, isBus);
             ConfigureBitCells(geometry.BitCells);
             _display.Configure(geometry);
 
@@ -449,42 +448,161 @@ namespace DigitalLogicSandbox.Rendering.Gates
             _title.SetText(_busText);
         }
 
-        private void ConfigureLabels(List<TextMeshPro> labels, string[] names, Vector2[] pins, string prefix)
+        /// <summary>
+        /// Places pin labels, then fits the title and subtitle into the space left between the label columns so long
+        /// names shrink (and finally truncate) inside the body instead of overflowing it.
+        /// </summary>
+        private void ConfigureTexts(Vector2 size, bool isBoundary, bool isBus)
+        {
+            // Body extent along the label direction (the unrotated width) and across it.
+            bool rotated = _geometry.Rotation == Rotation.R90 || _geometry.Rotation == Rotation.R270;
+            float along = rotated ? size.y : size.x;
+            bool hasTitle = !string.IsNullOrEmpty(_geometry.Title);
+            bool bothSides = _geometry.InputNames.Length > 0 && _geometry.OutputNames.Length > 0;
+            float labelLimit = along * (hasTitle ? (bothSides ? 0.4f : 0.6f) : bothSides ? 0.5f : 1f) - LabelInset - 0.1f;
+            float inputExtent = ConfigureLabels(_inputLabels, _geometry.InputNames, _geometry.InputPins, "InLabel",
+                true, labelLimit);
+            float outputExtent = ConfigureLabels(_outputLabels, _geometry.OutputNames, _geometry.OutputPins, "OutLabel",
+                false, labelLimit);
+
+            _title.enableAutoSizing = false;
+            if (isBus)
+            {
+                // The readout changes with the value: let TMP shrink it to the body width when it gets long.
+                _title.rectTransform.sizeDelta = new Vector2(Mathf.Max(0.4f, size.x - 0.3f), 0.6f);
+                _title.overflowMode = TextOverflowModes.Ellipsis;
+                _title.enableAutoSizing = true;
+                _title.fontSizeMax = 2.8f;
+                _title.fontSizeMin = 1.4f;
+                return;
+            }
+
+            if (_geometry.IsDisplay)
+            {
+                FitText(_title, 2.2f, 1.4f, size.x - 0.3f, 0.5f);
+                _title.alignment = TextAlignmentOptions.Center;
+                return;
+            }
+
+            if (isBoundary)
+            {
+                // The title shares the body with the state indicator.
+                Vector2 pin = _geometry.Kind == ComponentKind.OutputBoundary ? _geometry.InputPins[0] : _geometry.OutputPins[0];
+                bool pinHorizontal = Mathf.Abs(pin.x) >= Mathf.Abs(pin.y);
+                float indicator = Mathf.Min(size.x, size.y) * 0.62f;
+                float room = pinHorizontal ? size.x - indicator - 0.45f : size.x - 0.3f;
+                FitText(_title, 2.8f, 1.5f, room, 0.6f);
+                _title.alignment = TextAlignmentOptions.Center;
+                return;
+            }
+
+            // Keep the title centred in the free span between the input and output label columns.
+            Vector2 inward = GateLayout.Rotate(Vector2.right, _geometry.Rotation);
+            float leftUsed = inputExtent > 0f ? inputExtent + LabelGap : 0.3f;
+            float rightUsed = outputExtent > 0f ? outputExtent + LabelGap : 0.3f;
+            Vector2 shift = Vector2.zero;
+            float titleRoom = size.x - 0.4f;
+            if (!rotated)
+            {
+                shift = inward * ((leftUsed - rightUsed) * 0.5f);
+                titleRoom = size.x - leftUsed - rightUsed;
+            }
+
+            Vector3 basePosition = _title.transform.localPosition;
+            _title.transform.localPosition = new Vector3(shift.x, basePosition.y, 0f);
+            FitText(_title, 3.4f, 1.6f, titleRoom, 0.7f);
+            _title.alignment = TextAlignmentOptions.Center;
+
+            if (_subtitle.gameObject.activeSelf)
+            {
+                _subtitle.transform.localPosition = new Vector3(shift.x, _subtitle.transform.localPosition.y, 0f);
+                FitText(_subtitle, 2.1f, 1.4f, titleRoom, 0.5f);
+                _subtitle.alignment = TextAlignmentOptions.Center;
+            }
+        }
+
+        /// <summary>Gap between a pin and the start of its label, and between label columns and the title.</summary>
+        private const float LabelInset = 0.2f;
+        private const float LabelGap = 0.25f;
+        private const float LabelFontSize = 2.2f;
+        private const float LabelMinFontSize = 1.3f;
+
+        /// <summary>
+        /// Lays out pin labels just inside the body next to their pins, reading away from the pin. The side a pin is
+        /// on comes from the gate's rotation (inputs are on the unrotated left edge, outputs on the right), never from
+        /// the pin coordinates: on tall gates the outer pins are further from the centre vertically than
+        /// horizontally, which used to put their labels under the pin instead of beside it. On rotated gates the
+        /// labels are turned with the edge so neighbouring labels never overlap. Each label is limited to the space
+        /// available and shrinks (then truncates) rather than spilling out of the body.
+        /// </summary>
+        /// <returns>The widest label extent along the label direction, used to keep the title clear of it.</returns>
+        private float ConfigureLabels(List<TextMeshPro> labels, string[] names, Vector2[] pins, string prefix,
+            bool inputs, float maxWidth)
         {
             while (labels.Count < names.Length)
             {
-                TextMeshPro label = CreateText(transform, prefix, 2.2f, _theme, FontWeight.Regular);
-                label.rectTransform.sizeDelta = new Vector2(3f, 0.6f);
+                TextMeshPro label = CreateText(transform, prefix, LabelFontSize, _theme, FontWeight.Regular);
                 labels.Add(label);
             }
 
+            // Direction from the pin into the body: unrotated, inputs read rightwards and outputs leftwards.
+            Vector2 inward = GateLayout.Rotate(inputs ? Vector2.right : Vector2.left, _geometry.Rotation);
+            bool horizontal = Mathf.Abs(inward.x) > 0.5f;
+            float angle = horizontal ? 0f : inward.y > 0f ? 90f : -90f;
+            // Rotated text reads along +x of the label, so vertical labels always start at the pin.
+            bool startsAtPin = !horizontal || inward.x > 0f;
+            float extent = 0f;
+
             for (int i = 0; i < labels.Count; i++)
             {
-                bool active = i < names.Length;
-                labels[i].gameObject.SetActive(active);
+                TextMeshPro label = labels[i];
+                bool active = i < names.Length && !string.IsNullOrEmpty(names[i]);
+                label.gameObject.SetActive(active);
                 if (!active)
                 {
                     continue;
                 }
 
-                // Place the label just inside the body, next to its pin, aligned towards the pin.
-                Vector2 pin = pins[i];
-                Vector2 inward = Mathf.Abs(pin.x) >= Mathf.Abs(pin.y)
-                    ? new Vector2(-Mathf.Sign(pin.x), 0f)
-                    : new Vector2(0f, -Mathf.Sign(pin.y));
-                TextMeshPro label = labels[i];
-                label.text = names[i] ?? string.Empty;
+                label.text = names[i];
                 label.color = Tint(_theme.GateSubtext);
                 label.sortingOrder = _title.sortingOrder;
-                bool horizontal = inward.y == 0f;
-                label.alignment = !horizontal
-                    ? TextAlignmentOptions.Center
-                    : inward.x > 0f ? TextAlignmentOptions.MidlineLeft : TextAlignmentOptions.MidlineRight;
-                label.rectTransform.pivot = !horizontal
-                    ? new Vector2(0.5f, 0.5f)
-                    : inward.x > 0f ? new Vector2(0f, 0.5f) : new Vector2(1f, 0.5f);
-                label.transform.localPosition = pin + inward * (horizontal ? 0.18f : 0.3f);
+                label.alignment = startsAtPin ? TextAlignmentOptions.MidlineLeft : TextAlignmentOptions.MidlineRight;
+                label.rectTransform.pivot = startsAtPin ? new Vector2(0f, 0.5f) : new Vector2(1f, 0.5f);
+                label.transform.localRotation = Quaternion.Euler(0f, 0f, angle);
+                label.transform.localPosition = pins[i] + inward * LabelInset;
+                float width = FitText(label, LabelFontSize, LabelMinFontSize, maxWidth, GateLayout.PinSpacing * 0.9f);
+                extent = Mathf.Max(extent, width);
             }
+
+            return extent > 0f ? extent + LabelInset : 0f;
+        }
+
+        /// <summary>
+        /// Sizes a single-line text to its content, shrinking the font down to <paramref name="minSize"/> and then
+        /// truncating with an ellipsis so it never exceeds <paramref name="maxWidth"/>. Returns the used width.
+        /// Runs only when a gate is configured, not per frame.
+        /// </summary>
+        private static float FitText(TextMeshPro text, float size, float minSize, float maxWidth, float height)
+        {
+            maxWidth = Mathf.Max(0.2f, maxWidth);
+            text.enableAutoSizing = false;
+            text.fontSize = size;
+            text.overflowMode = TextOverflowModes.Overflow;
+            float preferred = text.GetPreferredValues(text.text, float.PositiveInfinity, height).x;
+            if (preferred > maxWidth && preferred > 0f)
+            {
+                text.fontSize = Mathf.Max(minSize, size * maxWidth / preferred);
+                preferred = text.GetPreferredValues(text.text, float.PositiveInfinity, height).x;
+                if (preferred > maxWidth)
+                {
+                    text.overflowMode = TextOverflowModes.Ellipsis;
+                    preferred = maxWidth;
+                }
+            }
+
+            float width = Mathf.Min(preferred + 0.05f, maxWidth);
+            text.rectTransform.sizeDelta = new Vector2(width, height);
+            return width;
         }
 
         private void ApplyOutline()

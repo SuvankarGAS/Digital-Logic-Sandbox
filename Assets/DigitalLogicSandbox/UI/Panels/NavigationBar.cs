@@ -124,12 +124,22 @@ namespace DigitalLogicSandbox.UI.Panels
 
                 // Measure after the style is set: the semibold current crumb is wider than the default measurement.
                 LayoutElement layout = crumb.GetComponent<LayoutElement>();
-                layout.preferredWidth = Mathf.Max(40f, label.GetPreferredValues(levels[i].Title).x + 20f);
+                // Long gate names are capped (ellipsis) so the trail stays on one line; the full name is a tooltip.
+                float natural = label.GetPreferredValues(levels[i].Title).x + 20f;
+                layout.preferredWidth = Mathf.Clamp(natural, 40f, MaxCrumbWidth);
+                if (natural > MaxCrumbWidth)
+                {
+                    _ui.AddTooltip(crumb.gameObject, levels[i].Title);
+                }
+
                 _crumbs.Add(crumb);
             }
 
             RefreshState();
         }
+
+        /// <summary>Widest a single breadcrumb may grow before its name is truncated.</summary>
+        private const float MaxCrumbWidth = 200f;
 
         /// <summary>Updates the mode badge and button states (cheap; runs on every status change).</summary>
         public void RefreshState()

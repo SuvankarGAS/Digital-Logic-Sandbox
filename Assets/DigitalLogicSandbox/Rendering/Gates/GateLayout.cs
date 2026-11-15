@@ -87,8 +87,12 @@ namespace DigitalLogicSandbox.Rendering.Gates
             }
             else if (boundary || kind == ComponentKind.Clock)
             {
-                // Boundaries and the clock are compact utility boxes with a state indicator.
-                size = BoundarySize;
+                // Boundaries and the clock are compact utility boxes with a state indicator; long names widen them
+                // (in half-unit steps) so the name stays readable next to the indicator.
+                float indicator = BoundarySize.y * 0.62f;
+                float named = (title?.Length ?? 0) * BoundaryCharWidth + indicator + 0.6f;
+                size = new Vector2(Mathf.Min(MaxBoundaryWidth, Mathf.Max(BoundarySize.x, Mathf.Ceil(named * 2f) * 0.5f)),
+                    BoundarySize.y);
                 float edge = size.x * 0.5f;
                 for (int i = 0; i < inputPins.Length; i++)
                 {
@@ -103,13 +107,27 @@ namespace DigitalLogicSandbox.Rendering.Gates
             else
             {
                 int rows = Mathf.Max(inputs.Count, outputs.Count);
-                float width = Mathf.Max(MinGateWidth, Mathf.Ceil((title?.Length ?? 0) * 0.32f + 1.6f));
+                float titleWidth = (title?.Length ?? 0) * TitleCharWidth;
+                float width = Mathf.Max(MinGateWidth, Mathf.Ceil(titleWidth + 1.6f));
+                if (kind == ComponentKind.Custom)
+                {
+                    // The pin summary ("icon · 2 in / 1 out") sits under the title.
+                    int summary = (inputs.Count + " in / " + outputs.Count + " out").Length +
+                        (string.IsNullOrWhiteSpace(icon) ? 0 : icon.Trim().Length + 5);
+                    width = Mathf.Max(width, Mathf.Ceil(summary * SubtitleCharWidth + 1.2f));
+                }
+
                 if (HasPinLabels(kind))
                 {
-                    // Room for pin labels on both sides of the title.
-                    float labels = (LongestName(inputs) + LongestName(outputs)) * PinLabelCharWidth;
-                    width = Mathf.Max(width, Mathf.Ceil((title?.Length ?? 0) * 0.32f + labels + 1.2f));
+                    // Room for the input label column, the title and the output label column side by side, with the
+                    // pin inset and a gap on each side (see GateView.ConfigureTexts).
+                    float left = LongestLabel(inputs, kind != ComponentKind.Splitter) * PinLabelCharWidth;
+                    float right = LongestLabel(outputs, kind != ComponentKind.Merger) * PinLabelCharWidth;
+                    float columns = (left > 0f ? left + 0.45f : 0.3f) + (right > 0f ? right + 0.45f : 0.3f);
+                    width = Mathf.Max(width, Mathf.Ceil(titleWidth + columns + 0.4f));
                 }
+
+                width = Mathf.Min(width, MaxGateWidth);
                 float height = Mathf.Max(MinGateHeight, rows * PinSpacing);
                 size = new Vector2(width, height);
                 float edge = width * 0.5f;
@@ -266,14 +284,42 @@ namespace DigitalLogicSandbox.Rendering.Gates
         }
 
         /// <summary>Approximate world width of one pin-label character.</summary>
-        public const float PinLabelCharWidth = 0.24f;
+        public const float PinLabelCharWidth = 0.17f;
 
-        private static int LongestName(IReadOnlyList<PortDescriptor> ports)
+        /// <summary>Approximate world width of one gate-title character (semibold, letter-spaced).</summary>
+        public const float TitleCharWidth = 0.3f;
+
+        /// <summary>Approximate world width of one subtitle (pin summary) character.</summary>
+        public const float SubtitleCharWidth = 0.13f;
+
+        /// <summary>Approximate world width of one boundary-name character.</summary>
+        public const float BoundaryCharWidth = 0.2f;
+
+        /// <summary>
+        /// Upper bounds on auto-sized widths; beyond them the text shrinks and then truncates (the full name stays
+        /// available in the inspector) so a pasted paragraph cannot produce an enormous gate.
+        /// </summary>
+        public const float MaxGateWidth = 16f;
+        public const float MaxBoundaryWidth = 7f;
+
+        /// <summary>Longest displayed pin label, counting the "[width]" suffix of bus pins.</summary>
+        private static int LongestLabel(IReadOnlyList<PortDescriptor> ports, bool labelled)
         {
+            if (!labelled)
+            {
+                return 0;
+            }
+
             int longest = 0;
             for (int i = 0; i < ports.Count; i++)
             {
-                longest = Mathf.Max(longest, ports[i].Name?.Length ?? 0);
+                int length = ports[i].Name?.Length ?? 0;
+                if (ports[i].Width > 1 && length > 0)
+                {
+                    length += 2 + ports[i].Width.ToString().Length;
+                }
+
+                longest = Mathf.Max(longest, length);
             }
 
             return longest;

@@ -347,9 +347,19 @@ namespace DigitalLogicSandbox.UI
 
             TextMeshProUGUI hint = Text("Placeholder", area, placeholder, 13f, Theme.TextMuted);
             Stretch(hint.rectTransform);
+            hint.fontStyle = FontStyles.Italic;
             TextMeshProUGUI text = Text("Text", area, string.Empty, 13f, Theme.TextPrimary);
             Stretch(text.rectTransform);
+            // The field scrolls its text inside the masked viewport; ellipsis would hide the caret and break
+            // caret/selection placement at the end of long values.
+            text.overflowMode = TextOverflowModes.Overflow;
+            hint.overflowMode = TextOverflowModes.Ellipsis;
 
+            // TMP_InputField builds its caret in OnEnable, and only when textComponent is already assigned. Adding the
+            // component to an active object runs OnEnable immediately with no text component, so no caret is ever
+            // created. Configure it while inactive and enable it afterwards.
+            bool wasActive = background.gameObject.activeSelf;
+            background.gameObject.SetActive(false);
             var field = background.gameObject.AddComponent<TMP_InputField>();
             field.textViewport = area;
             field.textComponent = text;
@@ -366,8 +376,16 @@ namespace DigitalLogicSandbox.UI
             field.caretColor = Theme.Accent;
             field.customCaretColor = true;
             field.caretWidth = 2;
+            field.caretBlinkRate = 1.1f;
             field.selectionColor = new Color(Theme.Accent.r, Theme.Accent.g, Theme.Accent.b, 0.3f);
             field.navigation = new Navigation { mode = Navigation.Mode.None };
+            field.resetOnDeActivation = true;
+            field.restoreOriginalTextOnEscape = true;
+
+            // Focus ring: accent border and a slightly lifted fill while the field is being edited.
+            background.gameObject.AddComponent<InputFieldVisual>().Initialize(field, border, Theme.PanelBorder,
+                Theme.Accent);
+            background.gameObject.SetActive(wasActive);
             return field;
         }
 
