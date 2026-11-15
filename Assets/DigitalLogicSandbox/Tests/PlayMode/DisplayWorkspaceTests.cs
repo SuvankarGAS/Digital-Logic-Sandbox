@@ -133,6 +133,59 @@ namespace DigitalLogicSandbox.Tests.PlayMode
         }
 
         [UnityTest]
+        public IEnumerator ChangingDisplayStyleAndBusWidth_AfterPlacement()
+        {
+            yield return LoadMain();
+            NodeId a = _workspace.PlaceNode(ComponentRef.InputBus(8), new Vector2(-10, 0));
+            NodeId display = _workspace.PlaceNode(ComponentRef.Display(DisplayStyle.Hex, 8), new Vector2(0, 0));
+            Assert.That(_workspace.Connect(Pin(a), Pin(display)), Is.EqualTo(ConnectionError.None));
+            Assert.That(_workspace.SetInputValue(a, 0xA5), Is.True);
+            _workspace.Sync();
+            yield return null;
+            Assert.That(View(display).DisplayText, Is.EqualTo("A5"));
+
+            // Style change through the workspace: same node, connection kept, new readout.
+            Assert.That(_workspace.ChangeComponent(display, -1, -1, (int)DisplayStyle.Decimal), Is.True);
+            _workspace.Sync();
+            yield return null;
+            Assert.That(_workspace.Circuit.IsDriven(Pin(display)), Is.True);
+            Assert.That(View(display).DisplayText, Is.EqualTo("165"));
+
+            // Style change through the inspector's style buttons.
+            _workspace.Selection.Select(display);
+            _app.Shell.Inspector.Rebuild();
+            UnityEngine.UI.Button binary = null;
+            foreach (UnityEngine.UI.Button button in _app.Shell.Inspector.GetComponentsInChildren<UnityEngine.UI.Button>(true))
+            {
+                if (button.name == "Style " + DisplayStyle.Binary)
+                {
+                    binary = button;
+                }
+            }
+
+            Assert.That(binary, Is.Not.Null, "The inspector offers a style picker for displays.");
+            binary.onClick.Invoke();
+            _workspace.Sync();
+            yield return null;
+            Assert.That(View(display).DisplayText, Is.EqualTo("10100101"));
+
+            // Narrowing the input bus drops the 8-bit connection; undo brings it back.
+            Assert.That(_workspace.ChangeComponent(a, 4), Is.True);
+            _workspace.Sync();
+            yield return null;
+            Assert.That(_workspace.Circuit.IsDriven(Pin(display)), Is.False);
+            Assert.That(_workspace.Undo(), Is.True);
+            Assert.That(_workspace.Undo(), Is.True);
+            Assert.That(_workspace.Undo(), Is.True);
+            _workspace.Sync();
+            yield return null;
+            Assert.That(_workspace.Circuit.GetNode(display).Component, Is.EqualTo(ComponentRef.Display(DisplayStyle.Hex, 8)));
+            Assert.That(_workspace.Circuit.GetNode(a).Component, Is.EqualTo(ComponentRef.InputBus(8)));
+            Assert.That(_workspace.Circuit.IsDriven(Pin(display)), Is.True);
+            Assert.That(View(display).DisplayText, Is.EqualTo("A5"));
+        }
+
+        [UnityTest]
         public IEnumerator LedAndSevenSegment_FollowSingleBitInputs()
         {
             yield return LoadMain();

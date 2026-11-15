@@ -995,7 +995,8 @@ is still exactly AND and NOT; every bus component is a circuit utility, like the
 
 ### Known issues / deferred
 - A bus join's driver count and a component's width are fixed when it is placed. To change one, place a new
-  component (the library fields set the size).
+  component (the library fields set the size). (Resolved: inspector Size section, see "Editor quality: change
+  width and style after placement".)
 - Signal animation runs per bit net. On a bus wire the travelling front uses the changed bit's colours and
   settles to the aggregate state on arrival.
 - Gates have no bus pins (AND/NOT stay single-bit); use splitters and mergers, or package bit-sliced custom
@@ -1063,7 +1064,7 @@ compiler, truth tables and the built-in gate library (still exactly AND and NOT)
 
 ### Known issues / deferred
 - A display's style and width are fixed when it is placed (as for bus components); place a new one to change
-  them.
+  them. (Resolved: inspector style picker.)
 - LEDs have a single colour (the HIGH signal colour); per-LED colours would need one more `ComponentRef`
   parameter.
 - Decimal displays are integer only (no fixed-point or BCD input mode); BCD can be shown with 4-bit hex
@@ -1215,3 +1216,30 @@ gates.
 - Fixed a timing flake in `SequentialWorkspaceTests.TruthTable_RefusesClockedCircuits_…`. The live clock
   could tick between frames before the assertion. The test now measures only across the synchronous
   analysis run.
+
+## Editor quality: change width and style after placement (2026-11-16)
+
+### Implemented
+- `Commands/Circuit/ChangeComponentCommand`: swaps a node's component for another of the same kind.
+  - It keeps the node's id, position, rotation, label and interface port.
+  - It reconnects every original connection that still passes `ConnectionRules` (the pin exists and the
+    widths match).
+  - Undo restores the node and all original connections. `NodeSnapshot.WithComponent` supports this.
+- `WorkspaceController.ChangeComponent` (by component, or by width / drivers / style) and `TryBuildVariant`.
+  `IsResizable` covers bus boundaries, splitters, mergers, bus joins, tri-state drivers and displays.
+  - Dropped connections are reported, and the message says undo brings them back.
+  - Resizing an input switch also records its value, so undo restores every bit even after narrowing.
+- Inspector "Size" section for editable resizable components: a width field, a driver-count field (bus
+  join) and a display style picker (LED, 7-seg, BIN, HEX, DEC, S-DEC). Switching style clamps the width
+  to what the new style supports.
+
+### Test results
+- EditMode: **370 / 370 passed**. New `ChangeComponentCommandTests` cover:
+  - narrowing a splitter, with undo and redo;
+  - widening a merger;
+  - a bus boundary keeping its interface port and order;
+  - variant validation;
+  - rejecting a different kind.
+- PlayMode: **69 / 69 passed**. The new `ChangingDisplayStyleAndBusWidth_AfterPlacement` test covers style
+  changes from both the workspace and the inspector buttons, narrowing a bus, and undoing back to the
+  original value.

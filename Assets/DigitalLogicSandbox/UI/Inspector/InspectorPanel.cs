@@ -405,6 +405,8 @@ namespace DigitalLogicSandbox.UI.Inspector
             _headerIcon.text = HeaderIconOf(node.Component.Kind);
 
             _ui.Property(_content, "Type", DescribeKind(node.Component));
+            // Editable utilities get width / style controls in the Size section instead of a read-only width row.
+            bool resizable = _workspace.IsEditable && WorkspaceController.IsResizable(node.Component);
             if (node.IsBoundary)
             {
                 circuit.TryGetInterfacePort(node.InterfacePort, out InterfacePort port);
@@ -415,7 +417,7 @@ namespace DigitalLogicSandbox.UI.Inspector
                 field.interactable = _workspace.IsEditable;
                 int index = input ? circuit.IndexOfInput(node.InterfacePort) : circuit.IndexOfOutput(node.InterfacePort);
                 _ui.Property(_content, "Order", (index + 1) + " of " + (input ? circuit.Inputs.Count : circuit.Outputs.Count));
-                if (node.Component.Width > 1)
+                if (node.Component.Width > 1 && !resizable)
                 {
                     _ui.Property(_content, "Width", node.Component.Width + " bits (bit 0 = LSB)");
                 }
@@ -437,7 +439,7 @@ namespace DigitalLogicSandbox.UI.Inspector
             {
                 _ui.Property(_content, "Inputs", (signature?.Inputs.Count ?? 0).ToString(CultureInfo.InvariantCulture));
                 _ui.Property(_content, "Outputs", (signature?.Outputs.Count ?? 0).ToString(CultureInfo.InvariantCulture));
-                if (node.Component.Width > 1)
+                if (node.Component.Width > 1 && !resizable)
                 {
                     _ui.Property(_content, "Width", node.Component.Width + " bits");
                 }
@@ -446,6 +448,11 @@ namespace DigitalLogicSandbox.UI.Inspector
                 {
                     _liveValues.Add(LiveValue.ForDisplay(_ui.Property(_content, "Shows", "-"), node.Id));
                 }
+            }
+
+            if (resizable)
+            {
+                BuildResizeSection(node);
             }
 
             _ui.Property(_content, "Position", node.Position.X.ToString("0.##", CultureInfo.InvariantCulture) + ", " +
@@ -506,6 +513,95 @@ namespace DigitalLogicSandbox.UI.Inspector
         }
 
         /// <summary>Clock and power-on settings (project-wide) plus the live clock state.</summary>
+        /// <summary>
+        /// Size and style of a placed utility: bus width, bus-join driver count and display style. Each change is one
+        /// undoable step that keeps the connections that still fit (see <see cref="WorkspaceController.ChangeComponent(NodeId, ComponentRef)"/>).
+        /// </summary>
+        private void BuildResizeSection(NodeDefinition node)
+        {
+            ComponentRef component = node.Component;
+            NodeId id = node.Id;
+            _ui.Caption(_content, "Size");
+
+            bool fixedWidth = component.Kind == ComponentKind.Display &&
+                DisplayStyles.MinWidth(component.DisplayStyle) == DisplayStyles.MaxWidth(component.DisplayStyle);
+            if (!fixedWidth)
+            {
+                TMP_InputField width = _ui.FieldRow(_content, "Width (bits)",
+                    component.Width.ToString(CultureInfo.InvariantCulture), text =>
+                    {
+                        if (int.TryParse(text.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out int value) &&
+                            value != component.Width)
+                        {
+                            _workspace.ChangeComponent(id, value);
+                        }
+                    });
+                width.contentType = TMP_InputField.ContentType.IntegerNumber;
+                width.characterLimit = 2;
+            }
+
+            if (component.Kind == ComponentKind.BusJoin)
+            {
+                TMP_InputField inputs = _ui.FieldRow(_content, "Drivers",
+                    component.Arity.ToString(CultureInfo.InvariantCulture), text =>
+                    {
+                        if (int.TryParse(text.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out int value) &&
+                            value != component.Arity)
+                        {
+                            _workspace.ChangeComponent(id, -1, value);
+                        }
+                    });
+                inputs.contentType = TMP_InputField.ContentType.IntegerNumber;
+                inputs.characterLimit = 1;
+            }
+
+            if (component.Kind == ComponentKind.Display)
+            {
+                // Style picker: one small button per style, the current one highlighted.
+                RectTransform grid = UiFactory.CreateRect("Styles", _content);
+                var layout = grid.gameObject.AddComponent<GridLayoutGroup>();
+                layout.cellSize = new Vector2(68f, 28f);
+                layout.spacing = new Vector2(4f, 4f);
+                layout.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
+                layout.constraintCount = 3;
+                int styles = (int)DisplayStyles.Last + 1;
+                grid.gameObject.AddComponent<LayoutElement>().preferredHeight = Mathf.Ceil(styles / 3f) * 32f;
+                for (int i = 0; i < styles; i++)
+                {
+                    var style = (DisplayStyle)i;
+                    Button button = _ui.Button("Style " + style, grid, ShortStyleName(style),
+                        () => _workspace.ChangeComponent(id, -1, -1, (int)style), -1f, 12f);
+                    if (style == component.DisplayStyle)
+                    {
+                        _ui.MakePrimary(button);
+                    }
+
+                    _ui.AddTooltip(button.gameObject, DisplayStyles.DisplayName(style));
+                }
+            }
+        }
+
+        private static string ShortStyleName(DisplayStyle style)
+        {
+            switch (style)
+            {
+                case DisplayStyle.Led:
+                    return "LED";
+                case DisplayStyle.SevenSegment:
+                    return "7-seg";
+                case DisplayStyle.Binary:
+                    return "BIN";
+                case DisplayStyle.Hex:
+                    return "HEX";
+                case DisplayStyle.Decimal:
+                    return "DEC";
+                case DisplayStyle.SignedDecimal:
+                    return "S-DEC";
+                default:
+                    return style.ToString();
+            }
+        }
+
         private void BuildClockSection()
         {
             _ui.Caption(_content, "Clock & power-on");

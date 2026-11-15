@@ -727,6 +727,172 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             return true;
         }
 
+        /// <summary>True for components whose size or style can be changed after placement.</summary>
+        public static bool IsResizable(ComponentRef component)
+        {
+            switch (component.Kind)
+            {
+                case ComponentKind.InputBoundary:
+                case ComponentKind.OutputBoundary:
+                case ComponentKind.Splitter:
+                case ComponentKind.Merger:
+                case ComponentKind.BusJoin:
+                case ComponentKind.TriState:
+                case ComponentKind.Display:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>
+        /// Builds a variant of <paramref name="current"/> with another width, bus-join driver count or display style
+        /// (pass -1 to keep a parameter). Returns false with a user-facing reason when the values are out of range.
+        /// </summary>
+        public static bool TryBuildVariant(ComponentRef current, int width, int inputs, int style,
+            out ComponentRef variant, out string error)
+        {
+            variant = current;
+            error = null;
+            width = width < 0 ? current.Width : width;
+            try
+            {
+                switch (current.Kind)
+                {
+                    case ComponentKind.InputBoundary:
+                        variant = ComponentRef.InputBus(width);
+                        return true;
+                    case ComponentKind.OutputBoundary:
+                        variant = ComponentRef.OutputBus(width);
+                        return true;
+                    case ComponentKind.Splitter:
+                        variant = ComponentRef.Splitter(width);
+                        return true;
+                    case ComponentKind.Merger:
+                        variant = ComponentRef.Merger(width);
+                        return true;
+                    case ComponentKind.BusJoin:
+                        variant = ComponentRef.BusJoin(width, inputs < 0 ? current.Arity : inputs);
+                        return true;
+                    case ComponentKind.TriState:
+                        variant = ComponentRef.TriState(width);
+                        return true;
+                    case ComponentKind.Display:
+                    {
+                        DisplayStyle newStyle = style < 0 ? current.DisplayStyle : (DisplayStyle)style;
+                        if (newStyle != current.DisplayStyle && style >= 0)
+                        {
+                            // A new style starts from a width it supports (keep the old one when it fits).
+                            width = Mathf.Clamp(width, DisplayStyles.MinWidth(newStyle), DisplayStyles.MaxWidth(newStyle));
+                        }
+
+                        variant = ComponentRef.Display(newStyle, width);
+                        return true;
+                    }
+                    default:
+                        error = "This component has no size or style to change.";
+                        return false;
+                }
+            }
+            catch (ArgumentOutOfRangeException exception)
+            {
+                string message = exception.Message;
+                int newline = message.IndexOf('\n');
+                error = newline >= 0 ? message.Substring(0, newline).Trim() : message;
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Replaces a placed component with a variant of the same kind (width, bus-join drivers, display style) as
+        /// one undoable step, keeping the node's id, position and every connection that still fits. Refusals and
+        /// dropped connections are reported through <see cref="Notification"/>.
+        /// </summary>
+        public bool ChangeComponent(NodeId node, ComponentRef component)
+        {
+            if (Circuit == null || !CheckEditable() || !Circuit.TryGetNode(node, out NodeDefinition existing))
+            {
+                return false;
+            }
+
+            if (!IsResizable(existing.Component) || existing.Component.Kind != component.Kind)
+            {
+                Notify("This component's size or style cannot be changed.");
+                return false;
+            }
+
+            if (existing.Component == component)
+            {
+                return false;
+            }
+
+            string description = "Change " + DescribeComponent(existing.Component);
+            var command = new ChangeComponentCommand(Circuit, _catalog, node, component, description);
+            if (existing.Component.Kind == ComponentKind.InputBoundary)
+            {
+                // Narrowing an input switch truncates its value. A no-op value step placed first is undone last,
+                // after the width is restored, so undo brings back every original bit.
+                CircuitSession session = Session;
+                session.RebuildIfDirty();
+                ulong value = session.GetInputBits(node);
+                History.Execute(new CompositeCommand(description, new ICommand[]
+                {
+                    new SetInputValueCommand(session, node, value, null),
+                    command,
+                }));
+            }
+            else
+            {
+                History.Execute(command);
+            }
+
+            _selection.Select(node);
+            if (command.DroppedConnections > 0)
+            {
+                Notify(command.DroppedConnections + " connection" + (command.DroppedConnections == 1 ? "" : "s") +
+                    " no longer fit and " + (command.DroppedConnections == 1 ? "was" : "were") +
+                    " removed. Undo restores " + (command.DroppedConnections == 1 ? "it" : "them") + ".");
+            }
+
+            return true;
+        }
+
+        /// <summary>Changes the width, driver count or display style of a placed component (see <see cref="TryBuildVariant"/>).</summary>
+        public bool ChangeComponent(NodeId node, int width, int inputs = -1, int style = -1)
+        {
+            if (Circuit == null || !Circuit.TryGetNode(node, out NodeDefinition existing))
+            {
+                return false;
+            }
+
+            if (!TryBuildVariant(existing.Component, width, inputs, style, out ComponentRef variant, out string error))
+            {
+                Notify(error);
+                return false;
+            }
+
+            return ChangeComponent(node, variant);
+        }
+
+        private static string DescribeComponent(ComponentRef component)
+        {
+            switch (component.Kind)
+            {
+                case ComponentKind.Display:
+                    return "display";
+                case ComponentKind.BusJoin:
+                    return "bus join";
+                case ComponentKind.TriState:
+                    return "tri-state width";
+                case ComponentKind.Splitter:
+                    return "splitter width";
+                case ComponentKind.Merger:
+                    return "merger width";
+                default:
+                    return "bus width";
+            }
+        }
+
         /// <summary>Records a move that the interaction already applied live (so undo restores <paramref name="from"/>).</summary>
         public void RecordMove(NodeId[] nodes, CircuitPoint[] from)
         {

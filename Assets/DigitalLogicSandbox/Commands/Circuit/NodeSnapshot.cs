@@ -59,6 +59,15 @@ namespace DigitalLogicSandbox.Commands.Circuit
                 isInput ? PortDirection.Input : PortDirection.Output, port?.Name, index);
         }
 
+        /// <summary>
+        /// The same node (id, position, rotation, label, interface port) with another component of the same kind,
+        /// e.g. a different width or display style.
+        /// </summary>
+        public NodeSnapshot WithComponent(ComponentRef component)
+        {
+            return new NodeSnapshot(Id, component, Position, Rotation, Label, Port, Direction, PortName, PortIndex);
+        }
+
         public void Restore(CircuitDefinition circuit)
         {
             if (Component.IsBoundary)

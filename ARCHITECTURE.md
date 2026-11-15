@@ -263,6 +263,13 @@ WorkspaceController.PreviewPackaging / PackageCustomGate ──► CircuitPackag
 - **Instancing.** The compiler expands each instance into its own gates and nets (Phase 2), so instances
   never share state. Custom gates show only their external pins, labelled with the interface names.
 
+- **Changing a placed component.** `ChangeComponentCommand` swaps a node's `ComponentRef` for another of the
+  same kind (width, bus-join drivers, display style). The node is removed and restored with the same id,
+  position and interface port, so the presenter, geometry and session see an ordinary remove and add.
+  Original connections are re-added through `ConnectionRules`, so only pins that still exist with a matching
+  width survive. Undo restores the original node and every original connection. For input switches the
+  workspace adds a value-restoring `SetInputValueCommand` that is undone last.
+
 ## 7. Hierarchy, inspection and versioning *(implemented – Phase 5)*
 
 ```
