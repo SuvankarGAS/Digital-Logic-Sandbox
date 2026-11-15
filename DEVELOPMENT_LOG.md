@@ -1067,3 +1067,76 @@ compiler, truth tables and the built-in gate library (still exactly AND and NOT)
   parameter.
 - Decimal displays are integer only (no fixed-point or BCD input mode); BCD can be shown with 4-bit hex
   displays, one per digit.
+
+## UI and art redesign (2026-11-15)
+
+Goal: a minimal, calm, satisfying interface that does not overwhelm a newcomer.
+
+### Implemented
+- New design system (ARCHITECTURE §18): floating cards over a full-bleed workspace, an ink-blue palette with a
+  periwinkle accent and teal HIGH glow, Nunito text font, Lucide icons, tooltips, switch toggles and primary
+  buttons.
+- Toolbar: about 20 text buttons replaced by a project pill with a file menu and a centred icon tool bar.
+  Selection tools appear only while something is selected. Zoom, frame and grid moved to a bottom-right
+  cluster.
+- Progressive disclosure:
+  - The properties card shows only on selection, or when pinned.
+  - The breadcrumb pill shows only inside custom gates.
+  - The status bar became a pill that expands into details.
+  - In the library, advanced sections start collapsed, search expands matches, and descriptions moved into
+    tooltips.
+  - The inspector drops the node ID and empty pin rows, and shows clock settings only when the circuit has a
+    clock.
+- First-run hint on the empty canvas.
+- Workspace art: dot grid with vignette, soft gate shadows, glowing HIGH wires (also during propagation
+  animation), glowing lit switches and lamps, quieter LOW pins, thinner outlines.
+- Dialogs: dimmed scrim, card windows, accent primary actions, icon close and reorder buttons, subtler
+  truth-table stripes.
+
+### Decisions
+- All public UI members used by tests and other systems were kept (`TitleText` still ends with "*" when
+  unsaved; the dot is presentation only). The file-menu items are the same `NewButton`/`OpenButton`/... buttons.
+- Library tiles show the first letter of a gate's name (or the custom icon text) rather than per-gate
+  symbols, so no gate-specific presentation is hardcoded.
+- The theme asset now stores only material and font references, so code defaults define the palette. Saving
+  new values from the Inspector still overrides them.
+
+### Test results
+- EditMode: **346 / 346 passed**. PlayMode: **66 / 66 passed** (including the thousands-of-gates
+  performance test with wire glow enabled).
+- Manual: play-mode screenshots of the empty state, a NAND circuit, the truth-table dialog, the file menu and
+  a tooltip.
+
+### Known issues / deferred
+- The breadcrumb pill and the signal settings popover share the top-centre position. When both are open
+  inside a custom gate, the popover covers the crumbs until it is closed.
+- The fonts use the Latin subset. Missing glyphs (such as →) fall back to LiberationSans.
+
+## Wire rendering and routing (2026-11-15)
+
+Goal: wires that look right. Before this change, glow showed seams at corners, overlapping fan-out wires
+stacked brighter, edges were aliased, branch points were unmarked, and wires ran straight through unrelated
+gates.
+
+### Implemented
+- `DlsWire.shader` and the `DlsWire.mat` material: wires are drawn as signed-distance capsules with
+  anti-aliased edges, round joints and a soft glow. `BlendOp Max` makes overlaps merge instead of brighten.
+- `WireView` rewritten from two LineRenderers to one quad-per-segment mesh plus a `MaterialPropertyBlock`.
+  The public API is unchanged except that `Line` was replaced by `Width`, `PointCount`, `GetPathPoint` and
+  `SetJunction`. Transitions keep the travelling front, now with a soft bright head.
+- Junction dots where a fan-out wire leaves the shared trunk (`CircuitPresenter.UpdateJunctions`).
+- Obstacle-aware routing: wires detour around gates in their way. `SpatialHash` indexes gate bodies and wire
+  bounds, so adding, moving or deleting a gate reroutes only the wires it blocks or unblocks.
+- Removed the unused `RenderAssets.GlowStrip` and `SortingOrders.WireGlow`.
+
+### Test results
+- EditMode: **350 / 350 passed**. New tests cover the obstacle detour, ignoring off-path obstacles, shared-trunk
+  measurement, and invalidation when a gate is added across a wire and moved away.
+- PlayMode: **66 / 66 passed**. The thousands-of-gates test still reroutes exactly 2 wires on a move.
+- Manual: play-mode screenshots of a detour around a gate, a LOW fan-out with a junction dot, and a HIGH
+  fan-out with merged glow.
+
+### Known issues / deferred
+- Routing is still candidate-based rather than a full maze search. In very dense areas a wire can still
+  cross a gate when no candidate shape avoids every obstacle (capped at 10 per wire).
+- Wires do not avoid each other. Parallel wires from different sources can overlap on the same lane.

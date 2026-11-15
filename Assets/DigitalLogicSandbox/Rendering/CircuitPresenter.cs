@@ -33,8 +33,13 @@ namespace DigitalLogicSandbox.Rendering
         private readonly Dictionary<PinRef, int[]> _busWireNets = new Dictionary<PinRef, int[]>();
         private readonly Dictionary<NodeId, int[]> _displayNets = new Dictionary<NodeId, int[]>();
         private readonly HashSet<NodeId> _selectedNodes = new HashSet<NodeId>();
-        private readonly List<ConnectionDefinition> _scratchConnections = new List<ConnectionDefinition>();
         private readonly List<PinRef> _highlightedPins = new List<PinRef>();
+        private readonly List<PinRef> _scratchReroutes = new List<PinRef>();
+        private readonly HashSet<PinRef> _junctionSources = new HashSet<PinRef>();
+        private readonly List<ConnectionDefinition> _scratchSiblings = new List<ConnectionDefinition>();
+
+        /// <summary>A shared trunk shorter than this (world units) gets no junction dot (the pin marks it).</summary>
+        private const float MinJunctionTrunk = 0.2f;
         private readonly SignalStyle _style;
 
         private CircuitDefinition _circuit;
@@ -80,7 +85,10 @@ namespace DigitalLogicSandbox.Rendering
 
         public int WireViewCount => _wires.Count;
 
-        /// <summary>Diagnostics: wire views rerouted after gates moved or rotated (since the last reset).</summary>
+        /// <summary>
+        /// Diagnostics: wire views rerouted after gates moved, rotated, appeared or disappeared (since the last
+        /// reset).
+        /// </summary>
         public int WireRerouteCount { get; private set; }
 
         /// <summary>Diagnostics: nets whose value was pushed to views (since the last reset).</summary>
@@ -137,7 +145,12 @@ namespace DigitalLogicSandbox.Rendering
             for (int i = 0; i < connections.Count; i++)
             {
                 CreateWireView(connections[i].Destination);
+                _junctionSources.Add(connections[i].Source);
             }
+
+            _scratchReroutes.Clear();
+            _geometry.DrainInvalidatedWires(_scratchReroutes); // nothing to reroute on a fresh bind
+            UpdateJunctions();
         }
 
         private void OnCircuitChanged(CircuitChange change)
@@ -165,7 +178,6 @@ namespace DigitalLogicSandbox.Rendering
                         moved.SetPosition(_geometry.GetPosition(change.Node));
                     }
 
-                    RerouteWiresOf(change.Node);
                     break;
 
                 case CircuitChangeKind.NodeRotated:
@@ -177,11 +189,11 @@ namespace DigitalLogicSandbox.Rendering
                         RefreshNodeSignals(change.Node);
                     }
 
-                    RerouteWiresOf(change.Node);
                     break;
 
                 case CircuitChangeKind.Connected:
                     CreateWireView(change.Connection.Destination);
+                    _junctionSources.Add(change.Connection.Source);
                     break;
 
                 case CircuitChangeKind.Disconnected:
@@ -196,8 +208,12 @@ namespace DigitalLogicSandbox.Rendering
                         _wirePool.Release(wire);
                     }
 
+                    _junctionSources.Add(change.Connection.Source);
                     break;
             }
+
+            RerouteInvalidatedWires();
+            UpdateJunctions();
         }
 
         private void CreateGateView(NodeId node)
@@ -221,25 +237,181 @@ namespace DigitalLogicSandbox.Rendering
             _wires[destination] = view;
         }
 
-        private void RerouteWiresOf(NodeId node)
+        /// <summary>
+        /// Reroutes the wire views whose cached route the geometry dropped: wires of a moved or reshaped gate, and
+        /// wires a gate now blocks or no longer blocks. Each view is rerouted at most once per change.
+        /// </summary>
+        private void RerouteInvalidatedWires()
         {
-            if (!_circuit.ContainsNode(node))
+            _scratchReroutes.Clear();
+            _geometry.DrainInvalidatedWires(_scratchReroutes);
+            for (int i = 0; i < _scratchReroutes.Count; i++)
             {
-                return;
-            }
-
-            _scratchConnections.Clear();
-            _circuit.GetConnectionsFrom(node, _scratchConnections);
-            _circuit.GetConnectionsTo(node, _scratchConnections);
-            for (int i = 0; i < _scratchConnections.Count; i++)
-            {
-                PinRef destination = _scratchConnections[i].Destination;
+                PinRef destination = _scratchReroutes[i];
                 if (_wires.TryGetValue(destination, out WireView view))
                 {
                     view.SetPath(_geometry.GetWirePath(destination));
                     WireRerouteCount++;
+                    if (_circuit.TryGetConnectionTo(destination, out ConnectionDefinition connection))
+                    {
+                        _junctionSources.Add(connection.Source);
+                    }
                 }
             }
+        }
+
+        /// <summary>
+        /// Places junction dots for every source pin whose wires changed. Fan-out wires from one output share their
+        /// first stretch (drawn as one merged trunk); a dot marks the point where each wire leaves that trunk.
+        /// </summary>
+        private void UpdateJunctions()
+        {
+            if (_junctionSources.Count == 0 || _circuit == null)
+            {
+                return;
+            }
+
+            // One pass over the connections collects every wire of an affected source; sorting by source hash makes
+            // each source's wires contiguous (hash collisions only widen a run; the source check below handles it).
+            _scratchSiblings.Clear();
+            IReadOnlyList<ConnectionDefinition> connections = _circuit.Connections;
+            for (int i = 0; i < connections.Count; i++)
+            {
+                if (_junctionSources.Contains(connections[i].Source))
+                {
+                    _scratchSiblings.Add(connections[i]);
+                }
+            }
+
+            _junctionSources.Clear();
+            _scratchSiblings.Sort(SourceHashComparer.Instance);
+
+            int runStart = 0;
+            while (runStart < _scratchSiblings.Count)
+            {
+                int hash = _scratchSiblings[runStart].Source.GetHashCode();
+                int runEnd = runStart + 1;
+                while (runEnd < _scratchSiblings.Count && _scratchSiblings[runEnd].Source.GetHashCode() == hash)
+                {
+                    runEnd++;
+                }
+
+                for (int i = runStart; i < runEnd; i++)
+                {
+                    if (!_wires.TryGetValue(_scratchSiblings[i].Destination, out WireView view))
+                    {
+                        continue;
+                    }
+
+                    PinRef source = _scratchSiblings[i].Source;
+                    IReadOnlyList<Vector3> path = _geometry.GetWirePath(_scratchSiblings[i].Destination);
+                    float trunk = 0f;
+                    for (int j = runStart; j < runEnd; j++)
+                    {
+                        if (j != i && _scratchSiblings[j].Source == source)
+                        {
+                            trunk = Mathf.Max(trunk,
+                                SharedPrefixLength(path, _geometry.GetWirePath(_scratchSiblings[j].Destination)));
+                        }
+                    }
+
+                    bool visible = trunk >= MinJunctionTrunk && trunk < PathLength(path) - MinJunctionTrunk;
+                    view.SetJunction(visible, visible ? PointAlong(path, trunk) : default);
+                }
+
+                runStart = runEnd;
+            }
+        }
+
+        /// <summary>Length of the common start of two polylines that begin at the same point.</summary>
+        internal static float SharedPrefixLength(IReadOnlyList<Vector3> a, IReadOnlyList<Vector3> b)
+        {
+            if (a.Count < 2 || b.Count < 2 || ((Vector2)(a[0] - b[0])).sqrMagnitude > 1e-6f)
+            {
+                return 0f;
+            }
+
+            float shared = 0f;
+            int i = 1;
+            int j = 1;
+            Vector2 pa = a[0];
+            Vector2 pb = b[0];
+            while (i < a.Count && j < b.Count)
+            {
+                Vector2 qa = a[i];
+                Vector2 qb = b[j];
+                float la = (qa - pa).magnitude;
+                float lb = (qb - pb).magnitude;
+                if (la < 1e-5f)
+                {
+                    pa = qa;
+                    i++;
+                    continue;
+                }
+
+                if (lb < 1e-5f)
+                {
+                    pb = qb;
+                    j++;
+                    continue;
+                }
+
+                if (Vector2.Dot((qa - pa) / la, (qb - pb) / lb) < 0.999f)
+                {
+                    break; // the paths turn different ways here
+                }
+
+                float step = Mathf.Min(la, lb);
+                shared += step;
+                if (Mathf.Abs(la - lb) > 1e-4f)
+                {
+                    break; // one path bends mid-way along the other's segment
+                }
+
+                pa = qa;
+                pb = qb;
+                i++;
+                j++;
+            }
+
+            return shared;
+        }
+
+        private sealed class SourceHashComparer : IComparer<ConnectionDefinition>
+        {
+            public static readonly SourceHashComparer Instance = new SourceHashComparer();
+
+            public int Compare(ConnectionDefinition x, ConnectionDefinition y)
+            {
+                return x.Source.GetHashCode().CompareTo(y.Source.GetHashCode());
+            }
+        }
+
+        private static float PathLength(IReadOnlyList<Vector3> path)
+        {
+            float total = 0f;
+            for (int i = 1; i < path.Count; i++)
+            {
+                total += Vector3.Distance(path[i - 1], path[i]);
+            }
+
+            return total;
+        }
+
+        private static Vector2 PointAlong(IReadOnlyList<Vector3> path, float distance)
+        {
+            for (int i = 1; i < path.Count; i++)
+            {
+                float segment = Vector3.Distance(path[i - 1], path[i]);
+                if (distance <= segment)
+                {
+                    return Vector3.Lerp(path[i - 1], path[i], segment > 0f ? distance / segment : 0f);
+                }
+
+                distance -= segment;
+            }
+
+            return path.Count > 0 ? (Vector2)path[path.Count - 1] : Vector2.zero;
         }
 
         private void ReleaseAll()
@@ -256,6 +428,7 @@ namespace DigitalLogicSandbox.Rendering
 
             _gates.Clear();
             _wires.Clear();
+            _junctionSources.Clear();
             _netTargets.Clear();
             _busWireNets.Clear();
             _displayNets.Clear();

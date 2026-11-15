@@ -146,10 +146,10 @@ namespace DigitalLogicSandbox.Tests.PlayMode
             yield return null;
 
             _workspace.Presenter.TryGetWireView(new PinRef(not, NotGate.Input), out WireView wire);
-            Vector3 endBefore = wire.Line.GetPosition(wire.Line.positionCount - 1);
+            Vector3 endBefore = wire.GetPathPoint(wire.PointCount - 1);
 
             _workspace.MoveNodes(new[] { not }, new[] { new CircuitPoint(2, 3) });
-            Vector3 endAfter = wire.Line.GetPosition(wire.Line.positionCount - 1);
+            Vector3 endAfter = wire.GetPathPoint(wire.PointCount - 1);
             Assert.That(endAfter.y - endBefore.y, Is.EqualTo(3f).Within(1e-4f), "Wire follows the moved gate.");
             Assert.That(_workspace.Presenter.TryGetGateView(not, out GateView view) &&
                 (Vector2)view.transform.position == new Vector2(2, 3), Is.True);

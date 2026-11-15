@@ -3,6 +3,7 @@ namespace DigitalLogicSandbox.Rendering
     /// <summary>Draw order of workspace elements (all on the default sorting layer).</summary>
     public static class SortingOrders
     {
+        public const int GateShadow = -10;
         public const int Wire = 0;
         public const int SelectedWire = 1;
         public const int PreviewWire = 2;

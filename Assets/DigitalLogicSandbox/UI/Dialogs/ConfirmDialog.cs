@@ -37,12 +37,12 @@ namespace DigitalLogicSandbox.UI.Dialogs
 
         public static ConfirmDialog Create(Transform parent, UiFactory ui, WorkspaceController workspace)
         {
-            Image blocker = ui.Panel("Confirm Dialog", parent, new Color(0f, 0f, 0f, 0.55f));
+            Image blocker = ui.Panel("Confirm Dialog", parent, ui.Theme.Scrim);
             UiFactory.Stretch(blocker.rectTransform);
             var dialog = blocker.gameObject.AddComponent<ConfirmDialog>();
             dialog._workspace = workspace;
 
-            Image window = ui.Panel("Window", blocker.rectTransform, ui.Theme.PanelBackground, rounded: true);
+            Image window = ui.Card("Window", blocker.rectTransform, ui.Theme.PanelBackground);
             RectTransform rect = window.rectTransform;
             rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
             rect.pivot = new Vector2(0.5f, 0.5f);
@@ -67,6 +67,7 @@ namespace DigitalLogicSandbox.UI.Dialogs
             dialog._cancel = ui.Button("Cancel", buttons, "Cancel", () => dialog.Answer(dialog._onCancel), 100f);
             dialog._secondary = ui.Button("Secondary", buttons, "No", () => dialog.Answer(dialog._onSecondary), 120f);
             dialog._primary = ui.Button("Primary", buttons, "Yes", () => dialog.Answer(dialog._onPrimary), 120f);
+            ui.MakePrimary(dialog._primary);
 
             blocker.gameObject.SetActive(false);
             return dialog;

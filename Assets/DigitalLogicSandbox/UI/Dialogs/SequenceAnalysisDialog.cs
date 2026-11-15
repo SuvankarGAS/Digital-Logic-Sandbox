@@ -90,7 +90,7 @@ namespace DigitalLogicSandbox.UI.Dialogs
 
         public static SequenceAnalysisDialog Create(Transform parent, UiFactory ui, WorkspaceController workspace)
         {
-            Image blocker = ui.Panel("Sequence Analysis Dialog", parent, new Color(0f, 0f, 0f, 0.55f));
+            Image blocker = ui.Panel("Sequence Analysis Dialog", parent, ui.Theme.Scrim);
             UiFactory.Stretch(blocker.rectTransform);
             var dialog = blocker.gameObject.AddComponent<SequenceAnalysisDialog>();
             dialog._ui = ui;
@@ -475,7 +475,7 @@ namespace DigitalLogicSandbox.UI.Dialogs
 
         private void Build(RectTransform blocker)
         {
-            Image window = _ui.Panel("Window", blocker, _ui.Theme.PanelBackground, rounded: true);
+            Image window = _ui.Card("Window", blocker, _ui.Theme.PanelBackground);
             RectTransform rect = window.rectTransform;
             rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
             rect.pivot = new Vector2(0.5f, 0.5f);
@@ -491,7 +491,7 @@ namespace DigitalLogicSandbox.UI.Dialogs
             _title = _ui.Text("Title", titleRow, "Sequence analysis", 18f, _ui.Theme.TextPrimary,
                 TextAlignmentOptions.MidlineLeft, FontStyles.Bold);
             _title.gameObject.AddComponent<LayoutElement>().flexibleWidth = 1f;
-            _ui.Button("Close", titleRow, "X", Close, 30f);
+            _ui.IconButton("Close", titleRow, Icons.Close, "Close", Close, 30f, 15f);
 
             _summary = _ui.Text("Summary", column, string.Empty, 12.5f, _ui.Theme.TextSecondary, TextAlignmentOptions.TopLeft);
             _summary.enableWordWrapping = true;
@@ -507,7 +507,7 @@ namespace DigitalLogicSandbox.UI.Dialogs
             _pulseClock = _ui.Toggle("PulseClock", column, "Pulse the clock once per step", true, _ => Run());
             _powerOnUnknown = _ui.Toggle("PowerOnUnknown", column, "Power on loops as unknown (X)", false, _ => Run());
 
-            Image tableFrame = _ui.Panel("Table", column, _ui.Theme.WorkspaceBackground, rounded: true);
+            Image tableFrame = _ui.Panel("Table", column, _ui.Theme.WorkspaceBackground, rounded: true, radius: 10f);
             var tableLayout = tableFrame.gameObject.AddComponent<LayoutElement>();
             tableLayout.flexibleHeight = 1f;
             tableLayout.minHeight = 180f;
@@ -528,7 +528,7 @@ namespace DigitalLogicSandbox.UI.Dialogs
             RectTransform buttons = UiFactory.CreateRect("Buttons", column);
             UiFactory.Row(buttons, 8f, new RectOffset(0, 0, 0, 0), TextAnchor.MiddleRight);
             buttons.gameObject.AddComponent<LayoutElement>().preferredHeight = 34f;
-            _ui.Button("Run", buttons, "Run", () => Run(), 80f);
+            _ui.MakePrimary(_ui.Button("Run", buttons, "Run", () => Run(), 80f));
             _copyButton = _ui.Button("Copy", buttons, "Copy", () => CopyToClipboard(), 80f);
             _exportButton = _ui.Button("Export", buttons, "Export CSV", () => ExportCsv(), 110f);
             UiFactory.Flexible(buttons);

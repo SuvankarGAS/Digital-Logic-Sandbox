@@ -55,7 +55,7 @@ namespace DigitalLogicSandbox.UI.Dialogs
 
         public static PackagingDialog Create(Transform parent, UiFactory ui, WorkspaceController workspace)
         {
-            Image blocker = ui.Panel("Packaging Dialog", parent, new Color(0f, 0f, 0f, 0.55f));
+            Image blocker = ui.Panel("Packaging Dialog", parent, ui.Theme.Scrim);
             UiFactory.Stretch(blocker.rectTransform);
             var dialog = blocker.gameObject.AddComponent<PackagingDialog>();
             dialog._ui = ui;
@@ -146,7 +146,7 @@ namespace DigitalLogicSandbox.UI.Dialogs
 
         private void Build(RectTransform blocker)
         {
-            Image window = _ui.Panel("Window", blocker, _ui.Theme.PanelBackground, rounded: true);
+            Image window = _ui.Card("Window", blocker, _ui.Theme.PanelBackground);
             _window = window.rectTransform;
             _window.anchorMin = _window.anchorMax = new Vector2(0.5f, 0.5f);
             _window.pivot = new Vector2(0.5f, 0.5f);
@@ -198,6 +198,7 @@ namespace DigitalLogicSandbox.UI.Dialogs
             UiFactory.Flexible(buttons);
             _ui.Button("Cancel", buttons, "Cancel", Close, 100f);
             _packageButton = _ui.Button("Package", buttons, "Create Gate", () => Confirm(), 130f);
+            _ui.MakePrimary(_packageButton);
             _packageButton.GetComponent<Image>().color = _ui.Theme.Accent;
         }
 
@@ -262,9 +263,9 @@ namespace DigitalLogicSandbox.UI.Dialogs
                     Revalidate();
                 });
 
-                Button up = _ui.Button("Up", row, "^", () => MovePort(ports, index, index - 1), 28f);
+                Button up = _ui.IconButton("Up", row, Icons.ChevronUp, "Move up", () => MovePort(ports, index, index - 1), 28f, 14f);
                 up.interactable = i > 0;
-                Button down = _ui.Button("Down", row, "v", () => MovePort(ports, index, index + 1), 28f);
+                Button down = _ui.IconButton("Down", row, Icons.ChevronDown, "Move down", () => MovePort(ports, index, index + 1), 28f, 14f);
                 down.interactable = i < ports.Count - 1;
             }
         }

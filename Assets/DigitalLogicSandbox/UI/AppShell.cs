@@ -17,10 +17,11 @@ using UnityEngine.UI;
 namespace DigitalLogicSandbox.UI
 {
     /// <summary>
-    /// Screen-space UI around the workspace: toolbar (top), breadcrumb bar, gate library (left), inspector (right), status bar (bottom), context menu and
-    /// modal dialogs. The
-    /// workspace camera renders full screen behind the panels. Pointer input over the panels is filtered out by
-    /// the workspace through <see cref="IsPointerOverUi"/>.
+    /// Screen-space UI floating over a full-bleed workspace: project pill and tool bar (top), breadcrumb pill (only
+    /// inside custom gates), gate library (left), properties card (right, only while something is selected or when
+    /// pinned), status pill and view controls (bottom), first-run hint, tooltip, context menu and modal dialogs.
+    /// The workspace camera renders full screen behind the panels. Pointer input over the panels is filtered out
+    /// by the workspace through <see cref="IsPointerOverUi"/>.
     /// </summary>
     public sealed class AppShell : MonoBehaviour
     {
@@ -39,6 +40,12 @@ namespace DigitalLogicSandbox.UI
         public PackagingDialog PackagingDialog { get; private set; }
 
         public NavigationBar NavigationBar { get; private set; }
+
+        /// <summary>Shared hover tooltip.</summary>
+        public TooltipView Tooltip { get; private set; }
+
+        /// <summary>Guidance shown on an empty canvas.</summary>
+        public EmptyStateView EmptyState { get; private set; }
 
         public ContextMenuView ContextMenu { get; private set; }
 
@@ -80,6 +87,7 @@ namespace DigitalLogicSandbox.UI
             go.AddComponent<GraphicRaycaster>();
 
             shell.Factory = new UiFactory(theme);
+            shell.EmptyState = EmptyStateView.Create(go.transform, shell.Factory, workspace);
             shell.Library = LibraryPanel.Create(go.transform, shell.Factory, workspace, catalog, library);
             shell.Toolbar = ToolbarView.Create(go.transform, shell.Factory, workspace);
             shell.StatusBar = StatusBarView.Create(go.transform, shell.Factory, workspace);
@@ -95,8 +103,13 @@ namespace DigitalLogicSandbox.UI
             shell._workspace = workspace;
             workspace.VisibleScreenArea = shell.GetWorkspaceScreenRect;
             shell.AttachProjects(projects);
+            shell.Tooltip = TooltipView.Create(go.transform, shell.Factory);
+            shell.Factory.Tooltip = shell.Tooltip;
 
             shell.Toolbar.SignalSettingsRequested += shell.SignalSettings.Toggle;
+            shell.SignalSettings.OpenChanged += shell.Toolbar.SetSignalsActive;
+            shell.Toolbar.PropertiesRequested += () => shell.Inspector.Pinned = !shell.Inspector.Pinned;
+            shell.Inspector.PinnedChanged += shell.Toolbar.SetPropertiesActive;
             shell.Toolbar.CreateGateRequested += () => shell.PackagingDialog.Open(selectionOnly: false);
             shell.Inspector.PackageRequested += selectionOnly => shell.PackagingDialog.Open(selectionOnly);
             shell.ContextMenu.PackageRequested += selectionOnly => shell.PackagingDialog.Open(selectionOnly);
@@ -163,10 +176,7 @@ namespace DigitalLogicSandbox.UI
         {
             Projects = projects;
             bool available = projects != null;
-            Toolbar.NewButton.gameObject.SetActive(available);
-            Toolbar.OpenButton.gameObject.SetActive(available);
-            Toolbar.SaveButton.gameObject.SetActive(available);
-            Toolbar.SaveAsButton.gameObject.SetActive(available);
+            Toolbar.SetProjectActionsAvailable(available);
             if (!available)
             {
                 Toolbar.SetProjectTitle("Digital Logic Sandbox", false);
@@ -297,6 +307,11 @@ namespace DigitalLogicSandbox.UI
             if (StatusBar != null && IsShown(StatusBar))
             {
                 bottom = Mathf.Max(bottom, ScreenRectOf(StatusBar.transform).yMax);
+            }
+
+            if (Toolbar != null && Toolbar.ViewCluster != null && Toolbar.ViewCluster.gameObject.activeInHierarchy)
+            {
+                bottom = Mathf.Max(bottom, ScreenRectOf(Toolbar.ViewCluster).yMax);
             }
 
             return Rect.MinMaxRect(left, bottom, Mathf.Max(left, right), Mathf.Max(bottom, top));

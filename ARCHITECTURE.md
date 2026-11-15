@@ -468,7 +468,8 @@ UI panels (toolbar, library) --> WorkspaceController --> CommandHistory --> Circ
   → gate bodies → wires (distance to path). No colliders.
 - **Geometry cache.** `CircuitGeometry` caches gate layouts and wire routes. The presenter forwards each model
   change to it *before* updating views, so drawing and picking always agree. Only wires touching a moved
-  node are rerouted.
+  node, or crossing its old or new body, are rerouted. The geometry queues those wires
+  (`DrainInvalidatedWires`), and the presenter reroutes each view once per change.
 - **Recompile policy.** Structural changes (nodes, connections, interface) mark the session dirty; moves,
   rotations, labels and renames do not. Recompilation happens at most once per frame in `Sync()` (or
   immediately before an input toggle), and input values carry over by port id.
@@ -492,8 +493,17 @@ UI panels (toolbar, library) --> WorkspaceController --> CommandHistory --> Circ
   - The cost is length plus bends. Entering an endpoint gate's body, or doubling back over a stub, carries
     a large penalty.
   - Scratch buffers are static, so routing allocates nothing.
-  - Only the two endpoint gates are obstacles. Avoiding all gates (A* on a grid) can be added behind the
-    same API, because routes are cached per wire and recomputed only when an endpoint moves.
+  - **Obstacles.** Other gates near the wire (up to `WireRouter.MaxObstacles`, nearest first, endpoint gates
+    and gates overlapping them excluded) are passed in. Crossing one costs less than crossing an endpoint
+    gate. Only when the best plain shape still crosses an obstacle does a second pass add lanes just outside
+    each obstacle (one stub away), so unobstructed wires pay nothing.
+  - **Spatial indexes.** `CircuitGeometry` keeps two uniform-grid `SpatialHash` indexes: gate bodies (for
+    obstacle queries) and wire route bounds. When a gate is added, moved, reshaped or removed, only wires
+    whose bounds touch its old or new body are invalidated. That covers both newly blocked wires and wires
+    that can now take a shorter path. The node index is built lazily on the first route after `Bind`.
+  - **Junction dots.** Fan-out wires from one output share their first stretch. The presenter measures each
+    wire's longest common prefix with its siblings (`SharedPrefixLength`) and puts a dot where it leaves the
+    trunk. Dots are recomputed only for sources whose wires were created, removed or rerouted.
 - **Diagnostics.** `CircuitPresenter.WireRerouteCount` / `NetSignalUpdateCount` let tests and profiling
   confirm that only affected views are touched.
 
@@ -648,3 +658,57 @@ latches, and so on. The engine has no sequential primitive. What makes this well
 - **Layout.** `GateLayout.DisplaySize` gives each style's body and content area; content is drawn upright and
   scaled into the rotated `GateGeometry.DisplayArea`.
 - **Persistence (schema v4).** `{ "kind": "display", "style": "hex", "width": 8 }`.
+
+## 18. Visual design system *(UI redesign, 2026-11-15)*
+
+One visual language, defined in `VisualTheme` (colour tokens, sizes, fonts) and applied by `UiFactory` (UI) and
+the workspace views (`GateView`, `WireView`, `GridView`).
+
+- **Principles.** The workspace is the hero: it is full-bleed, and panels float over it as rounded cards with
+  soft shadows. The palette is calm (deep ink background, one periwinkle accent, a teal glow for HIGH). Icons
+  replace text where the meaning is clear, with a tooltip on every icon button. The UI uses progressive
+  disclosure: only what a newcomer needs is visible at first.
+- **Layout.** Project pill and file menu (top-left), icon tool bar (top-centre), library card (left), status
+  pill (bottom-centre), view controls (bottom-right). Several panels appear only when needed:
+  - The breadcrumb pill appears only inside a custom gate (`NavigationBar` hides itself at the root).
+  - The properties card appears only while something is selected, or when pinned with the toolbar
+    "Circuit properties" button (`InspectorPanel.Pinned`). It grows with its content.
+  - The selection tools (Inspect, Delete) appear in the tool bar only while something is selected.
+  - The status details (evaluation count, live values) expand from the status pill on click.
+  - The library opens Gates, Inputs & Outputs and My Gates. Timing, Buses and Displays start collapsed, and
+    search expands whatever matches.
+  - An `EmptyStateView` explains the first step on an empty canvas and fades out once a part is placed.
+- **Typography.** Nunito (SIL OFL), with Regular, SemiBold and Bold weights linked through the font asset's
+  weight table. `UiFactory.Text` maps `FontStyles.Bold` to SemiBold for softer emphasis. Lucide (ISC) supplies
+  icons and is a fallback of the text font, so `UiFactory.Icon` labels keep Nunito as their primary font. This
+  avoids TMP warnings, because TMP looks up '_' and '…' only in the primary font. Glyph constants are in
+  `UI/Icons.cs`. The fonts are dynamic TMP assets under `UI/Resources/DLSFonts`, referenced by the theme, and
+  `Resources.Load` is the fallback for runtime-default themes.
+- **Controls.**
+  - `UiFactory.Card` draws a transparent hit root with Shadow, Fill and Border children. These children ignore
+    layout, so layout groups on the card work as on a plain panel.
+  - `IconButton` is a ghost button with a hover tile. `MakePrimary` gives a button the accent style.
+  - `Toggle` is a switch, animated by `SwitchVisual`.
+  - `ButtonVisual` keeps labels and icons in step with the disabled, hover and active states.
+  - There is one shared `TooltipView`, and `TooltipTrigger` components feed it.
+- **Workspace art.**
+  - `DlsGrid.shader` draws a screen-constant dot grid over a centre-lifted background with a vignette.
+  - Gates get a 9-sliced `RenderAssets.SoftShadow` (sorting order `GateShadow`, below wires), a hairline
+    outline and a SemiBold title. Lit switches and lamps get a radial `Glow` sprite.
+  - **Wires** are meshes drawn with `DlsWire.shader` (`VisualTheme.WireMaterial`), not LineRenderers:
+    - Each `WireView` builds one quad per straight segment, extended by the core half width plus
+      `VisualTheme.WireGlowRadius`. UV0 holds the distance along and across the segment; UV1 holds the
+      path distance at the segment start and the segment length.
+    - The fragment shader evaluates a capsule signed-distance field. That gives an anti-aliased core
+      (`fwidth`), perfectly round joints, and a soft quadratic glow, with no seams at bends.
+    - Blending is `BlendOp Max` on premultiplied colour. Overlapping capsules (bends, shared fan-out
+      trunks, junction dots) form a union instead of stacking brighter.
+    - State comes in through a per-view `MaterialPropertyBlock`: new and old colour, front colour, half
+      widths, glow amounts, front distance and the junction disc. A signal transition is drawn as the new
+      state up to the front path distance, with a Gaussian bright head, and the old state beyond it.
+    - The mesh is rebuilt only by `SetPath`. Signal, hover, selection and transition changes touch only the
+      property block.
+    - Glow is `GlowStrength × 1.6` for HIGH, half that for UNKNOWN, and none for LOW and Z.
+      `GlowStrength` 0 disables it.
+- **Colour space.** The project renders in linear space, so low-alpha white overlays look much brighter than
+  their numbers suggest. Keep stripes and tints at around 2% alpha.

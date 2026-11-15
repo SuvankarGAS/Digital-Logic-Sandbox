@@ -14,25 +14,30 @@ using UnityEngine.UI;
 namespace DigitalLogicSandbox.UI.Panels
 {
     /// <summary>
-    /// Left panel: built-in gates (listed from the primitive registry, never hardcoded), circuit I/O boundaries,
-    /// and the user's custom gates grouped by category. It refreshes automatically when a definition is published
-    /// and supports search by name, category and description. Right-clicking an entry opens its context menu.
+    /// Floating gate library on the left. It opens with only what a newcomer needs: the built-in gates (listed
+    /// from the primitive registry, never hardcoded), inputs and outputs, and the user's own gates. Advanced parts
+    /// (clock, buses, displays) live in collapsed sections. Search looks through everything, expanding whatever
+    /// matches. Custom gates are grouped by category and refresh automatically when a definition is published.
+    /// Right-clicking an entry opens its context menu.
     /// </summary>
     public sealed class LibraryPanel : MonoBehaviour
     {
         public const string UncategorizedLabel = "General";
-
-        private readonly List<LibraryItemView> _items = new List<LibraryItemView>();
-        private readonly List<LibraryItemView> _customItems = new List<LibraryItemView>();
-        private readonly List<GameObject> _customHeaders = new List<GameObject>();
-        private readonly List<CircuitDefinition> _scratchDefinitions = new List<CircuitDefinition>();
-        private readonly List<LibraryItemView> _busItems = new List<LibraryItemView>();
 
         /// <summary>Default bit width of bus components placed from the library.</summary>
         public const int DefaultBusWidth = 4;
 
         /// <summary>Default number of drivers of a bus join placed from the library.</summary>
         public const int DefaultJoinInputs = 2;
+
+        private const float HeaderHeight = 92f;
+
+        private readonly List<LibraryItemView> _items = new List<LibraryItemView>();
+        private readonly List<LibraryItemView> _customItems = new List<LibraryItemView>();
+        private readonly List<GameObject> _customHeaders = new List<GameObject>();
+        private readonly List<CircuitDefinition> _scratchDefinitions = new List<CircuitDefinition>();
+        private readonly List<LibraryItemView> _busItems = new List<LibraryItemView>();
+        private readonly List<Section> _sections = new List<Section>();
 
         private RectTransform _busRoot;
         private RectTransform _displayRoot;
@@ -47,7 +52,11 @@ namespace DigitalLogicSandbox.UI.Panels
         private DefinitionLibrary _library;
         private RectTransform _content;
         private RectTransform _customRoot;
-        private TextMeshProUGUI _customEmpty;
+        private Section _customSection;
+        private Section _busSection;
+        private Section _displaySection;
+        private GameObject _customEmpty;
+        private TextMeshProUGUI _customEmptyText;
         private TMP_InputField _search;
         private string _filter = string.Empty;
 
@@ -81,20 +90,13 @@ namespace DigitalLogicSandbox.UI.Panels
         public static LibraryPanel Create(Transform parent, UiFactory ui, WorkspaceController workspace,
             ComponentCatalog catalog, DefinitionLibrary library)
         {
-            Image background = ui.Panel("Gate Library", parent, ui.Theme.PanelBackground);
+            Image background = ui.Card("Gate Library", parent, ui.Theme.PanelBackground);
             RectTransform rect = background.rectTransform;
             rect.anchorMin = new Vector2(0f, 0f);
             rect.anchorMax = new Vector2(0f, 1f);
             rect.pivot = new Vector2(0f, 0.5f);
-            rect.offsetMin = new Vector2(0f, UiFactory.StatusBarHeight);
-            rect.offsetMax = new Vector2(UiFactory.LibraryWidth, -UiFactory.ToolbarHeight);
-
-            Image border = ui.Panel("Border", rect, ui.Theme.PanelBorder);
-            border.raycastTarget = false;
-            border.rectTransform.anchorMin = new Vector2(1f, 0f);
-            border.rectTransform.anchorMax = new Vector2(1f, 1f);
-            border.rectTransform.sizeDelta = new Vector2(1f, 0f);
-            border.rectTransform.anchoredPosition = Vector2.zero;
+            rect.offsetMin = new Vector2(UiFactory.Margin, UiFactory.Margin);
+            rect.offsetMax = new Vector2(UiFactory.Margin + UiFactory.LibraryWidth, -UiFactory.TopInset);
 
             var panel = background.gameObject.AddComponent<LibraryPanel>();
             panel._ui = ui;
@@ -108,13 +110,22 @@ namespace DigitalLogicSandbox.UI.Panels
             return panel;
         }
 
-        /// <summary>Applies a search filter (case-insensitive substring on name, and category/description of custom gates).</summary>
+        /// <summary>
+        /// Applies a search filter (case-insensitive substring on name, and category/description of custom gates).
+        /// While searching, every section with a match is shown expanded and sections without matches are hidden.
+        /// </summary>
         public void SetFilter(string filter)
         {
             _filter = filter?.Trim() ?? string.Empty;
             for (int i = 0; i < _items.Count; i++)
             {
                 _items[i].gameObject.SetActive(_items[i].Matches(_filter));
+            }
+
+            bool searching = _filter.Length > 0;
+            for (int i = 0; i < _sections.Count; i++)
+            {
+                _sections[i].ApplyFilter(searching);
             }
 
             UpdateCustomEmptyState();
@@ -126,6 +137,7 @@ namespace DigitalLogicSandbox.UI.Panels
             for (int i = 0; i < _customItems.Count; i++)
             {
                 _items.Remove(_customItems[i]);
+                _customSection.Items.Remove(_customItems[i]);
                 Destroy(_customItems[i].gameObject);
             }
 
@@ -150,20 +162,26 @@ namespace DigitalLogicSandbox.UI.Panels
                 if (multipleCategories && !string.Equals(category, currentCategory, StringComparison.Ordinal))
                 {
                     currentCategory = category;
-                    TextMeshProUGUI header = _ui.Text("Category " + category, _customRoot, category.ToUpperInvariant(),
-                        11f, _ui.Theme.TextSecondary);
-                    header.gameObject.AddComponent<LayoutElement>().preferredHeight = 20f;
+                    TextMeshProUGUI header = _ui.Text("Category " + category, _customRoot, category, 11.5f,
+                        _ui.Theme.TextMuted, TextAlignmentOptions.BottomLeft);
+                    header.margin = new Vector4(8f, 0f, 0f, 2f);
+                    header.gameObject.AddComponent<LayoutElement>().preferredHeight = 24f;
                     _customHeaders.Add(header.gameObject);
                 }
 
                 ComponentSignature signature = definition.GetSignature();
-                LibraryItemView item = AddItem(_customRoot,
+                string tile = string.IsNullOrWhiteSpace(definition.Icon) ? Initial(definition.Name) : definition.Icon;
+                string tooltip = string.IsNullOrWhiteSpace(definition.Description)
+                    ? definition.Name + (definition.Version > 1 ? "  ·  version " + definition.Version : string.Empty)
+                    : definition.Description;
+                LibraryItemView item = AddItem(_customSection, _customRoot,
                     new PlacementRequest(ComponentRef.Custom(definition.Reference), definition.Name),
-                    definition.Name, Describe(signature) + (definition.Version > 1 ? "  -  v" + definition.Version : string.Empty),
-                    definition.Icon, category + " " + definition.Description);
+                    definition.Name, Describe(signature), tile, LibraryTileStyle.Accent, showDetail: true,
+                    category + " " + definition.Description, tooltip);
                 _customItems.Add(item);
             }
 
+            _customSection.SetCount(_customItems.Count);
             SetFilter(_filter);
         }
 
@@ -173,79 +191,93 @@ namespace DigitalLogicSandbox.UI.Panels
             header.anchorMin = new Vector2(0f, 1f);
             header.anchorMax = new Vector2(1f, 1f);
             header.pivot = new Vector2(0.5f, 1f);
-            header.sizeDelta = new Vector2(0f, 76f);
+            header.sizeDelta = new Vector2(0f, HeaderHeight);
             header.anchoredPosition = Vector2.zero;
             var headerLayout = header.gameObject.AddComponent<VerticalLayoutGroup>();
-            headerLayout.padding = new RectOffset(12, 12, 10, 6);
-            headerLayout.spacing = 6f;
+            headerLayout.padding = new RectOffset(14, 14, 14, 8);
+            headerLayout.spacing = 10f;
             headerLayout.childControlWidth = true;
             headerLayout.childControlHeight = true;
             headerLayout.childForceExpandHeight = false;
 
-            TextMeshProUGUI title = _ui.Text("Title", header, "Gate Library", 15f, _ui.Theme.TextPrimary,
+            TextMeshProUGUI title = _ui.Text("Title", header, "Library", 14.5f, _ui.Theme.TextPrimary,
                 TextAlignmentOptions.MidlineLeft, FontStyles.Bold);
             title.gameObject.AddComponent<LayoutElement>().preferredHeight = 20f;
-            _search = _ui.InputField("Search", header, "Search gates...");
+            _search = _ui.InputField("Search", header, "Search parts", Icons.Search);
             _search.onValueChanged.AddListener(SetFilter);
 
             RectTransform scroll = UiFactory.CreateRect("Scroll", rect);
-            UiFactory.Stretch(scroll, 0f, 1f, 76f, 0f);
+            UiFactory.Stretch(scroll, 2f, 2f, HeaderHeight, 4f);
             _content = _ui.ScrollView("List", scroll, out _);
             UiFactory.Stretch((RectTransform)_content.parent.parent);
+            var listLayout = _content.GetComponent<VerticalLayoutGroup>();
+            listLayout.padding = new RectOffset(8, 8, 0, 14);
+            listLayout.spacing = 1f;
 
-            Section("Built-in Gates");
+            Section gates = AddSection("Gates", expanded: true);
             IReadOnlyList<IPrimitiveComponent> primitives = _catalog.Primitives.All;
             for (int i = 0; i < primitives.Count; i++)
             {
                 IPrimitiveComponent primitive = primitives[i];
-                AddItem(_content, new PlacementRequest(ComponentRef.Primitive(primitive.Id), primitive.DisplayName),
-                    primitive.DisplayName, Describe(primitive.Signature));
+                AddItem(gates, gates.Body, new PlacementRequest(ComponentRef.Primitive(primitive.Id), primitive.DisplayName),
+                    primitive.DisplayName, "Built-in gate  ·  " + Describe(primitive.Signature),
+                    Initial(primitive.DisplayName), LibraryTileStyle.Neutral, showDetail: false);
             }
 
-            Section("Circuit I/O");
-            AddItem(_content, new PlacementRequest(ComponentRef.InputBoundary, "Input"), "Input", "switch");
-            AddItem(_content, new PlacementRequest(ComponentRef.OutputBoundary, "Output"), "Output", "indicator");
-            AddItem(_content, new PlacementRequest(ComponentRef.Clock, "Clock"), "Clock", "global clock signal");
+            gates.SetCount(primitives.Count);
 
-            Section("Buses");
-            _busWidthField = _ui.FieldRow(_content, "Bus width",
+            Section io = AddSection("Inputs & Outputs", expanded: true);
+            AddItem(io, io.Body, new PlacementRequest(ComponentRef.InputBoundary, "Input"), "Input",
+                "A switch you can flip between 0 and 1", Icons.Switch, LibraryTileStyle.Icon, false, "switch");
+            AddItem(io, io.Body, new PlacementRequest(ComponentRef.OutputBoundary, "Output"), "Output",
+                "A lamp that lights up on 1", Icons.Lamp, LibraryTileStyle.Icon, false, "indicator lamp");
+            io.SetCount(2);
+
+            _customSection = AddSection("My Gates", expanded: true);
+            _customRoot = _customSection.Body;
+            _customEmpty = BuildCustomEmptyState(_customSection.Body);
+
+            Section timing = AddSection("Timing", expanded: false);
+            AddItem(timing, timing.Body, new PlacementRequest(ComponentRef.Clock, "Clock"), "Clock",
+                "Global clock signal for sequential circuits", Icons.Clock, LibraryTileStyle.Icon, false,
+                "global clock signal");
+            timing.SetCount(1);
+
+            _busSection = AddSection("Buses", expanded: false);
+            _busWidthField = _ui.FieldRow(_busSection.Body, "Bus width",
                 _busWidth.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 text => SetBusParameters(ParseOr(text, _busWidth), _joinInputs));
             _busWidthField.contentType = TMP_InputField.ContentType.IntegerNumber;
-            _joinInputsField = _ui.FieldRow(_content, "Join inputs",
+            _joinInputsField = _ui.FieldRow(_busSection.Body, "Join inputs",
                 _joinInputs.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 text => SetBusParameters(_busWidth, ParseOr(text, _joinInputs)));
             _joinInputsField.contentType = TMP_InputField.ContentType.IntegerNumber;
-            _busRoot = UiFactory.CreateRect("Bus Components", _content);
-            var busLayout = _busRoot.gameObject.AddComponent<VerticalLayoutGroup>();
-            busLayout.spacing = 4f;
-            busLayout.childControlWidth = true;
-            busLayout.childControlHeight = true;
-            busLayout.childForceExpandHeight = false;
+            _busRoot = UiFactory.Column("Bus Components", _busSection.Body, 1f, new RectOffset(0, 0, 4, 0));
 
-            Section("Displays");
-            _displayRoot = UiFactory.CreateRect("Display Components", _content);
-            var displayLayout = _displayRoot.gameObject.AddComponent<VerticalLayoutGroup>();
-            displayLayout.spacing = 4f;
-            displayLayout.childControlWidth = true;
-            displayLayout.childControlHeight = true;
-            displayLayout.childForceExpandHeight = false;
+            _displaySection = AddSection("Displays", expanded: false);
+            _displayRoot = UiFactory.Column("Display Components", _displaySection.Body, 1f, new RectOffset(0, 0, 0, 0));
             RebuildBusItems();
 
-            Section("My Custom Gates");
-            _customRoot = UiFactory.CreateRect("Custom Gates", _content);
-            var customLayout = _customRoot.gameObject.AddComponent<VerticalLayoutGroup>();
-            customLayout.spacing = 4f;
-            customLayout.childControlWidth = true;
-            customLayout.childControlHeight = true;
-            customLayout.childForceExpandHeight = false;
-            _customEmpty = _ui.Text("Empty", _content,
-                "No custom gates yet.\nBuild a circuit and package it.", 12f, _ui.Theme.TextSecondary,
-                TextAlignmentOptions.TopLeft);
-            _customEmpty.enableWordWrapping = true;
-            _customEmpty.gameObject.AddComponent<LayoutElement>().preferredHeight = 40f;
-
             RefreshCustomGates();
+        }
+
+        private GameObject BuildCustomEmptyState(Transform parent)
+        {
+            RectTransform box = UiFactory.Column("Empty", parent, 4f, new RectOffset(10, 10, 6, 8));
+            TextMeshProUGUI icon = _ui.Icon("Icon", box, Icons.PackagePlus, 18f, _ui.Theme.TextMuted);
+            icon.alignment = TextAlignmentOptions.Left;
+            icon.gameObject.AddComponent<LayoutElement>().preferredHeight = 24f;
+            _customEmptyText = _ui.Text("Text", box, string.Empty, 12f, _ui.Theme.TextSecondary, TextAlignmentOptions.TopLeft);
+            _customEmptyText.enableWordWrapping = true;
+            _customEmptyText.gameObject.AddComponent<LayoutElement>().preferredHeight = 34f;
+            return box.gameObject;
+        }
+
+        private Section AddSection(string title, bool expanded)
+        {
+            var section = new Section(this, title, expanded);
+            _sections.Add(section);
+            return section;
         }
 
         private void RebuildBusItems()
@@ -258,43 +290,51 @@ namespace DigitalLogicSandbox.UI.Panels
             for (int i = 0; i < _busItems.Count; i++)
             {
                 _items.Remove(_busItems[i]);
+                _busSection.Items.Remove(_busItems[i]);
+                _displaySection.Items.Remove(_busItems[i]);
                 Destroy(_busItems[i].gameObject);
             }
 
             _busItems.Clear();
             string bits = _busWidth.ToString(System.Globalization.CultureInfo.InvariantCulture) + "-bit";
-            AddBusItem(ComponentRef.InputBus(_busWidth), "Bus Input", bits + " switches");
-            AddBusItem(ComponentRef.OutputBus(_busWidth), "Bus Output", bits + " display");
-            AddBusItem(ComponentRef.Splitter(_busWidth), "Splitter", bits + " bus to single bits");
-            AddBusItem(ComponentRef.Merger(_busWidth), "Merger", "single bits to " + bits + " bus");
+            AddBusItem(ComponentRef.InputBus(_busWidth), "Bus Input", bits + " switches", Icons.Switch);
+            AddBusItem(ComponentRef.OutputBus(_busWidth), "Bus Output", bits + " display", Icons.Lamp);
+            AddBusItem(ComponentRef.Splitter(_busWidth), "Splitter", bits + " bus to single bits", Icons.Bus);
+            AddBusItem(ComponentRef.Merger(_busWidth), "Merger", "single bits to " + bits + " bus", Icons.Bus);
             AddBusItem(ComponentRef.BusJoin(_busWidth, _joinInputs), "Bus Join",
-                _joinInputs + " drivers onto one " + bits + " bus");
-            AddBusItem(ComponentRef.TriState(_busWidth), "Tri-state", bits + " driver with enable");
-            AddBusItem(ComponentRef.TriState(1), "Tri-state (1-bit)", "driver with enable");
+                _joinInputs + " drivers onto one " + bits + " bus", Icons.Bus);
+            AddBusItem(ComponentRef.TriState(_busWidth), "Tri-state", bits + " driver with enable", Icons.Zap);
+            AddBusItem(ComponentRef.TriState(1), "Tri-state (1-bit)", "driver with enable", Icons.Zap);
 
             // Displays: LED and seven-segment have fixed single-bit inputs; the others follow the bus width.
-            AddDisplayItem(ComponentRef.Display(DisplayStyle.Led), "LED", "lamp, lit while HIGH");
-            AddDisplayItem(ComponentRef.Display(DisplayStyle.SevenSegment), "7-Segment", "one digit, inputs a-g and dp");
-            AddDisplayItem(ComponentRef.Display(DisplayStyle.Binary, _busWidth), "Binary Display", bits + " as lamps");
-            AddDisplayItem(ComponentRef.Display(DisplayStyle.Hex, _busWidth), "Hex Display", bits + " as hex digits");
+            AddDisplayItem(ComponentRef.Display(DisplayStyle.Led), "LED", "lamp, lit while HIGH", Icons.Lamp);
+            AddDisplayItem(ComponentRef.Display(DisplayStyle.SevenSegment), "7-Segment", "one digit, inputs a-g and dp",
+                Icons.Hash);
+            AddDisplayItem(ComponentRef.Display(DisplayStyle.Binary, _busWidth), "Binary Display", bits + " as lamps",
+                Icons.Binary);
+            AddDisplayItem(ComponentRef.Display(DisplayStyle.Hex, _busWidth), "Hex Display", bits + " as hex digits",
+                Icons.Hash);
             AddDisplayItem(ComponentRef.Display(DisplayStyle.Decimal, _busWidth), "Decimal Display",
-                bits + " unsigned number");
+                bits + " unsigned number", Icons.Monitor);
             AddDisplayItem(ComponentRef.Display(DisplayStyle.SignedDecimal, _busWidth), "Signed Display",
-                bits + " two's complement number");
+                bits + " two's complement number", Icons.Monitor);
+            _busSection.SetCount(7);
+            _displaySection.SetCount(6);
             SetFilter(_filter);
         }
 
-        private void AddBusItem(ComponentRef component, string title, string detail)
+        private void AddBusItem(ComponentRef component, string title, string detail, string glyph)
         {
-            LibraryItemView item = AddItem(_busRoot, new PlacementRequest(component, title), title, detail, null,
-                "bus wiring");
+            LibraryItemView item = AddItem(_busSection, _busRoot, new PlacementRequest(component, title), title, detail,
+                glyph, LibraryTileStyle.Icon, false, "bus wiring");
             _busItems.Add(item);
         }
 
-        private void AddDisplayItem(ComponentRef component, string title, string detail)
+        private void AddDisplayItem(ComponentRef component, string title, string detail, string glyph)
         {
-            LibraryItemView item = AddItem(_displayRoot ? _displayRoot : _busRoot, new PlacementRequest(component, title),
-                title, detail, null, "display output led seven segment hex decimal binary");
+            LibraryItemView item = AddItem(_displaySection, _displayRoot ? _displayRoot : _busRoot,
+                new PlacementRequest(component, title), title, detail, glyph, LibraryTileStyle.Icon, false,
+                "display output led seven segment hex decimal binary");
             _busItems.Add(item);
         }
 
@@ -304,26 +344,21 @@ namespace DigitalLogicSandbox.UI.Panels
                 System.Globalization.CultureInfo.InvariantCulture, out int value) ? value : fallback;
         }
 
-        private LibraryItemView AddItem(Transform parent, PlacementRequest request, string title, string detail,
-            string icon = null, string searchExtra = null)
+        private LibraryItemView AddItem(Section section, Transform parent, PlacementRequest request, string title,
+            string detail, string tile, LibraryTileStyle style, bool showDetail, string searchExtra = null,
+            string tooltip = null)
         {
-            LibraryItemView item = LibraryItemView.Create(parent, _ui, _workspace, request, title, detail, icon,
-                searchExtra);
+            LibraryItemView item = LibraryItemView.Create(parent, _ui, _workspace, request, title, detail, tile, style,
+                showDetail, searchExtra, tooltip);
             item.ContextRequested += OnItemContext;
             _items.Add(item);
+            section.Items.Add(item);
             return item;
         }
 
         private void OnItemContext(LibraryItemView item, Vector2 screen)
         {
             ItemContextRequested?.Invoke(item.Request, screen);
-        }
-
-        private void Section(string title)
-        {
-            TextMeshProUGUI label = _ui.Text("Section " + title, _content, title, 12f, _ui.Theme.Accent,
-                TextAlignmentOptions.BottomLeft, FontStyles.Bold);
-            label.gameObject.AddComponent<LayoutElement>().preferredHeight = 26f;
         }
 
         private void UpdateCustomEmptyState()
@@ -339,10 +374,14 @@ namespace DigitalLogicSandbox.UI.Panels
                 anyVisible |= _customItems[i].gameObject.activeSelf;
             }
 
-            _customEmpty.text = _customItems.Count == 0
-                ? "No custom gates yet.\nBuild a circuit and package it."
-                : "No custom gates match the search.";
-            _customEmpty.gameObject.SetActive(!anyVisible);
+            bool searching = _filter.Length > 0;
+            _customEmptyText.text = "Build a circuit, then package it as a gate. It will appear here, ready to reuse.";
+            // While searching, an empty "My Gates" simply disappears with the other sections that have no match.
+            _customEmpty.SetActive(!anyVisible && !searching);
+            if (!searching)
+            {
+                _customSection.SetHeaderVisible(true);
+            }
         }
 
         private void OnDefinitionAdded(CircuitDefinition definition)
@@ -363,6 +402,23 @@ namespace DigitalLogicSandbox.UI.Panels
         private static string Describe(ComponentSignature signature)
         {
             return signature.Inputs.Count + " in · " + signature.Outputs.Count + " out";
+        }
+
+        /// <summary>Tile letter for a gate without an icon: the first letter or digit of its name.</summary>
+        private static string Initial(string name)
+        {
+            if (!string.IsNullOrEmpty(name))
+            {
+                for (int i = 0; i < name.Length; i++)
+                {
+                    if (char.IsLetterOrDigit(name[i]))
+                    {
+                        return char.ToUpperInvariant(name[i]).ToString();
+                    }
+                }
+            }
+
+            return "?";
         }
 
         private static string CategoryOf(CircuitDefinition definition)
@@ -387,6 +443,103 @@ namespace DigitalLogicSandbox.UI.Panels
         {
             int category = string.Compare(CategoryOf(a), CategoryOf(b), StringComparison.OrdinalIgnoreCase);
             return category != 0 ? category : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Collapsible group: a header row (chevron, title, item count) and a body holding the entries. The
+        /// user's expanded/collapsed choice is kept while searching temporarily overrides it.
+        /// </summary>
+        private sealed class Section
+        {
+            private readonly RectTransform _header;
+            private readonly TextMeshProUGUI _chevron;
+            private readonly TextMeshProUGUI _count;
+            private bool _expanded;
+            private bool _searching;
+
+            public Section(LibraryPanel panel, string title, bool expanded)
+            {
+                UiFactory ui = panel._ui;
+                _expanded = expanded;
+                Image header = ui.Panel("Section " + title, panel._content, Color.clear);
+                _header = header.rectTransform;
+                header.gameObject.AddComponent<LayoutElement>().preferredHeight = 34f;
+                var button = header.gameObject.AddComponent<Button>();
+                button.transition = Selectable.Transition.None;
+                button.navigation = new Navigation { mode = Navigation.Mode.None };
+                button.onClick.AddListener(Toggle);
+
+                _chevron = ui.Icon("Chevron", _header, Icons.ChevronDown, 12f, ui.Theme.TextMuted);
+                _chevron.rectTransform.anchorMin = new Vector2(0f, 0f);
+                _chevron.rectTransform.anchorMax = new Vector2(0f, 1f);
+                _chevron.rectTransform.pivot = new Vector2(0f, 0.5f);
+                _chevron.rectTransform.sizeDelta = new Vector2(20f, 0f);
+                _chevron.rectTransform.anchoredPosition = new Vector2(4f, -3f);
+
+                TextMeshProUGUI label = ui.Text("Title", _header, title.ToUpperInvariant(), 10.5f, ui.Theme.TextMuted,
+                    TextAlignmentOptions.MidlineLeft, FontStyles.Bold);
+                label.characterSpacing = 8f;
+                UiFactory.Stretch(label.rectTransform, 26f, 36f, 6f, 0f);
+
+                _count = ui.Text("Count", _header, string.Empty, 10.5f, ui.Theme.TextMuted, TextAlignmentOptions.MidlineRight);
+                UiFactory.Stretch(_count.rectTransform, 150f, 10f, 6f, 0f);
+
+                Body = UiFactory.Column("Body " + title, panel._content, 1f, new RectOffset(0, 0, 0, 6));
+                Apply();
+            }
+
+            public RectTransform Body { get; }
+
+            public List<LibraryItemView> Items { get; } = new List<LibraryItemView>();
+
+            public void SetCount(int count)
+            {
+                _count.text = count > 0 ? count.ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty;
+            }
+
+            public void SetHeaderVisible(bool visible)
+            {
+                _header.gameObject.SetActive(visible);
+            }
+
+            /// <summary>While searching, show the section expanded only if it has a matching entry.</summary>
+            public void ApplyFilter(bool searching)
+            {
+                _searching = searching;
+                Apply();
+            }
+
+            private void Toggle()
+            {
+                if (_searching)
+                {
+                    return;
+                }
+
+                _expanded = !_expanded;
+                Apply();
+            }
+
+            private void Apply()
+            {
+                if (_searching)
+                {
+                    bool any = false;
+                    for (int i = 0; i < Items.Count && !any; i++)
+                    {
+                        any = Items[i].gameObject.activeSelf;
+                    }
+
+                    _header.gameObject.SetActive(any);
+                    Body.gameObject.SetActive(any);
+                    _chevron.text = Icons.ChevronDown;
+                    return;
+                }
+
+                _header.gameObject.SetActive(true);
+                Body.gameObject.SetActive(_expanded);
+                _chevron.text = _expanded ? Icons.ChevronDown : Icons.ChevronRight;
+            }
         }
     }
 }

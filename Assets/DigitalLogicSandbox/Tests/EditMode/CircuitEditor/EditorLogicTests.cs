@@ -242,6 +242,45 @@ namespace DigitalLogicSandbox.Tests.EditMode.CircuitEditor
             Assert.That(WireRouter.DistanceToPath(path, new Vector2(5, 2)), Is.EqualTo(1f).Within(1e-5f));
         }
 
+        [Test]
+        public void WireRouter_DetoursAroundObstacleGate()
+        {
+            // A gate sits right across the straight line between two facing pins.
+            var obstacle = new Rect(3f, -1f, 2f, 2f);
+            var points = new List<Vector3>();
+            WireRouter.Route(new Vector2(0f, 0f), Vector2.right, default, new Vector2(8f, 0f), Vector2.left, default,
+                new[] { obstacle }, 1, points);
+
+            AssertOrthogonal(points);
+            Assert.That(points.Count, Is.GreaterThan(2), "Not a straight line through the gate.");
+            for (int i = 0; i < points.Count - 1; i++)
+            {
+                Assert.That(WireRouter.SegmentCrossesRect(points[i], points[i + 1], obstacle), Is.False,
+                    $"Segment {i} ({points[i]} -> {points[i + 1]}) crosses the obstacle.");
+            }
+        }
+
+        [Test]
+        public void WireRouter_IgnoresObstaclesOffThePath()
+        {
+            var points = new List<Vector3>();
+            WireRouter.Route(new Vector2(0f, 0f), Vector2.right, default, new Vector2(8f, 0f), Vector2.left, default,
+                new[] { new Rect(3f, 4f, 2f, 2f) }, 1, points);
+            Assert.That(points.Count, Is.EqualTo(2));
+        }
+
+        [Test]
+        public void SharedPrefixLength_MeasuresCommonTrunk()
+        {
+            var straight = new List<Vector3> { new Vector3(0, 0), new Vector3(6, 0) };
+            var branch = new List<Vector3> { new Vector3(0, 0), new Vector3(2, 0), new Vector3(2, 3), new Vector3(6, 3) };
+            var other = new List<Vector3> { new Vector3(0, 1), new Vector3(6, 1) };
+
+            Assert.That(CircuitPresenter.SharedPrefixLength(branch, straight), Is.EqualTo(2f).Within(1e-4f));
+            Assert.That(CircuitPresenter.SharedPrefixLength(straight, branch), Is.EqualTo(2f).Within(1e-4f));
+            Assert.That(CircuitPresenter.SharedPrefixLength(straight, other), Is.EqualTo(0f));
+        }
+
         private static void AssertAvoids(List<Vector3> points, Rect body)
         {
             // The first and last segments are pin stubs touching the body edge; everything in between stays out.
@@ -278,6 +317,44 @@ namespace DigitalLogicSandbox.Tests.EditMode.CircuitEditor
             _geometry = new CircuitGeometry(_env.Catalog);
             _geometry.Bind(_nand);
             _hits = new WorkspaceHitTester(_geometry);
+        }
+
+        [Test]
+        public void AddingGateAcrossWire_InvalidatesAndReroutesIt()
+        {
+            var circuit = new CircuitDefinition(DefinitionId.New(), "Obstacle");
+            NodeDefinition input = circuit.AddInputBoundary("A", new CircuitPoint(0f, 0f));
+            NodeDefinition output = circuit.AddOutputBoundary("Y", new CircuitPoint(12f, 0f));
+            var destination = new PinRef(output.Id, BoundarySignatures.Pin);
+            circuit.Connect(new PinRef(input.Id, BoundarySignatures.Pin), destination);
+            var geometry = new CircuitGeometry(_env.Catalog);
+            geometry.Bind(circuit);
+            circuit.Changed += geometry.OnChanged;
+
+            Assert.That(geometry.GetWirePath(destination).Count, Is.EqualTo(2), "Straight while unobstructed.");
+            var drained = new List<PinRef>();
+            geometry.DrainInvalidatedWires(drained);
+            drained.Clear();
+
+            NodeDefinition blocker = circuit.AddNode(ComponentRef.Primitive(BuiltInComponentIds.Not),
+                new CircuitPoint(6f, 0f));
+            geometry.DrainInvalidatedWires(drained);
+            Assert.That(drained, Does.Contain(destination), "The blocked wire is queued for rerouting.");
+
+            IReadOnlyList<Vector3> path = geometry.GetWirePath(destination);
+            Rect body = geometry.GetBounds(blocker.Id);
+            for (int i = 0; i < path.Count - 1; i++)
+            {
+                Assert.That(WireRouter.SegmentCrossesRect(path[i], path[i + 1], body), Is.False,
+                    $"Segment {i} crosses the new gate.");
+            }
+
+            // Moving the gate away frees the wire again.
+            drained.Clear();
+            circuit.MoveNode(blocker.Id, new CircuitPoint(6f, 20f));
+            geometry.DrainInvalidatedWires(drained);
+            Assert.That(drained, Does.Contain(destination));
+            Assert.That(geometry.GetWirePath(destination).Count, Is.EqualTo(2));
         }
 
         [Test]

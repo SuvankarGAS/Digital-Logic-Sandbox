@@ -15,9 +15,9 @@ namespace DigitalLogicSandbox.Rendering.Wires
     /// cheap enough to run for every wire touching a moving gate each frame.
     /// </para>
     /// <para>
-    /// Only the two endpoint gates are treated as obstacles. Full obstacle-aware routing over the whole workspace
-    /// (A* on a visibility grid) is a possible future extension; routes are cached per wire so it could be added
-    /// behind the same API.
+    /// Other gates near the wire can be passed as obstacles. Crossing one is penalised (less than crossing an
+    /// endpoint gate), and when the best plain shape still crosses an obstacle, a second pass adds lanes just
+    /// outside each obstacle so the wire can detour around it. Unobstructed wires pay nothing for this.
     /// </para>
     /// </summary>
     public static class WireRouter
@@ -31,13 +31,21 @@ namespace DigitalLogicSandbox.Rendering.Wires
         private const float BendCost = 0.6f;
         private const float BodyCrossingCost = 1000f;
         private const float ReversalCost = 200f;
+        private const float ObstacleCrossingCost = 400f;
         private const int MaxShapePoints = 6;
-        private const int MaxCoordinates = 8;
+        private const int MaxCoordinates = 32;
+
+        /// <summary>Most obstacles considered per wire (the caller passes the nearest ones).</summary>
+        public const int MaxObstacles = 10;
 
         private static readonly Vector2[] Candidate = new Vector2[MaxShapePoints];
         private static readonly Vector2[] Best = new Vector2[MaxShapePoints];
         private static readonly float[] MidXs = new float[MaxCoordinates];
         private static readonly float[] MidYs = new float[MaxCoordinates];
+        private static readonly Rect[] Obstacles = new Rect[MaxObstacles];
+        private static readonly Rect[] NoObstacles = new Rect[0];
+
+        private static int _obstacleCount;
 
         private static int _bestCount;
         private static float _bestCost;
@@ -64,12 +72,34 @@ namespace DigitalLogicSandbox.Rendering.Wires
         public static void Route(Vector2 from, Vector2 fromNormal, Rect fromBody, Vector2 to, Vector2 toNormal,
             Rect toBody, List<Vector3> points)
         {
+            Route(from, fromNormal, fromBody, to, toNormal, toBody, NoObstacles, 0, points);
+        }
+
+        /// <summary>
+        /// Routes a wire between two pins around up to <see cref="MaxObstacles"/> other gate bodies.
+        /// </summary>
+        /// <param name="obstacles">World bounds of nearby gates (not the endpoint gates).</param>
+        /// <param name="obstacleCount">Number of entries of <paramref name="obstacles"/> to use.</param>
+        public static void Route(Vector2 from, Vector2 fromNormal, Rect fromBody, Vector2 to, Vector2 toNormal,
+            Rect toBody, IReadOnlyList<Rect> obstacles, int obstacleCount, List<Vector3> points)
+        {
             points.Clear();
             fromNormal = Axis(fromNormal);
             toNormal = Axis(toNormal);
 
+            _obstacleCount = 0;
+            int count = Mathf.Min(obstacleCount, Mathf.Min(MaxObstacles, obstacles.Count));
+            for (int i = 0; i < count; i++)
+            {
+                Rect inflated = Inflate(obstacles[i], BodyMargin);
+                if (inflated.width > 0f)
+                {
+                    Obstacles[_obstacleCount++] = inflated;
+                }
+            }
+
             // Straight wire: pins face each other on the same line with nothing in between.
-            if (IsDirectLine(from, fromNormal, to, toNormal))
+            if (IsDirectLine(from, fromNormal, to, toNormal) && !CrossesObstacle(from, to))
             {
                 points.Add(from);
                 points.Add(to);
@@ -85,7 +115,43 @@ namespace DigitalLogicSandbox.Rendering.Wires
 
             _bestCost = float.MaxValue;
             _bestCount = 0;
+            Search(a, b, midXCount, midYCount, fromNormal, toNormal, bodyA, bodyB);
 
+            // Still crossing another gate: add lanes just outside each obstacle and search again.
+            if (_obstacleCount > 0 && _bestCost >= ObstacleCrossingCost)
+            {
+                for (int i = 0; i < _obstacleCount; i++)
+                {
+                    Rect lane = Inflate(Obstacles[i], Stub - BodyMargin);
+                    if (midXCount + 2 <= MaxCoordinates)
+                    {
+                        MidXs[midXCount++] = lane.xMin;
+                        MidXs[midXCount++] = lane.xMax;
+                    }
+
+                    if (midYCount + 2 <= MaxCoordinates)
+                    {
+                        MidYs[midYCount++] = lane.yMin;
+                        MidYs[midYCount++] = lane.yMax;
+                    }
+                }
+
+                Search(a, b, midXCount, midYCount, fromNormal, toNormal, bodyA, bodyB);
+            }
+
+            points.Add(from);
+            for (int i = 0; i < _bestCount; i++)
+            {
+                points.Add(Best[i]);
+            }
+
+            points.Add(to);
+            Simplify(points);
+        }
+
+        private static void Search(Vector2 a, Vector2 b, int midXCount, int midYCount, Vector2 fromNormal,
+            Vector2 toNormal, Rect bodyA, Rect bodyB)
+        {
             // L shapes.
             Consider(a, new Vector2(b.x, a.y), b, fromNormal, toNormal, bodyA, bodyB);
             Consider(a, new Vector2(a.x, b.y), b, fromNormal, toNormal, bodyA, bodyB);
@@ -115,15 +181,19 @@ namespace DigitalLogicSandbox.Rendering.Wires
                         fromNormal, toNormal, bodyA, bodyB);
                 }
             }
+        }
 
-            points.Add(from);
-            for (int i = 0; i < _bestCount; i++)
+        private static bool CrossesObstacle(Vector2 p, Vector2 q)
+        {
+            for (int i = 0; i < _obstacleCount; i++)
             {
-                points.Add(Best[i]);
+                if (SegmentCrossesRect(p, q, Obstacles[i]))
+                {
+                    return true;
+                }
             }
 
-            points.Add(to);
-            Simplify(points);
+            return false;
         }
 
         /// <summary>Removes duplicate and collinear interior points.</summary>
@@ -318,6 +388,14 @@ namespace DigitalLogicSandbox.Rendering.Wires
                 if (SegmentCrossesRect(p, q, bodyA) || SegmentCrossesRect(p, q, bodyB))
                 {
                     cost += BodyCrossingCost;
+                }
+
+                for (int o = 0; o < _obstacleCount; o++)
+                {
+                    if (SegmentCrossesRect(p, q, Obstacles[o]))
+                    {
+                        cost += ObstacleCrossingCost;
+                    }
                 }
 
                 previousDirection = direction;

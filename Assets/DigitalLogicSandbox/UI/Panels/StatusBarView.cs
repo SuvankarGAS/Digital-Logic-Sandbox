@@ -15,12 +15,15 @@ using UnityEngine.UI;
 namespace DigitalLogicSandbox.UI.Panels
 {
     /// <summary>
-    /// Bottom panel showing simulation status, evaluation count, the first validation problem and live
-    /// input/output values. Refreshed only when the workspace reports a change.
+    /// Floating status pill at the bottom of the workspace. At rest it shows only a coloured state dot and one word
+    /// ("Running", "Paused", …), plus a message when there is something to say (a notification, the first
+    /// validation problem). Clicking it expands a small details card with the evaluation count, propagation
+    /// status, clock and live input/output values. Refreshed only when the workspace reports a change.
     /// </summary>
     public sealed class StatusBarView : MonoBehaviour
     {
         private const int MaxListedPorts = 8;
+        private const float MaxMessageWidth = 460f;
 
         /// <summary>How long a notification replaces the validation message.</summary>
         public const float NotificationSeconds = 6f;
@@ -34,8 +37,14 @@ namespace DigitalLogicSandbox.UI.Panels
         private TextMeshProUGUI _evaluations;
         private TextMeshProUGUI _message;
         private TextMeshProUGUI _values;
+        private Image _dot;
+        private TextMeshProUGUI _chevron;
+        private RectTransform _details;
         private string _notification;
         private float _notificationUntil;
+
+        /// <summary>True while the details card is expanded.</summary>
+        public bool DetailsOpen => _details != null && _details.gameObject.activeSelf;
 
         public string StatusText => _status.text;
 
@@ -47,28 +56,69 @@ namespace DigitalLogicSandbox.UI.Panels
 
         public static StatusBarView Create(Transform parent, UiFactory ui, WorkspaceController workspace)
         {
-            Image background = ui.Panel("Status Bar", parent, ui.Theme.PanelHeader);
+            Image background = ui.Card("Status Bar", parent, ui.Theme.PanelBackground, radius: UiFactory.StatusBarHeight * 0.5f);
             RectTransform rect = background.rectTransform;
-            rect.anchorMin = Vector2.zero;
-            rect.anchorMax = new Vector2(1f, 0f);
+            rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0f);
             rect.pivot = new Vector2(0.5f, 0f);
             rect.sizeDelta = new Vector2(0f, UiFactory.StatusBarHeight);
-            rect.anchoredPosition = Vector2.zero;
-            UiFactory.Row(rect, 18f, new RectOffset(12, 12, 0, 0));
+            rect.anchoredPosition = new Vector2(0f, UiFactory.Margin + 2f);
+            UiFactory.Row(rect, 9f, new RectOffset(14, 10, 0, 0));
+            rect.gameObject.AddComponent<ContentSizeFitter>().horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
 
             var view = background.gameObject.AddComponent<StatusBarView>();
             view._workspace = workspace;
             view._ui = ui;
-            view._status = view.Cell("Status", rect, 150f);
-            view._evaluations = view.Cell("Evaluations", rect, 210f);
-            view._clock = view.Cell("Clock", rect, 190f);
-            view._values = view.Cell("Values", rect, 360f);
-            view._message = view.Cell("Message", rect, -1f);
+
+            var toggle = background.gameObject.AddComponent<Button>();
+            toggle.transition = Selectable.Transition.None;
+            toggle.navigation = new Navigation { mode = Navigation.Mode.None };
+            toggle.onClick.AddListener(view.ToggleDetails);
+            ui.AddTooltip(background.gameObject, "Simulation details");
+
+            view._dot = ui.Panel("Dot", rect, ui.Theme.SignalColor(Signal.High));
+            view._dot.sprite = DigitalLogicSandbox.Rendering.RenderAssets.Circle;
+            view._dot.raycastTarget = false;
+            var dotLayout = view._dot.gameObject.AddComponent<LayoutElement>();
+            dotLayout.preferredWidth = dotLayout.minWidth = 8f;
+            dotLayout.preferredHeight = dotLayout.minHeight = 8f;
+            view._status = view.Cell("Status", rect, ui.Theme.TextPrimary);
+            view._clock = view.Cell("Clock", rect, ui.Theme.TextSecondary);
+            view._message = view.Cell("Message", rect, ui.Theme.TextSecondary);
+            view._chevron = ui.Icon("Chevron", rect, Icons.ChevronUp, 13f, ui.Theme.TextMuted);
+            view._chevron.gameObject.AddComponent<LayoutElement>().preferredWidth = 16f;
+
+            // Details card above the pill (collapsed by default).
+            Image details = ui.Card("Status Details", parent, ui.Theme.PanelBackground, radius: 12f);
+            view._details = details.rectTransform;
+            view._details.anchorMin = view._details.anchorMax = new Vector2(0.5f, 0f);
+            view._details.pivot = new Vector2(0.5f, 0f);
+            view._details.anchoredPosition = new Vector2(0f, UiFactory.Margin + UiFactory.StatusBarHeight + 10f);
+            view._details.sizeDelta = new Vector2(340f, 0f);
+            var column = details.gameObject.AddComponent<VerticalLayoutGroup>();
+            column.padding = new RectOffset(16, 16, 10, 12);
+            column.spacing = 2f;
+            column.childControlWidth = true;
+            column.childControlHeight = true;
+            column.childForceExpandWidth = true;
+            column.childForceExpandHeight = false;
+            details.gameObject.AddComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+            ui.Caption(details.transform, "Simulation");
+            view._evaluations = view.DetailLine("Evaluations", details.transform);
+            view._values = view.DetailLine("Values", details.transform);
+            view._values.enableWordWrapping = true;
+            details.gameObject.SetActive(false);
 
             workspace.StatusChanged += view.Refresh;
             workspace.Notification += view.ShowNotification;
             view.Refresh();
             return view;
+        }
+
+        /// <summary>Expands or collapses the details card.</summary>
+        public void ToggleDetails()
+        {
+            _details.gameObject.SetActive(!_details.gameObject.activeSelf);
+            Refresh();
         }
 
         /// <summary>Shows a transient message (e.g. a refused edit or a saved version).</summary>
@@ -97,8 +147,16 @@ namespace DigitalLogicSandbox.UI.Panels
                 _clock.text = string.Empty;
                 _values.text = string.Empty;
                 _message.text = string.Empty;
+                Layout();
                 return;
             }
+
+            RefreshContent();
+            Layout();
+        }
+
+        private void RefreshContent()
+        {
 
             CircuitSession session = _workspace.Session;
             ValidationReport report = session.Report;
@@ -127,7 +185,7 @@ namespace DigitalLogicSandbox.UI.Panels
                 }
                 else
                 {
-                    SetStatus("Running", _ui.Theme.TextPrimary);
+                    SetStatus("Running", _ui.Theme.SignalColor(Signal.High));
                 }
 
                 _clock.text = runner.HasClock
@@ -138,18 +196,10 @@ namespace DigitalLogicSandbox.UI.Panels
                       "  ·  cycle " + runner.ClockCycles
                     : string.Empty;
 
-                _evaluations.text = "Evaluations: " + runner.EvaluationCount +
-                    (_workspace.SignalAnimation != null && _workspace.SignalAnimation.IsAnimating ? "  - propagating" : string.Empty);
+                _evaluations.text = "Evaluations  <color=#" + ColorUtility.ToHtmlStringRGB(_ui.Theme.TextPrimary) + ">" +
+                    runner.EvaluationCount + "</color>" +
+                    (_workspace.SignalAnimation != null && _workspace.SignalAnimation.IsAnimating ? "   · propagating" : string.Empty);
                 _values.text = DescribeValues(session);
-            }
-
-            if (_workspace.CurrentLevel != null && !_workspace.IsEditable)
-            {
-                _status.text = "Inspecting - " + _status.text;
-            }
-            else if (_workspace.CurrentLevel != null && _workspace.CurrentLevel.IsDraft)
-            {
-                _status.text = "Editing - " + _status.text;
             }
 
             if (_notification != null)
@@ -175,10 +225,32 @@ namespace DigitalLogicSandbox.UI.Panels
             DescribeFirstProblem(report);
         }
 
+        /// <summary>Sets the state word; the dot carries the colour, the word stays calm and readable.</summary>
         private void SetStatus(string text, Color color)
         {
             _status.text = text;
-            _status.color = color;
+            _status.color = _ui.Theme.TextPrimary;
+            _dot.color = color;
+        }
+
+        /// <summary>Hides empty cells and sizes the pill to its content.</summary>
+        private void Layout()
+        {
+            _clock.gameObject.SetActive(!string.IsNullOrEmpty(_clock.text));
+            _message.gameObject.SetActive(!string.IsNullOrEmpty(_message.text));
+            Fit(_status, 240f);
+            Fit(_clock, 220f);
+            Fit(_message, MaxMessageWidth);
+            _chevron.text = DetailsOpen ? Icons.ChevronDown : Icons.ChevronUp;
+            _values.gameObject.SetActive(!string.IsNullOrEmpty(_values.text));
+        }
+
+        private static void Fit(TextMeshProUGUI text, float max)
+        {
+            if (text.gameObject.activeSelf)
+            {
+                text.GetComponent<LayoutElement>().preferredWidth = Mathf.Min(max, text.GetPreferredValues(text.text).x + 2f);
+            }
         }
 
         private void DescribeFirstProblem(ValidationReport report)
@@ -214,7 +286,7 @@ namespace DigitalLogicSandbox.UI.Panels
             {
                 if (_builder.Length > 0)
                 {
-                    _builder.Append("  ->  ");
+                    _builder.Append("   \u2192   ");
                 }
 
                 AppendPorts(session, circuit, circuit.Outputs, input: false);
@@ -256,19 +328,21 @@ namespace DigitalLogicSandbox.UI.Panels
             }
         }
 
-        private TextMeshProUGUI Cell(string name, Transform parent, float width)
+        private TextMeshProUGUI Cell(string name, Transform parent, Color color)
         {
-            TextMeshProUGUI text = _ui.Text(name, parent, string.Empty, 12.5f, _ui.Theme.TextSecondary);
-            var layout = text.gameObject.AddComponent<LayoutElement>();
-            if (width > 0f)
-            {
-                layout.preferredWidth = width;
-            }
-            else
-            {
-                layout.flexibleWidth = 1f;
-            }
+            TextMeshProUGUI text = _ui.Text(name, parent, string.Empty, 12.5f, color);
+            text.richText = true;
+            text.gameObject.AddComponent<LayoutElement>();
+            return text;
+        }
 
+        private TextMeshProUGUI DetailLine(string name, Transform parent)
+        {
+            TextMeshProUGUI text = _ui.Text(name, parent, string.Empty, 12.5f, _ui.Theme.TextSecondary,
+                TextAlignmentOptions.TopLeft);
+            text.richText = true;
+            text.overflowMode = TextOverflowModes.Overflow;
+            text.gameObject.AddComponent<LayoutElement>().minHeight = 20f;
             return text;
         }
 

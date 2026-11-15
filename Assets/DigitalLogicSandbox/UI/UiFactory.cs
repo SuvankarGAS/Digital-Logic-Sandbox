@@ -1,5 +1,6 @@
 using System;
 using DigitalLogicSandbox.Rendering;
+using DigitalLogicSandbox.UI.Panels;
 using TMPro;
 using UnityEngine;
 using UnityEngine.Events;
@@ -11,12 +12,35 @@ namespace DigitalLogicSandbox.UI
     /// <summary>
     /// Builds the application's UGUI controls in code with the shared <see cref="VisualTheme"/>, so the whole
     /// interface follows one visual language without a large hand-maintained prefab set.
+    /// <para>
+    /// Design language: floating rounded cards over a full-bleed workspace, soft shadows, one accent colour, icon
+    /// buttons with tooltips, a calm rounded typeface (Nunito) and muted secondary text. Headings use the SemiBold
+    /// weight rather than Bold so long sessions stay easy on the eyes.
+    /// </para>
     /// </summary>
     public sealed class UiFactory
     {
+        /// <summary>Gap between floating panels and the screen edge / each other.</summary>
+        public const float Margin = 12f;
+
+        /// <summary>Height of the floating top bars (project, tools).</summary>
         public const float ToolbarHeight = 44f;
-        public const float StatusBarHeight = 28f;
+
+        /// <summary>Height of the floating status pill.</summary>
+        public const float StatusBarHeight = 36f;
+
         public const float LibraryWidth = 248f;
+
+        /// <summary>Distance from the top of the screen to the top of the side panels.</summary>
+        public const float TopInset = Margin + ToolbarHeight + Margin;
+
+        /// <summary>Corner radius of cards and dialogs.</summary>
+        public const float CardRadius = 14f;
+
+        /// <summary>Corner radius of buttons, fields and list rows.</summary>
+        public const float ControlRadius = 9f;
+
+        public const float IconButtonSize = 34f;
 
         public UiFactory(VisualTheme theme)
         {
@@ -24,6 +48,9 @@ namespace DigitalLogicSandbox.UI
         }
 
         public VisualTheme Theme { get; }
+
+        /// <summary>Shared tooltip; set by the shell. Triggers resolve it when hovered, so it may be set later.</summary>
+        public TooltipView Tooltip { get; set; }
 
         public static RectTransform CreateRect(string name, Transform parent)
         {
@@ -41,19 +68,78 @@ namespace DigitalLogicSandbox.UI
             rect.offsetMax = new Vector2(-right, -top);
         }
 
-        public Image Panel(string name, Transform parent, Color color, bool rounded = false)
+        /// <summary>Plain image. <paramref name="rounded"/> uses the 9-sliced rounded sprite with <paramref name="radius"/>.</summary>
+        public Image Panel(string name, Transform parent, Color color, bool rounded = false, float radius = ControlRadius)
         {
             RectTransform rect = CreateRect(name, parent);
             var image = rect.gameObject.AddComponent<Image>();
             image.color = color;
             if (rounded)
             {
-                image.sprite = RenderAssets.RoundedRect;
-                image.type = Image.Type.Sliced;
-                image.pixelsPerUnitMultiplier = 4f;
+                ApplyRounded(image, RenderAssets.RoundedRect, radius);
             }
 
             return image;
+        }
+
+        /// <summary>
+        /// Floating card: a transparent root (it blocks pointer input and hosts layout groups and content) with a
+        /// soft drop shadow, a rounded fill and a hairline border drawn behind the content. The decoration children
+        /// ignore layout, so callers can add layout groups to the returned root exactly as to a plain panel.
+        /// </summary>
+        public Image Card(string name, Transform parent, Color fill, float radius = CardRadius, bool shadow = true)
+        {
+            RectTransform root = CreateRect(name, parent);
+            var hit = root.gameObject.AddComponent<Image>();
+            hit.color = Color.clear;
+
+            if (shadow)
+            {
+                var shadowImage = Decoration("Shadow", root, Theme.UiShadow);
+                shadowImage.sprite = RenderAssets.SoftShadow;
+                shadowImage.type = Image.Type.Sliced;
+                // Border of 30 texels on a 64 ppu sprite; scale so the blur spans ~22 UI units.
+                shadowImage.pixelsPerUnitMultiplier = RenderAssets.ShadowBorder / 64f * 100f / 22f;
+                Stretch(shadowImage.rectTransform, -18f, -18f, -14f, -24f);
+            }
+
+            Image body = Decoration("Fill", root, fill);
+            ApplyRounded(body, RenderAssets.RoundedRect, radius);
+            Stretch(body.rectTransform);
+
+            Image border = Decoration("Border", root, Theme.PanelBorder);
+            ApplyRounded(border, RenderAssets.RoundedOutline, radius);
+            Stretch(border.rectTransform);
+            return hit;
+        }
+
+        /// <summary>Changes the fill colour of a <see cref="Card"/>.</summary>
+        public static void SetCardFill(Image card, Color fill)
+        {
+            Transform body = card.transform.Find("Fill");
+            if (body != null)
+            {
+                body.GetComponent<Image>().color = fill;
+            }
+        }
+
+        private Image Decoration(string name, Transform parent, Color color)
+        {
+            RectTransform rect = CreateRect(name, parent);
+            var image = rect.gameObject.AddComponent<Image>();
+            image.color = color;
+            image.raycastTarget = false;
+            rect.gameObject.AddComponent<LayoutElement>().ignoreLayout = true;
+            return image;
+        }
+
+        private static void ApplyRounded(Image image, Sprite sprite, float radius)
+        {
+            image.sprite = sprite;
+            image.type = Image.Type.Sliced;
+            // The rounded sprites have 16-texel borders on a 64 ppu texture (canvas reference ppu = 100), so a
+            // multiplier of 25 / radius gives corners of 'radius' UI units.
+            image.pixelsPerUnitMultiplier = 25f / Mathf.Max(1f, radius);
         }
 
         public TextMeshProUGUI Text(string name, Transform parent, string text, float size, Color color,
@@ -61,10 +147,18 @@ namespace DigitalLogicSandbox.UI
         {
             RectTransform rect = CreateRect(name, parent);
             var label = rect.gameObject.AddComponent<TextMeshProUGUI>();
+            label.font = Theme.UiFont;
             label.text = text;
             label.fontSize = size;
             label.color = color;
             label.alignment = alignment;
+            if ((style & FontStyles.Bold) != 0)
+            {
+                // Softer emphasis: SemiBold weight instead of the heavy bold face.
+                style &= ~FontStyles.Bold;
+                label.fontWeight = FontWeight.SemiBold;
+            }
+
             label.fontStyle = style;
             label.enableWordWrapping = false;
             label.overflowMode = TextOverflowModes.Ellipsis;
@@ -72,35 +166,32 @@ namespace DigitalLogicSandbox.UI
             return label;
         }
 
-        /// <summary>Flat text button with hover/press colours from the theme.</summary>
+        /// <summary>One icon glyph (see <see cref="Icons"/>), centred in its rect.</summary>
+        public TextMeshProUGUI Icon(string name, Transform parent, string glyph, float size, Color color)
+        {
+            // The text font lists the icon font as a fallback, so glyphs resolve through it. Keeping the text font as
+            // the primary avoids TMP's per-label warnings about the icon font lacking '_' / '…' (TMP looks those up
+            // in the primary font only); line metrics still come from the icon font that draws the glyph.
+            TextMeshProUGUI icon = Text(name, parent, glyph, size, color, TextAlignmentOptions.Center);
+            icon.overflowMode = TextOverflowModes.Overflow;
+            return icon;
+        }
+
+        /// <summary>Rounded text button with hover/press colours from the theme.</summary>
         public Button Button(string name, Transform parent, string label, UnityAction onClick, float width = -1f,
-            float fontSize = 14f)
+            float fontSize = 13.5f)
         {
             Image background = Panel(name, parent, Color.white, rounded: true);
-            var button = background.gameObject.AddComponent<Button>();
-            button.targetGraphic = background;
-            ColorBlock colors = button.colors;
-            colors.normalColor = Theme.ButtonNormal;
-            colors.highlightedColor = Theme.ButtonHover;
-            colors.selectedColor = Theme.ButtonNormal;
-            colors.pressedColor = Theme.ButtonPressed;
-            colors.disabledColor = new Color(Theme.ButtonNormal.r, Theme.ButtonNormal.g, Theme.ButtonNormal.b, 0.4f);
-            colors.colorMultiplier = 1f;
-            colors.fadeDuration = 0.06f;
-            button.colors = colors;
-            button.navigation = new Navigation { mode = Navigation.Mode.None };
-            if (onClick != null)
-            {
-                button.onClick.AddListener(onClick);
-            }
+            Button button = ConfigureButton(background, Theme.ButtonNormal, Theme.ButtonHover, Theme.ButtonPressed, onClick);
 
             TextMeshProUGUI text = Text("Label", background.transform, label, fontSize, Theme.TextPrimary,
                 TextAlignmentOptions.Center);
-            Stretch(text.rectTransform, 8f, 8f);
+            Stretch(text.rectTransform, 10f, 10f);
+            background.gameObject.AddComponent<ButtonVisual>().Initialize(button, Theme, text);
 
             var layout = background.gameObject.AddComponent<LayoutElement>();
-            layout.minHeight = 30f;
-            layout.preferredHeight = 30f;
+            layout.minHeight = 32f;
+            layout.preferredHeight = 32f;
             if (width > 0f)
             {
                 layout.preferredWidth = width;
@@ -108,10 +199,94 @@ namespace DigitalLogicSandbox.UI
             }
             else
             {
-                layout.preferredWidth = Mathf.Max(40f, text.GetPreferredValues(label).x + 20f);
+                layout.preferredWidth = Mathf.Max(44f, text.GetPreferredValues(label).x + 26f);
             }
 
             return button;
+        }
+
+        /// <summary>Gives a button the accent (primary action) style.</summary>
+        public void MakePrimary(Button button)
+        {
+            Color accent = Theme.Accent;
+            SetColors(button, accent, Color.Lerp(accent, Color.white, 0.12f), Color.Lerp(accent, Color.black, 0.12f));
+            TextMeshProUGUI label = button.GetComponentInChildren<TextMeshProUGUI>();
+            if (label != null)
+            {
+                label.color = Theme.WorkspaceBackground;
+                label.fontWeight = FontWeight.SemiBold;
+                ButtonVisual visual = button.GetComponent<ButtonVisual>();
+                if (visual != null)
+                {
+                    visual.SetLabelColor(label.color);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Square, background-less icon button (a soft tile appears on hover) with an optional tooltip. Dims when
+        /// not interactable; <see cref="ButtonVisual.Active"/> highlights it as a toggled state.
+        /// </summary>
+        public Button IconButton(string name, Transform parent, string glyph, string tooltip, UnityAction onClick,
+            float size = IconButtonSize, float iconSize = 17f)
+        {
+            Image background = Panel(name, parent, Color.white, rounded: true, radius: ControlRadius);
+            Color hover = Theme.ButtonHover;
+            Button button = ConfigureButton(background, new Color(hover.r, hover.g, hover.b, 0f), hover, Theme.ButtonPressed,
+                onClick);
+            TextMeshProUGUI icon = Icon("Icon", background.transform, glyph, iconSize, Theme.TextSecondary);
+            Stretch(icon.rectTransform);
+            background.gameObject.AddComponent<ButtonVisual>().Initialize(button, Theme, icon, hoverBrightens: true);
+
+            var layout = background.gameObject.AddComponent<LayoutElement>();
+            layout.minWidth = layout.preferredWidth = size;
+            layout.minHeight = layout.preferredHeight = size;
+            if (!string.IsNullOrEmpty(tooltip))
+            {
+                AddTooltip(background.gameObject, tooltip);
+            }
+
+            return button;
+        }
+
+        /// <summary>Shows <paramref name="text"/> in the shared tooltip while the pointer rests on <paramref name="target"/>.</summary>
+        public TooltipTrigger AddTooltip(GameObject target, string text)
+        {
+            TooltipTrigger trigger = target.GetComponent<TooltipTrigger>();
+            if (trigger == null)
+            {
+                trigger = target.AddComponent<TooltipTrigger>();
+            }
+
+            trigger.Initialize(this, text);
+            return trigger;
+        }
+
+        private Button ConfigureButton(Image background, Color normal, Color hover, Color pressed, UnityAction onClick)
+        {
+            var button = background.gameObject.AddComponent<Button>();
+            button.targetGraphic = background;
+            SetColors(button, normal, hover, pressed);
+            button.navigation = new Navigation { mode = Navigation.Mode.None };
+            if (onClick != null)
+            {
+                button.onClick.AddListener(onClick);
+            }
+
+            return button;
+        }
+
+        private static void SetColors(Button button, Color normal, Color hover, Color pressed)
+        {
+            ColorBlock colors = button.colors;
+            colors.normalColor = normal;
+            colors.highlightedColor = hover;
+            colors.selectedColor = normal;
+            colors.pressedColor = pressed;
+            colors.disabledColor = new Color(normal.r, normal.g, normal.b, normal.a * 0.45f);
+            colors.colorMultiplier = 1f;
+            colors.fadeDuration = 0.08f;
+            button.colors = colors;
         }
 
         public RectTransform Separator(Transform parent, bool vertical)
@@ -122,7 +297,7 @@ namespace DigitalLogicSandbox.UI
             {
                 layout.preferredWidth = 1f;
                 layout.minWidth = 1f;
-                layout.preferredHeight = 24f;
+                layout.preferredHeight = 20f;
             }
             else
             {
@@ -137,18 +312,40 @@ namespace DigitalLogicSandbox.UI
 
         public TMP_InputField InputField(string name, Transform parent, string placeholder)
         {
-            Image background = Panel(name, parent, Theme.ButtonNormal, rounded: true);
+            return InputField(name, parent, placeholder, null);
+        }
+
+        /// <summary>Rounded single-line field; an optional leading <paramref name="glyph"/> (e.g. a search icon).</summary>
+        public TMP_InputField InputField(string name, Transform parent, string placeholder, string glyph)
+        {
+            Image background = Panel(name, parent, Theme.WorkspaceBackground, rounded: true);
             var layout = background.gameObject.AddComponent<LayoutElement>();
-            layout.preferredHeight = 30f;
-            layout.minHeight = 30f;
+            layout.preferredHeight = 32f;
+            layout.minHeight = 32f;
             layout.flexibleWidth = 1f;
 
+            Image border = Panel("Border", background.transform, Theme.PanelBorder);
+            ApplyRounded(border, RenderAssets.RoundedOutline, ControlRadius);
+            Stretch(border.rectTransform);
+            border.raycastTarget = false;
+
+            float left = 11f;
+            if (!string.IsNullOrEmpty(glyph))
+            {
+                TextMeshProUGUI icon = Icon("Icon", background.transform, glyph, 14f, Theme.TextMuted);
+                icon.rectTransform.anchorMin = new Vector2(0f, 0f);
+                icon.rectTransform.anchorMax = new Vector2(0f, 1f);
+                icon.rectTransform.pivot = new Vector2(0f, 0.5f);
+                icon.rectTransform.sizeDelta = new Vector2(30f, 0f);
+                icon.rectTransform.anchoredPosition = new Vector2(3f, 0f);
+                left = 31f;
+            }
+
             RectTransform area = CreateRect("Text Area", background.transform);
-            Stretch(area, 10f, 10f, 4f, 4f);
+            Stretch(area, left, 10f, 4f, 4f);
             area.gameObject.AddComponent<RectMask2D>();
 
-            TextMeshProUGUI hint = Text("Placeholder", area, placeholder, 13f, Theme.TextSecondary);
-            hint.fontStyle = FontStyles.Italic;
+            TextMeshProUGUI hint = Text("Placeholder", area, placeholder, 13f, Theme.TextMuted);
             Stretch(hint.rectTransform);
             TextMeshProUGUI text = Text("Text", area, string.Empty, 13f, Theme.TextPrimary);
             Stretch(text.rectTransform);
@@ -158,9 +355,18 @@ namespace DigitalLogicSandbox.UI
             field.textComponent = text;
             field.placeholder = hint;
             field.targetGraphic = background;
-            field.caretColor = Theme.TextPrimary;
+            field.fontAsset = Theme.UiFont;
+            ColorBlock colors = field.colors;
+            colors.normalColor = Color.white;
+            colors.highlightedColor = new Color(1.12f, 1.12f, 1.18f, 1f);
+            colors.selectedColor = new Color(1.12f, 1.12f, 1.18f, 1f);
+            colors.disabledColor = new Color(1f, 1f, 1f, 0.5f);
+            colors.colorMultiplier = 1.4f;
+            field.colors = colors;
+            field.caretColor = Theme.Accent;
             field.customCaretColor = true;
-            field.selectionColor = new Color(Theme.Accent.r, Theme.Accent.g, Theme.Accent.b, 0.35f);
+            field.caretWidth = 2;
+            field.selectionColor = new Color(Theme.Accent.r, Theme.Accent.g, Theme.Accent.b, 0.3f);
             field.navigation = new Navigation { mode = Navigation.Mode.None };
             return field;
         }
@@ -172,7 +378,7 @@ namespace DigitalLogicSandbox.UI
             scrollRect = root.gameObject.AddComponent<ScrollRect>();
             scrollRect.horizontal = false;
             scrollRect.movementType = ScrollRect.MovementType.Clamped;
-            scrollRect.scrollSensitivity = 24f;
+            scrollRect.scrollSensitivity = 28f;
 
             RectTransform viewport = CreateRect("Viewport", root);
             Stretch(viewport);
@@ -192,7 +398,7 @@ namespace DigitalLogicSandbox.UI
             layout.childForceExpandWidth = true;
             layout.childForceExpandHeight = false;
             layout.spacing = 4f;
-            layout.padding = new RectOffset(10, 10, 8, 12);
+            layout.padding = new RectOffset(12, 12, 6, 14);
             var fitter = content.gameObject.AddComponent<ContentSizeFitter>();
             fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
@@ -215,32 +421,39 @@ namespace DigitalLogicSandbox.UI
             return layout;
         }
 
-        /// <summary>Checkbox with a label; returns the toggle.</summary>
+        /// <summary>Labelled switch (pill track with a sliding knob); returns the toggle.</summary>
         public Toggle Toggle(string name, Transform parent, string label, bool isOn, UnityAction<bool> onChanged)
         {
             RectTransform row = CreateRect(name, parent);
-            Row(row, 8f, new RectOffset(0, 0, 2, 2));
+            Row(row, 10f, new RectOffset(0, 0, 2, 2));
             var rowLayout = row.gameObject.AddComponent<LayoutElement>();
-            rowLayout.preferredHeight = 24f;
-            rowLayout.minHeight = 24f;
-
-            Image box = Panel("Box", row, Theme.ButtonNormal, rounded: true);
-            var boxLayout = box.gameObject.AddComponent<LayoutElement>();
-            boxLayout.preferredWidth = 18f;
-            boxLayout.preferredHeight = 18f;
-            boxLayout.minWidth = 18f;
-            boxLayout.minHeight = 18f;
-            Image check = Panel("Check", box.transform, Theme.Accent, rounded: true);
-            Stretch(check.rectTransform, 4f, 4f, 4f, 4f);
-            check.raycastTarget = false;
+            rowLayout.preferredHeight = 28f;
+            rowLayout.minHeight = 28f;
 
             TextMeshProUGUI text = Text("Label", row, label, 13f, Theme.TextPrimary);
             text.gameObject.AddComponent<LayoutElement>().flexibleWidth = 1f;
             text.raycastTarget = true; // clicking the label toggles too
 
+            Image track = Panel("Track", row, Theme.ButtonPressed, rounded: true, radius: 9f);
+            var trackLayout = track.gameObject.AddComponent<LayoutElement>();
+            trackLayout.preferredWidth = trackLayout.minWidth = 32f;
+            trackLayout.preferredHeight = trackLayout.minHeight = 18f;
+            Image on = Panel("On", track.transform, Theme.Accent, rounded: true, radius: 9f);
+            Stretch(on.rectTransform);
+            on.raycastTarget = false;
+            Image knob = Panel("Knob", track.transform, Theme.TextPrimary, rounded: true, radius: 7f);
+            knob.sprite = RenderAssets.Circle;
+            knob.type = Image.Type.Simple;
+            knob.raycastTarget = false;
+            RectTransform knobRect = knob.rectTransform;
+            knobRect.anchorMin = knobRect.anchorMax = new Vector2(0f, 0.5f);
+            knobRect.pivot = new Vector2(0.5f, 0.5f);
+            knobRect.sizeDelta = new Vector2(14f, 14f);
+
             var toggle = row.gameObject.AddComponent<Toggle>();
-            toggle.targetGraphic = box;
-            toggle.graphic = check;
+            toggle.targetGraphic = track;
+            toggle.graphic = on;
+            toggle.toggleTransition = UnityEngine.UI.Toggle.ToggleTransition.Fade;
             toggle.navigation = new Navigation { mode = Navigation.Mode.None };
             toggle.isOn = isOn;
             if (onChanged != null)
@@ -248,15 +461,17 @@ namespace DigitalLogicSandbox.UI
                 toggle.onValueChanged.AddListener(onChanged);
             }
 
+            row.gameObject.AddComponent<SwitchVisual>().Initialize(toggle, knobRect, 9f, 23f);
             return toggle;
         }
 
-        /// <summary>Small upper-case section caption.</summary>
+        /// <summary>Small, quiet upper-case section caption.</summary>
         public TextMeshProUGUI Caption(Transform parent, string text)
         {
-            TextMeshProUGUI caption = Text("Caption " + text, parent, text.ToUpperInvariant(), 11f, Theme.Accent,
+            TextMeshProUGUI caption = Text("Caption " + text, parent, text.ToUpperInvariant(), 10.5f, Theme.TextMuted,
                 TextAlignmentOptions.BottomLeft, FontStyles.Bold);
-            caption.gameObject.AddComponent<LayoutElement>().preferredHeight = 24f;
+            caption.characterSpacing = 8f;
+            caption.gameObject.AddComponent<LayoutElement>().preferredHeight = 28f;
             return caption;
         }
 
@@ -265,7 +480,7 @@ namespace DigitalLogicSandbox.UI
         {
             RectTransform row = CreateRect("Property " + label, parent);
             Row(row, 6f, new RectOffset(0, 0, 0, 0));
-            row.gameObject.AddComponent<LayoutElement>().preferredHeight = 22f;
+            row.gameObject.AddComponent<LayoutElement>().preferredHeight = 24f;
             TextMeshProUGUI name = Text("Label", row, label, 12.5f, Theme.TextSecondary);
             var nameLayout = name.gameObject.AddComponent<LayoutElement>();
             nameLayout.preferredWidth = labelWidth;
@@ -281,7 +496,7 @@ namespace DigitalLogicSandbox.UI
         {
             RectTransform row = CreateRect("Field " + label, parent);
             Row(row, 6f, new RectOffset(0, 0, 0, 0));
-            row.gameObject.AddComponent<LayoutElement>().preferredHeight = 30f;
+            row.gameObject.AddComponent<LayoutElement>().preferredHeight = 32f;
             TextMeshProUGUI name = Text("Label", row, label, 12.5f, Theme.TextSecondary);
             var nameLayout = name.gameObject.AddComponent<LayoutElement>();
             nameLayout.preferredWidth = labelWidth;

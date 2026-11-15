@@ -56,13 +56,13 @@ namespace DigitalLogicSandbox.UI.ContextMenus
             view._workspace = workspace;
             view._root = blocker.rectTransform;
 
-            Image menu = ui.Panel("Menu", blocker.rectTransform, ui.Theme.PanelHeader, rounded: true);
+            Image menu = ui.Card("Menu", blocker.rectTransform, ui.Theme.PanelHeader, radius: 12f);
             view._menu = menu.rectTransform;
             view._menu.anchorMin = view._menu.anchorMax = Vector2.zero;
             view._menu.pivot = new Vector2(0f, 1f);
             var layout = menu.gameObject.AddComponent<VerticalLayoutGroup>();
-            layout.padding = new RectOffset(4, 4, 4, 4);
-            layout.spacing = 2f;
+            layout.padding = new RectOffset(6, 6, 6, 6);
+            layout.spacing = 1f;
             layout.childControlWidth = true;
             layout.childControlHeight = true;
             layout.childForceExpandWidth = true;
@@ -205,6 +205,13 @@ namespace DigitalLogicSandbox.UI.ContextMenus
             }, ItemWidth, 13f);
             TextMeshProUGUI text = button.GetComponentInChildren<TextMeshProUGUI>();
             text.alignment = TextAlignmentOptions.MidlineLeft;
+            // Menu rows: no resting background, a soft tile on hover.
+            ColorBlock colors = button.colors;
+            Color hover = _ui.Theme.ButtonHover;
+            colors.normalColor = new Color(hover.r, hover.g, hover.b, 0f);
+            colors.selectedColor = colors.normalColor;
+            colors.disabledColor = colors.normalColor;
+            button.colors = colors;
             button.interactable = enabled;
             _labels.Add(label);
             _buttons.Add(button);
@@ -215,11 +222,11 @@ namespace DigitalLogicSandbox.UI.ContextMenus
             RectTransformUtility.ScreenPointToLocalPointInRectangle(_root, screen, null, out Vector2 local);
             Vector2 size = _root.rect.size;
             Vector2 fromCorner = local + size * _root.pivot;
-            float height = _labels.Count * 32f + 8f;
+            float height = _labels.Count * 33f + 12f;
             float x = Mathf.Clamp(fromCorner.x, 0f, Mathf.Max(0f, size.x - ItemWidth - 8f));
             float y = Mathf.Clamp(fromCorner.y, height, size.y);
             _menu.anchoredPosition = new Vector2(x, y);
-            _menu.sizeDelta = new Vector2(ItemWidth + 8f, _menu.sizeDelta.y);
+            _menu.sizeDelta = new Vector2(ItemWidth + 12f, _menu.sizeDelta.y);
         }
 
         private void OnDestroy()

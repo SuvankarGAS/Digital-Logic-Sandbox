@@ -8,8 +8,9 @@ namespace DigitalLogicSandbox.Rendering.Gates
 {
     /// <summary>
     /// Pooled visual for one node: rounded body with outline, title, pins coloured by signal, and for boundaries a
-    /// state indicator (input switch knob / output lamp). Built entirely from <see cref="GateGeometry"/>, so it
-    /// knows nothing about which gate it represents. Has no Update.
+    /// state indicator (input switch knob / output lamp) that glows while HIGH. A soft drop shadow lifts the body off
+    /// the background. Built entirely from <see cref="GateGeometry"/>, so it knows nothing about which gate it
+    /// represents. Has no Update.
     /// </summary>
     public sealed class GateView : MonoBehaviour
     {
@@ -26,6 +27,8 @@ namespace DigitalLogicSandbox.Rendering.Gates
         private readonly System.Text.StringBuilder _busText = new System.Text.StringBuilder(48);
 
         private VisualTheme _theme;
+        private SpriteRenderer _shadow;
+        private SpriteRenderer _stateGlow;
         private SpriteRenderer _outline;
         private SpriteRenderer _fill;
         private SpriteRenderer _state;
@@ -54,14 +57,18 @@ namespace DigitalLogicSandbox.Rendering.Gates
             go.transform.SetParent(parent, false);
             var view = go.AddComponent<GateView>();
             view._theme = theme;
+            view._shadow = CreateSprite(go.transform, "Shadow", RenderAssets.SoftShadow, theme, SortingOrders.GateShadow);
+            view._shadow.drawMode = SpriteDrawMode.Sliced;
             view._outline = CreateSprite(go.transform, "Outline", RenderAssets.RoundedRect, theme, SortingOrders.GateOutline);
             view._fill = CreateSprite(go.transform, "Fill", RenderAssets.RoundedRect, theme, SortingOrders.GateFill);
             view._outline.drawMode = SpriteDrawMode.Sliced;
             view._fill.drawMode = SpriteDrawMode.Sliced;
-            view._stateRing = CreateSprite(go.transform, "StateRing", RenderAssets.Circle, theme, SortingOrders.GateState);
-            view._state = CreateSprite(go.transform, "State", RenderAssets.Circle, theme, SortingOrders.GateState + 1);
-            view._title = CreateText(go.transform, "Title", 3.6f, FontStyles.Bold);
-            view._subtitle = CreateText(go.transform, "Subtitle", 2.2f, FontStyles.Normal);
+            view._stateGlow = CreateSprite(go.transform, "StateGlow", RenderAssets.Glow, theme, SortingOrders.GateState);
+            view._stateRing = CreateSprite(go.transform, "StateRing", RenderAssets.Circle, theme, SortingOrders.GateState + 1);
+            view._state = CreateSprite(go.transform, "State", RenderAssets.Circle, theme, SortingOrders.GateState + 2);
+            view._title = CreateText(go.transform, "Title", 3.4f, theme, FontWeight.SemiBold);
+            view._title.characterSpacing = 4f;
+            view._subtitle = CreateText(go.transform, "Subtitle", 2.1f, theme, FontWeight.Regular);
             view._display = new DisplayVisual(go.transform, theme);
             return view;
         }
@@ -76,6 +83,8 @@ namespace DigitalLogicSandbox.Rendering.Gates
 
             Vector2 size = geometry.Size;
             _fill.size = size;
+            _shadow.size = size + Vector2.one * ShadowSpread;
+            _shadow.transform.localPosition = new Vector3(0f, -ShadowDrop, 0f);
             bool isCustom = geometry.Kind == ComponentKind.Custom;
             bool isInput = geometry.Kind == ComponentKind.InputBoundary;
             bool isOutput = geometry.Kind == ComponentKind.OutputBoundary;
@@ -88,6 +97,7 @@ namespace DigitalLogicSandbox.Rendering.Gates
             // Boundary state indicator sits at the end away from the pin.
             _state.gameObject.SetActive(isBoundary);
             _stateRing.gameObject.SetActive(isBoundary);
+            _stateGlow.gameObject.SetActive(false);
             float indicator = Mathf.Min(size.x, size.y) * 0.62f;
             Vector2 statePosition = Vector2.zero;
             if (isBoundary)
@@ -97,7 +107,9 @@ namespace DigitalLogicSandbox.Rendering.Gates
                 _state.transform.localPosition = statePosition;
                 _state.transform.localScale = Vector3.one * indicator;
                 _stateRing.transform.localPosition = statePosition;
-                _stateRing.transform.localScale = Vector3.one * (indicator + 0.1f);
+                _stateRing.transform.localScale = Vector3.one * (indicator + 0.08f);
+                _stateGlow.transform.localPosition = statePosition;
+                _stateGlow.transform.localScale = Vector3.one * (indicator * 2.6f);
                 _stateRing.color = _theme.GateOutline;
             }
 
@@ -110,7 +122,7 @@ namespace DigitalLogicSandbox.Rendering.Gates
                 float shift = (indicator * 0.5f + 0.1f);
                 _title.transform.localPosition = new Vector3(-statePosition.normalized.x * shift,
                     -statePosition.normalized.y * shift, 0f);
-                _title.fontSize = 3.0f;
+                _title.fontSize = 2.8f;
             }
             else if (geometry.IsDisplay)
             {
@@ -129,7 +141,7 @@ namespace DigitalLogicSandbox.Rendering.Gates
             else
             {
                 _title.transform.localPosition = isCustom ? new Vector3(0f, 0.12f, 0f) : Vector3.zero;
-                _title.fontSize = 3.6f;
+                _title.fontSize = 3.4f;
             }
 
             _subtitle.gameObject.SetActive(isCustom);
@@ -182,10 +194,13 @@ namespace DigitalLogicSandbox.Rendering.Gates
             _ghost = ghost;
             _ghostValid = valid;
             int offset = ghost ? SortingOrders.GhostOffset : 0;
+            _shadow.sortingOrder = SortingOrders.GateShadow + offset;
+            _shadow.gameObject.SetActive(!ghost);
             _outline.sortingOrder = SortingOrders.GateOutline + offset;
             _fill.sortingOrder = SortingOrders.GateFill + offset;
-            _stateRing.sortingOrder = SortingOrders.GateState + offset;
-            _state.sortingOrder = SortingOrders.GateState + 1 + offset;
+            _stateGlow.sortingOrder = SortingOrders.GateState + offset;
+            _stateRing.sortingOrder = SortingOrders.GateState + 1 + offset;
+            _state.sortingOrder = SortingOrders.GateState + 2 + offset;
             _title.sortingOrder = SortingOrders.Text + offset;
             _subtitle.sortingOrder = SortingOrders.Text + offset;
             SetPinOrder(_inputPins, _inputRings, offset);
@@ -208,7 +223,7 @@ namespace DigitalLogicSandbox.Rendering.Gates
             }
 
             _inputSignals[index] = signal;
-            _inputPins[index].color = Tint(_theme.SignalColor(signal));
+            _inputPins[index].color = Tint(PinColor(signal));
         }
 
         public void SetOutputSignal(int index, Signal signal)
@@ -219,7 +234,7 @@ namespace DigitalLogicSandbox.Rendering.Gates
             }
 
             _outputSignals[index] = signal;
-            _outputPins[index].color = Tint(_theme.SignalColor(signal));
+            _outputPins[index].color = Tint(PinColor(signal));
         }
 
         public Signal GetInputSignal(int index)
@@ -358,10 +373,10 @@ namespace DigitalLogicSandbox.Rendering.Gates
 
                 pins[i].transform.localPosition = offsets[i];
                 pins[i].transform.localScale = Vector3.one * pinSize;
-                pins[i].color = Tint(_theme.SignalColor(Signal.Low));
+                pins[i].color = Tint(PinColor(Signal.Low));
                 rings[i].transform.localPosition = offsets[i];
-                rings[i].transform.localScale = Vector3.one * (pinSize * 2.2f);
-                rings[i].color = new Color(_theme.CompatiblePin.r, _theme.CompatiblePin.g, _theme.CompatiblePin.b, 0.55f);
+                rings[i].transform.localScale = Vector3.one * (pinSize * 2.4f);
+                rings[i].color = new Color(_theme.CompatiblePin.r, _theme.CompatiblePin.g, _theme.CompatiblePin.b, 0.4f);
                 signals[i] = Signal.Low;
             }
         }
@@ -438,7 +453,7 @@ namespace DigitalLogicSandbox.Rendering.Gates
         {
             while (labels.Count < names.Length)
             {
-                TextMeshPro label = CreateText(transform, prefix, 2.4f, FontStyles.Normal);
+                TextMeshPro label = CreateText(transform, prefix, 2.2f, _theme, FontWeight.Regular);
                 label.rectTransform.sizeDelta = new Vector2(3f, 0.6f);
                 labels.Add(label);
             }
@@ -512,6 +527,25 @@ namespace DigitalLogicSandbox.Rendering.Gates
                 : _stateSignal == Signal.Low ? _theme.ButtonNormal : _theme.SignalColor(_stateSignal);
             _state.color = Tint(color);
             _stateRing.color = Tint(_stateSignal == Signal.High ? _theme.SignalColor(Signal.High) : _theme.GateOutline);
+
+            // Lit switches and lamps glow softly; the glow is hidden entirely otherwise.
+            bool glow = _stateSignal == Signal.High && _theme.GlowStrength > 0f && !_ghost;
+            _stateGlow.gameObject.SetActive(glow);
+            if (glow)
+            {
+                Color halo = _theme.SignalColor(Signal.High);
+                halo.a = Mathf.Clamp01(_theme.GlowStrength * 2.2f);
+                _stateGlow.color = halo;
+            }
+        }
+
+        /// <summary>
+        /// Pin colour: LOW pins use a quiet neutral that stays visible on the gate body; other states use the
+        /// signal colour.
+        /// </summary>
+        private Color PinColor(Signal signal)
+        {
+            return signal == Signal.Low ? _theme.Hover : _theme.SignalColor(signal);
         }
 
         private void ApplyGhostTint()
@@ -547,13 +581,15 @@ namespace DigitalLogicSandbox.Rendering.Gates
             ApplyState();
             for (int i = 0; i < _inputPins.Count; i++)
             {
-                _inputPins[i].color = Tint(_theme.SignalColor(_inputSignals[i]));
+                _inputPins[i].color = Tint(PinColor(_inputSignals[i]));
             }
 
             for (int i = 0; i < _outputPins.Count; i++)
             {
-                _outputPins[i].color = Tint(_theme.SignalColor(_outputSignals[i]));
+                _outputPins[i].color = Tint(PinColor(_outputSignals[i]));
             }
+
+            _shadow.color = _theme.GateShadow;
         }
 
         private Color Tint(Color color)
@@ -586,13 +622,19 @@ namespace DigitalLogicSandbox.Rendering.Gates
             return renderer;
         }
 
-        private static TextMeshPro CreateText(Transform parent, string name, float size, FontStyles style)
+        /// <summary>How much larger than the body the shadow is (world units), and how far it drops.</summary>
+        private const float ShadowSpread = 1.0f;
+        private const float ShadowDrop = 0.14f;
+
+        private static TextMeshPro CreateText(Transform parent, string name, float size, VisualTheme theme, FontWeight weight)
         {
             var go = new GameObject(name);
             go.transform.SetParent(parent, false);
             var text = go.AddComponent<TextMeshPro>();
+            text.font = theme.UiFont;
             text.fontSize = size;
-            text.fontStyle = style;
+            text.fontStyle = FontStyles.Normal;
+            text.fontWeight = weight;
             text.alignment = TextAlignmentOptions.Center;
             text.enableWordWrapping = false;
             text.overflowMode = TextOverflowModes.Overflow;

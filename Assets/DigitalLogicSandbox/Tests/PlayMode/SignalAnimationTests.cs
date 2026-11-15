@@ -370,13 +370,13 @@ namespace DigitalLogicSandbox.Tests.PlayMode
         {
             Toggle(_a);
             TickFor(Long);
-            float standardHigh = InputWire.Line.widthMultiplier;
-            float standardLow = OutputWire.Line.widthMultiplier;
+            float standardHigh = InputWire.Width;
+            float standardLow = OutputWire.Width;
             Assert.That(standardHigh, Is.GreaterThan(standardLow), "Not colour alone: HIGH is wider.");
 
             _workspace.VisualizationMode = SignalVisualizationMode.HighContrast;
-            Assert.That(InputWire.Line.widthMultiplier, Is.GreaterThan(standardHigh));
-            Assert.That(OutputWire.Line.widthMultiplier, Is.LessThan(standardLow));
+            Assert.That(InputWire.Width, Is.GreaterThan(standardHigh));
+            Assert.That(OutputWire.Width, Is.LessThan(standardLow));
             AssertViewsMatchSimulation();
         }
 

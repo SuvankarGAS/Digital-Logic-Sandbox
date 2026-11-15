@@ -1,4 +1,5 @@
 using DigitalLogicSandbox.Core.Signals;
+using TMPro;
 using UnityEngine;
 
 namespace DigitalLogicSandbox.Rendering
@@ -13,54 +14,75 @@ namespace DigitalLogicSandbox.Rendering
         [Header("Materials")]
         [SerializeField] private Material _unlitMaterial;
         [SerializeField] private Material _gridMaterial;
+        [Tooltip("Material with the DigitalLogicSandbox/Wire shader (anti-aliased signed-distance wires with glow).")]
+        [SerializeField] private Material _wireMaterial;
+
+        [Header("Fonts")]
+        [Tooltip("Text font for the whole application (UI and workspace). Falls back to Resources/DLSFonts.")]
+        [SerializeField] private TMP_FontAsset _uiFont;
+        [Tooltip("Icon font (Lucide). Glyphs are listed in DigitalLogicSandbox.UI.Icons.")]
+        [SerializeField] private TMP_FontAsset _iconFont;
 
         [Header("Workspace")]
-        [SerializeField] private Color _workspaceBackground = Hex(0x1A1C21);
-        [SerializeField] private Color _gridMinor = Hex(0x22252C);
-        [SerializeField] private Color _gridMajor = Hex(0x2C3039);
+        [SerializeField] private Color _workspaceBackground = Hex(0x0D0F15);
+        [SerializeField] private Color _gridMinor = Hex(0x1E2230);
+        [SerializeField] private Color _gridMajor = Hex(0x2C3244);
+        [SerializeField] private Color _vignette = new Color(0.02f, 0.025f, 0.04f, 0.85f);
 
         [Header("Gates")]
-        [SerializeField] private Color _gateFill = Hex(0x2A2F3C);
-        [SerializeField] private Color _gateOutline = Hex(0x4A5268);
-        [SerializeField] private Color _customGateFill = Hex(0x2B2A40);
-        [SerializeField] private Color _customGateOutline = Hex(0x6B5FB5);
-        [SerializeField] private Color _boundaryFill = Hex(0x252A33);
-        [SerializeField] private Color _gateText = Hex(0xE6E9EF);
-        [SerializeField] private Color _gateSubtext = Hex(0x8A93A6);
-        [SerializeField] private Color _selection = Hex(0x4DA3FF);
-        [SerializeField] private Color _hover = Hex(0x7A8499);
-        [SerializeField] private Color _compatiblePin = Hex(0xFFD166);
-        [SerializeField] private Color _invalid = Hex(0xFF5D73);
+        [SerializeField] private Color _gateFill = Hex(0x181B25);
+        [SerializeField] private Color _gateOutline = Hex(0x272C3B);
+        [SerializeField] private Color _customGateFill = Hex(0x1A1A29);
+        [SerializeField] private Color _customGateOutline = Hex(0x3B3762);
+        [SerializeField] private Color _boundaryFill = Hex(0x141720);
+        [SerializeField] private Color _gateText = Hex(0xE6E8F0);
+        [SerializeField] private Color _gateSubtext = Hex(0x737A90);
+        [SerializeField] private Color _gateShadow = new Color(0f, 0f, 0f, 0.55f);
+        [SerializeField] private Color _selection = Hex(0x8FA3FF);
+        [SerializeField] private Color _hover = Hex(0x4C5468);
+        [SerializeField] private Color _compatiblePin = Hex(0xF6CF8C);
+        [SerializeField] private Color _invalid = Hex(0xFF7D8C);
 
         [Header("Signals")]
-        [SerializeField] private Color _signalLow = Hex(0x596172);
-        [SerializeField] private Color _signalHigh = Hex(0x3DDC97);
-        [SerializeField] private Color _signalUnknown = Hex(0xF5A524);
-        [SerializeField] private Color _signalHighImpedance = Hex(0x9B8AFB);
+        [SerializeField] private Color _signalLow = Hex(0x323849);
+        [SerializeField] private Color _signalHigh = Hex(0x5CE8D0);
+        [SerializeField] private Color _signalUnknown = Hex(0xF4B860);
+        [SerializeField] private Color _signalHighImpedance = Hex(0xA98CF8);
+        [Tooltip("Opacity of the soft glow drawn around energized wires and pins (0 disables it).")]
+        [SerializeField, Range(0f, 1f)] private float _glowStrength = 0.2f;
 
         [Header("Sizes (world units)")]
-        [SerializeField] private float _wireWidth = 0.07f;
-        [SerializeField] private float _wireWidthHigh = 0.12f;
-        [SerializeField] private float _pinRadius = 0.16f;
-        [SerializeField] private float _outlineThickness = 0.06f;
-        [SerializeField] private float _selectedOutlineThickness = 0.12f;
+        [SerializeField] private float _wireWidth = 0.055f;
+        [SerializeField] private float _wireWidthHigh = 0.085f;
+        [SerializeField] private float _pinRadius = 0.12f;
+        [Tooltip("How far the glow of an energized wire reaches beyond its edge (world units).")]
+        [SerializeField] private float _wireGlowRadius = 0.26f;
+        [SerializeField] private float _outlineThickness = 0.035f;
+        [SerializeField] private float _selectedOutlineThickness = 0.055f;
 
         [Header("UI")]
-        [SerializeField] private Color _panelBackground = Hex(0x15171B);
-        [SerializeField] private Color _panelBorder = Hex(0x2A2E36);
-        [SerializeField] private Color _panelHeader = Hex(0x1C1F25);
-        [SerializeField] private Color _buttonNormal = Hex(0x252932);
-        [SerializeField] private Color _buttonHover = Hex(0x30353F);
-        [SerializeField] private Color _buttonPressed = Hex(0x3A404C);
-        [SerializeField] private Color _textPrimary = Hex(0xE6E9EF);
-        [SerializeField] private Color _textSecondary = Hex(0x8A93A6);
-        [SerializeField] private Color _accent = Hex(0x4DA3FF);
-        [SerializeField] private Color _error = Hex(0xFF5D73);
-        [SerializeField] private Color _warning = Hex(0xF5A524);
+        [SerializeField] private Color _panelBackground = new Color(0.075f, 0.084f, 0.112f, 0.96f);
+        [SerializeField] private Color _panelBorder = Hex(0x252A38);
+        [SerializeField] private Color _panelHeader = Hex(0x171A23);
+        [SerializeField] private Color _buttonNormal = Hex(0x1D212C);
+        [SerializeField] private Color _buttonHover = Hex(0x272C3A);
+        [SerializeField] private Color _buttonPressed = Hex(0x323849);
+        [SerializeField] private Color _textPrimary = Hex(0xE6E8F0);
+        [SerializeField] private Color _textSecondary = Hex(0x8C93A8);
+        [SerializeField] private Color _textMuted = Hex(0x687088);
+        [SerializeField] private Color _accent = Hex(0x8FA3FF);
+        [SerializeField] private Color _error = Hex(0xFF7D8C);
+        [SerializeField] private Color _warning = Hex(0xF4B860);
+        [SerializeField] private Color _scrim = new Color(0.02f, 0.025f, 0.04f, 0.62f);
+        [SerializeField] private Color _uiShadow = new Color(0f, 0f, 0f, 0.5f);
 
         public Material UnlitMaterial => _unlitMaterial;
 
         public Material GridMaterial => _gridMaterial;
+
+        public Material WireMaterial => _wireMaterial;
+
+        public float WireGlowRadius => _wireGlowRadius;
 
         public Color WorkspaceBackground => _workspaceBackground;
 
@@ -118,6 +140,51 @@ namespace DigitalLogicSandbox.Rendering
 
         public Color Warning => _warning;
 
+        public Color TextMuted => _textMuted;
+
+        /// <summary>Dimmed backdrop behind modal dialogs.</summary>
+        public Color Scrim => _scrim;
+
+        /// <summary>Soft drop shadow under floating panels.</summary>
+        public Color UiShadow => _uiShadow;
+
+        /// <summary>Accent at low opacity: selected rows, active toggles, focus rings.</summary>
+        public Color AccentSoft => new Color(_accent.r, _accent.g, _accent.b, 0.16f);
+
+        public Color Vignette => _vignette;
+
+        public Color GateShadow => _gateShadow;
+
+        public float GlowStrength => _glowStrength;
+
+        /// <summary>Application text font (never null once resolved; falls back to the TMP default).</summary>
+        public TMP_FontAsset UiFont
+        {
+            get
+            {
+                if (_uiFont == null)
+                {
+                    _uiFont = Resources.Load<TMP_FontAsset>("DLSFonts/Nunito-Regular SDF");
+                }
+
+                return _uiFont != null ? _uiFont : TMP_Settings.defaultFontAsset;
+            }
+        }
+
+        /// <summary>Icon font; null only if the asset is missing (icons then fall back through the text font).</summary>
+        public TMP_FontAsset IconFont
+        {
+            get
+            {
+                if (_iconFont == null)
+                {
+                    _iconFont = Resources.Load<TMP_FontAsset>("DLSFonts/lucide SDF");
+                }
+
+                return _iconFont != null ? _iconFont : UiFont;
+            }
+        }
+
         public Color SignalColor(Signal signal)
         {
             switch (signal)
@@ -159,6 +226,11 @@ namespace DigitalLogicSandbox.Rendering
             if (_gridMaterial == null)
             {
                 _gridMaterial = new Material(Shader.Find("DigitalLogicSandbox/Grid")) { name = "DLS Grid (runtime)" };
+            }
+
+            if (_wireMaterial == null)
+            {
+                _wireMaterial = new Material(Shader.Find("DigitalLogicSandbox/Wire")) { name = "DLS Wire (runtime)" };
             }
         }
 

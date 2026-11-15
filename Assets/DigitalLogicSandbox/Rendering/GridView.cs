@@ -3,8 +3,8 @@ using UnityEngine;
 namespace DigitalLogicSandbox.Rendering
 {
     /// <summary>
-    /// Infinite procedural background grid: a single quad parented to the camera, resized to the view. One central
-    /// LateUpdate for the whole grid; minor lines fade out when zoomed far out.
+    /// Infinite procedural background (dot grid and vignette): a single quad parented to the camera, resized to the view. One central
+    /// LateUpdate for the whole grid; minor dots fade out when zoomed far out.
     /// </summary>
     public sealed class GridView : MonoBehaviour
     {
@@ -33,6 +33,7 @@ namespace DigitalLogicSandbox.Rendering
             view._material.SetColor("_BackColor", theme.WorkspaceBackground);
             view._material.SetColor("_MinorColor", theme.GridMinor);
             view._material.SetColor("_MajorColor", theme.GridMajor);
+            view._material.SetColor("_VignetteColor", theme.Vignette);
             var renderer = go.GetComponent<MeshRenderer>();
             renderer.sharedMaterial = view._material;
             renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;

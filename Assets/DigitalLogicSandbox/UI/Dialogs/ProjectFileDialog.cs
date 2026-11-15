@@ -54,7 +54,7 @@ namespace DigitalLogicSandbox.UI.Dialogs
         public static ProjectFileDialog Create(Transform parent, UiFactory ui, WorkspaceController workspace,
             IProjectService projects)
         {
-            Image blocker = ui.Panel("Project File Dialog", parent, new Color(0f, 0f, 0f, 0.55f));
+            Image blocker = ui.Panel("Project File Dialog", parent, ui.Theme.Scrim);
             UiFactory.Stretch(blocker.rectTransform);
             var dialog = blocker.gameObject.AddComponent<ProjectFileDialog>();
             dialog._ui = ui;
@@ -219,7 +219,7 @@ namespace DigitalLogicSandbox.UI.Dialogs
 
         private void Build(RectTransform blocker)
         {
-            Image window = _ui.Panel("Window", blocker, _ui.Theme.PanelBackground, rounded: true);
+            Image window = _ui.Card("Window", blocker, _ui.Theme.PanelBackground);
             RectTransform rect = window.rectTransform;
             rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
             rect.pivot = new Vector2(0.5f, 0.5f);
@@ -234,7 +234,7 @@ namespace DigitalLogicSandbox.UI.Dialogs
             _folder.overflowMode = TextOverflowModes.Ellipsis;
             _folder.gameObject.AddComponent<LayoutElement>().preferredHeight = 18f;
 
-            Image frame = _ui.Panel("List Frame", column, _ui.Theme.WorkspaceBackground, rounded: true);
+            Image frame = _ui.Panel("List Frame", column, _ui.Theme.WorkspaceBackground, rounded: true, radius: 10f);
             var frameLayout = frame.gameObject.AddComponent<LayoutElement>();
             frameLayout.flexibleHeight = 1f;
             frameLayout.minHeight = 160f;
@@ -253,6 +253,7 @@ namespace DigitalLogicSandbox.UI.Dialogs
             UiFactory.Flexible(buttons);
             _ui.Button("Cancel", buttons, "Cancel", Close, 100f);
             _confirm = _ui.Button("Confirm", buttons, "Open", () => Confirm(), 110f);
+            _ui.MakePrimary(_confirm);
             _confirmLabel = _confirm.GetComponentInChildren<TextMeshProUGUI>();
         }
     }

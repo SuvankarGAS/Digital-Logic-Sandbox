@@ -18,14 +18,21 @@ using UnityEngine.UI;
 namespace DigitalLogicSandbox.UI.Inspector
 {
     /// <summary>
-    /// Right-hand properties panel. With nothing selected it shows the circuit (name, interface, packaging); with
-    /// one node it shows the gate (type, pins, position, custom gate details, boundary port name); with a wire it
-    /// shows source, destination and live signal. Content is rebuilt only when the selection, history or library
-    /// changes. Live signal values are refreshed in place.
+    /// Floating properties card on the right. It stays out of the way until it is useful: it appears when
+    /// something is selected, or when the user pins it open from the toolbar (circuit properties). With nothing
+    /// selected it shows the circuit (name, interface, packaging); with one node it shows the gate (type, pins,
+    /// position, custom gate details, boundary port name); with a wire it shows source, destination and live
+    /// signal. The card grows with its content up to the available height. Content is rebuilt only when the
+    /// selection, history or library changes. Live signal values are refreshed in place.
     /// </summary>
     public sealed class InspectorPanel : MonoBehaviour
     {
-        public const float Width = 280f;
+        public const float Width = 288f;
+
+        private const float HeaderHeight = 50f;
+
+        /// <summary>Space kept free at the bottom (status pill and view controls).</summary>
+        private const float BottomReserve = UiFactory.Margin + UiFactory.StatusBarHeight + UiFactory.Margin + 6f;
 
         private readonly List<LiveValue> _liveValues = new List<LiveValue>();
         private TextMeshProUGUI _clockStatus;
@@ -36,6 +43,36 @@ namespace DigitalLogicSandbox.UI.Inspector
         private TextMeshProUGUI _header;
         private bool _rebuildPending = true;
         private CircuitDefinition _shownCircuit;
+        private RectTransform _rect;
+        private RectTransform _canvas;
+        private TextMeshProUGUI _headerIcon;
+        private bool _pinned;
+        private float _appliedHeight = -1f;
+
+        /// <summary>Raised when the panel is shown or hidden (argument: pinned state, for the toolbar button).</summary>
+        public event Action<bool> PinnedChanged;
+
+        /// <summary>
+        /// Keeps the panel open with nothing selected (circuit properties). Selecting something always shows it.
+        /// </summary>
+        public bool Pinned
+        {
+            get => _pinned;
+            set
+            {
+                if (_pinned == value)
+                {
+                    return;
+                }
+
+                _pinned = value;
+                UpdateVisibility();
+                PinnedChanged?.Invoke(_pinned);
+            }
+        }
+
+        /// <summary>True while the card is on screen.</summary>
+        public bool IsShown => gameObject.activeSelf;
 
         /// <summary>Requested by the "Create Custom Gate" buttons; argument = package selection only.</summary>
         public event Action<bool> PackageRequested;
@@ -56,48 +93,95 @@ namespace DigitalLogicSandbox.UI.Inspector
 
         public static InspectorPanel Create(Transform parent, UiFactory ui, WorkspaceController workspace)
         {
-            Image background = ui.Panel("Inspector", parent, ui.Theme.PanelBackground);
+            Image background = ui.Card("Inspector", parent, ui.Theme.PanelBackground);
             RectTransform rect = background.rectTransform;
-            rect.anchorMin = new Vector2(1f, 0f);
-            rect.anchorMax = new Vector2(1f, 1f);
-            rect.pivot = new Vector2(1f, 0.5f);
-            rect.offsetMin = new Vector2(-Width, UiFactory.StatusBarHeight);
-            rect.offsetMax = new Vector2(0f, -UiFactory.ToolbarHeight);
-
-            Image border = ui.Panel("Border", rect, ui.Theme.PanelBorder);
-            border.raycastTarget = false;
-            border.rectTransform.anchorMin = new Vector2(0f, 0f);
-            border.rectTransform.anchorMax = new Vector2(0f, 1f);
-            border.rectTransform.sizeDelta = new Vector2(1f, 0f);
-            border.rectTransform.anchoredPosition = Vector2.zero;
+            rect.anchorMin = rect.anchorMax = new Vector2(1f, 1f);
+            rect.pivot = new Vector2(1f, 1f);
+            rect.anchoredPosition = new Vector2(-UiFactory.Margin, -UiFactory.TopInset);
+            rect.sizeDelta = new Vector2(Width, 300f);
 
             var panel = background.gameObject.AddComponent<InspectorPanel>();
             panel._ui = ui;
             panel._workspace = workspace;
+            panel._rect = rect;
+            panel._canvas = (RectTransform)parent;
 
-            panel._header = ui.Text("Header", rect, "Properties", 15f, ui.Theme.TextPrimary,
+            panel._headerIcon = ui.Icon("HeaderIcon", rect, Icons.Sliders, 15f, ui.Theme.Accent);
+            RectTransform iconRect = panel._headerIcon.rectTransform;
+            iconRect.anchorMin = iconRect.anchorMax = new Vector2(0f, 1f);
+            iconRect.pivot = new Vector2(0f, 1f);
+            iconRect.sizeDelta = new Vector2(20f, HeaderHeight);
+            iconRect.anchoredPosition = new Vector2(16f, 0f);
+
+            panel._header = ui.Text("Header", rect, "Properties", 14.5f, ui.Theme.TextPrimary,
                 TextAlignmentOptions.MidlineLeft, FontStyles.Bold);
             RectTransform headerRect = panel._header.rectTransform;
             headerRect.anchorMin = new Vector2(0f, 1f);
             headerRect.anchorMax = new Vector2(1f, 1f);
             headerRect.pivot = new Vector2(0.5f, 1f);
-            headerRect.offsetMin = new Vector2(14f, -40f);
-            headerRect.offsetMax = new Vector2(-14f, -8f);
+            headerRect.offsetMin = new Vector2(44f, -HeaderHeight);
+            headerRect.offsetMax = new Vector2(-46f, 0f);
+
+            Button close = ui.IconButton("Close", rect, Icons.Close, "Close", panel.Close, 28f, 14f);
+            RectTransform closeRect = (RectTransform)close.transform;
+            closeRect.anchorMin = closeRect.anchorMax = new Vector2(1f, 1f);
+            closeRect.pivot = new Vector2(1f, 1f);
+            closeRect.sizeDelta = new Vector2(28f, 28f);
+            closeRect.anchoredPosition = new Vector2(-11f, -11f);
 
             RectTransform scroll = UiFactory.CreateRect("Scroll", rect);
-            UiFactory.Stretch(scroll, 1f, 0f, 40f, 0f);
+            UiFactory.Stretch(scroll, 2f, 2f, HeaderHeight - 6f, 4f);
             panel._content = ui.ScrollView("Body", scroll, out _);
             UiFactory.Stretch((RectTransform)panel._content.parent.parent);
+            ((VerticalLayoutGroup)panel._content.GetComponent<LayoutGroup>()).padding = new RectOffset(16, 16, 0, 14);
 
             workspace.StatusChanged += panel.OnStatusChanged;
             workspace.Selection.Changed += panel.MarkRebuild;
+            workspace.Selection.Changed += panel.UpdateVisibility;
             workspace.Navigator.HistoryChanged += panel.MarkRebuild;
             workspace.NavigationChanged += panel.MarkRebuild;
             workspace.Library.DefinitionAdded += panel.OnLibraryChanged;
             workspace.Library.DefinitionRemoved += panel.OnLibraryChanged;
             workspace.Library.DefinitionUpdated += panel.OnLibraryChanged;
             panel.Rebuild();
+            panel.UpdateVisibility();
             return panel;
+        }
+
+        /// <summary>Hides the card: unpins it and clears the selection that kept it open.</summary>
+        public void Close()
+        {
+            if (_workspace != null && _workspace.IsInitialized && !_workspace.Selection.IsEmpty)
+            {
+                _workspace.Selection.Clear();
+            }
+
+            Pinned = false;
+            UpdateVisibility();
+        }
+
+        /// <summary>Shown while pinned or while something is selected.</summary>
+        private void UpdateVisibility()
+        {
+            bool show = _pinned || (_workspace != null && _workspace.IsInitialized && !_workspace.Selection.IsEmpty);
+            if (gameObject.activeSelf != show)
+            {
+                gameObject.SetActive(show);
+                _appliedHeight = -1f;
+            }
+        }
+
+        private void LateUpdate()
+        {
+            // Grow with the content, up to the free height between the toolbar and the bottom controls.
+            float available = _canvas.rect.height - UiFactory.TopInset - BottomReserve;
+            float wanted = HeaderHeight + LayoutUtility.GetPreferredHeight(_content) + 6f;
+            float height = Mathf.Clamp(wanted, 120f, Mathf.Max(120f, available));
+            if (!Mathf.Approximately(height, _appliedHeight))
+            {
+                _appliedHeight = height;
+                _rect.sizeDelta = new Vector2(Width, height);
+            }
         }
 
         /// <summary>Forces an immediate rebuild (used after loading a circuit and by tests).</summary>
@@ -148,6 +232,8 @@ namespace DigitalLogicSandbox.UI.Inspector
             {
                 RefreshLiveValues();
             }
+
+            UpdateVisibility();
         }
 
         private void MarkRebuild()
@@ -170,6 +256,7 @@ namespace DigitalLogicSandbox.UI.Inspector
             _header.text = level == null || level.Kind == NavigationLevelKind.Root
                 ? "Circuit"
                 : level.IsDraft ? "Editing gate" : "Custom gate (inspecting)";
+            _headerIcon.text = Icons.Sliders;
             BuildLevelSection(level);
             bool editable = _workspace.IsEditable;
             _ui.FieldRow(_content, "Name", circuit.Name,
@@ -191,26 +278,41 @@ namespace DigitalLogicSandbox.UI.Inspector
             BuildInterfaceList(circuit, circuit.Inputs, "Input interface", input: true);
             BuildInterfaceList(circuit, circuit.Outputs, "Output interface", input: false);
 
-            BuildClockSection();
+            // Clock settings only matter once the circuit has a clock.
+            bool hasClock = false;
+            for (int i = 0; i < circuit.Nodes.Count && !hasClock; i++)
+            {
+                hasClock = circuit.Nodes[i].Component.Kind == ComponentKind.Clock;
+            }
 
-            _ui.Caption(_content, "Truth table");
-            _ui.Button("TruthTable", _content, "Generate Truth Table...", () => CircuitTruthTableRequested?.Invoke())
+            if (hasClock)
+            {
+                BuildClockSection();
+            }
+
+            _ui.Caption(_content, "Analysis");
+            _ui.Button("TruthTable", _content, "Generate truth table", () => CircuitTruthTableRequested?.Invoke())
                 .interactable = circuit.Outputs.Count > 0;
-            _ui.Button("SequenceAnalysis", _content, "Sequence Analysis...", () => SequenceAnalysisRequested?.Invoke())
-                .interactable = circuit.Outputs.Count > 0;
+            if (hasClock)
+            {
+                _ui.Button("SequenceAnalysis", _content, "Sequence analysis", () => SequenceAnalysisRequested?.Invoke())
+                    .interactable = circuit.Outputs.Count > 0;
+            }
 
             if (!_workspace.CanPackage)
             {
                 return;
             }
 
-            _ui.Caption(_content, "Packaging");
+            _ui.Caption(_content, "Reuse");
             TextMeshProUGUI note = _ui.Text("Note", _content,
                 "Turn this circuit into a reusable gate. Its inputs and outputs become the gate's pins.", 12f,
                 _ui.Theme.TextSecondary, TextAlignmentOptions.TopLeft);
             note.enableWordWrapping = true;
             note.gameObject.AddComponent<LayoutElement>().preferredHeight = 34f;
-            _ui.Button("Package", _content, "Create Custom Gate...", () => PackageRequested?.Invoke(false));
+            Button package = _ui.Button("Package", _content, "Create custom gate", () => PackageRequested?.Invoke(false));
+            package.interactable = circuit.Outputs.Count > 0;
+            _ui.MakePrimary(package);
         }
 
         /// <summary>Mode explanation and actions for inspected gates and drafts.</summary>
@@ -269,9 +371,11 @@ namespace DigitalLogicSandbox.UI.Inspector
                 if (_workspace.IsEditable && ports.Count > 1)
                 {
                     int index = i;
-                    Button up = _ui.Button("Up", field.transform.parent, "^", () => _workspace.MoveInterfacePort(port.Id, index - 1), 24f, 12f);
+                    Button up = _ui.IconButton("Up", field.transform.parent, Icons.ChevronUp, "Move up",
+                        () => _workspace.MoveInterfacePort(port.Id, index - 1), 24f, 13f);
                     up.interactable = i > 0;
-                    Button down = _ui.Button("Down", field.transform.parent, "v", () => _workspace.MoveInterfacePort(port.Id, index + 1), 24f, 12f);
+                    Button down = _ui.IconButton("Down", field.transform.parent, Icons.ChevronDown, "Move down",
+                        () => _workspace.MoveInterfacePort(port.Id, index + 1), 24f, 13f);
                     down.interactable = i < ports.Count - 1;
                 }
                 if (circuit.TryGetBoundaryNode(port.Id, out NodeId node))
@@ -296,6 +400,7 @@ namespace DigitalLogicSandbox.UI.Inspector
             catalog.TryGetSignature(node.Component, out ComponentSignature signature);
             string title = _workspace.Geometry.TitleOf(node);
             _header.text = title;
+            _headerIcon.text = HeaderIconOf(node.Component.Kind);
 
             _ui.Property(_content, "Type", DescribeKind(node.Component));
             if (node.IsBoundary)
@@ -343,22 +448,7 @@ namespace DigitalLogicSandbox.UI.Inspector
 
             _ui.Property(_content, "Position", node.Position.X.ToString("0.##", CultureInfo.InvariantCulture) + ", " +
                 node.Position.Y.ToString("0.##", CultureInfo.InvariantCulture));
-            _ui.Property(_content, "Rotation", ((int)node.Rotation * 90) + " deg");
-            _ui.Property(_content, "Node id", node.Id.ToString());
-
-            if (signature != null && !node.IsBoundary)
-            {
-                _ui.Caption(_content, "Pins");
-                for (int i = 0; i < signature.Inputs.Count; i++)
-                {
-                    _ui.Property(_content, "In  " + signature.Inputs[i].Name, string.Empty);
-                }
-
-                for (int i = 0; i < signature.Outputs.Count; i++)
-                {
-                    _ui.Property(_content, "Out " + signature.Outputs[i].Name, string.Empty);
-                }
-            }
+            _ui.Property(_content, "Rotation", ((int)node.Rotation * 90) + "°");
 
             if (node.Component.Kind == ComponentKind.Custom)
             {
@@ -373,18 +463,43 @@ namespace DigitalLogicSandbox.UI.Inspector
             _ui.Caption(_content, "Actions");
             if (node.Component.Kind == ComponentKind.Custom)
             {
-                _ui.Button("Open", _content, "Open Internal Circuit", () => _workspace.OpenNode(id)).interactable =
-                    _workspace.CanOpenNode(id);
+                Button open = _ui.Button("Open", _content, "Look inside", () => _workspace.OpenNode(id));
+                open.interactable = _workspace.CanOpenNode(id);
+                _ui.MakePrimary(open);
             }
 
             if (!node.Component.IsUtility)
             {
-                _ui.Button("NodeTruthTable", _content, "Truth Table", () => NodeTruthTableRequested?.Invoke(id));
+                _ui.Button("NodeTruthTable", _content, "Truth table", () => NodeTruthTableRequested?.Invoke(id));
             }
 
             if (_workspace.CanPackage)
             {
-                _ui.Button("Package", _content, "Create Custom Gate from selection...", () => PackageRequested?.Invoke(true));
+                _ui.Button("Package", _content, "Create custom gate from selection", () => PackageRequested?.Invoke(true));
+            }
+        }
+
+        private static string HeaderIconOf(ComponentKind kind)
+        {
+            switch (kind)
+            {
+                case ComponentKind.Custom:
+                    return Icons.Component;
+                case ComponentKind.InputBoundary:
+                    return Icons.Switch;
+                case ComponentKind.OutputBoundary:
+                    return Icons.Lamp;
+                case ComponentKind.Clock:
+                    return Icons.Clock;
+                case ComponentKind.Display:
+                    return Icons.Monitor;
+                case ComponentKind.Splitter:
+                case ComponentKind.Merger:
+                case ComponentKind.BusJoin:
+                case ComponentKind.TriState:
+                    return Icons.Bus;
+                default:
+                    return Icons.Cpu;
             }
         }
 
@@ -482,6 +597,7 @@ namespace DigitalLogicSandbox.UI.Inspector
         private void BuildMultiple()
         {
             _header.text = _workspace.Selection.NodeCount + " parts selected";
+            _headerIcon.text = Icons.Boxes;
             int gates = 0;
             int inputs = 0;
             int outputs = 0;
@@ -514,13 +630,15 @@ namespace DigitalLogicSandbox.UI.Inspector
             if (_workspace.CanPackage)
             {
                 _ui.Caption(_content, "Actions");
-                _ui.Button("Package", _content, "Create Custom Gate from selection...", () => PackageRequested?.Invoke(true));
+                Button package = _ui.Button("Package", _content, "Create custom gate", () => PackageRequested?.Invoke(true));
+                _ui.MakePrimary(package);
             }
         }
 
         private void BuildWire(CircuitDefinition circuit, PinRef destination)
         {
             _header.text = "Wire";
+            _headerIcon.text = Icons.Activity;
             if (!circuit.TryGetConnectionTo(destination, out ConnectionDefinition connection))
             {
                 return;
@@ -679,6 +797,7 @@ namespace DigitalLogicSandbox.UI.Inspector
 
             _workspace.StatusChanged -= OnStatusChanged;
             _workspace.Selection.Changed -= MarkRebuild;
+            _workspace.Selection.Changed -= UpdateVisibility;
             _workspace.Navigator.HistoryChanged -= MarkRebuild;
             _workspace.NavigationChanged -= MarkRebuild;
             if (_workspace.Library != null)

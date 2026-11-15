@@ -120,7 +120,7 @@ namespace DigitalLogicSandbox.UI.Dialogs
         public static TruthTableDialog Create(Transform parent, UiFactory ui, WorkspaceController workspace,
             TruthTableLimits limits)
         {
-            Image blocker = ui.Panel("Truth Table Dialog", parent, new Color(0f, 0f, 0f, 0.55f));
+            Image blocker = ui.Panel("Truth Table Dialog", parent, ui.Theme.Scrim);
             UiFactory.Stretch(blocker.rectTransform);
             var dialog = blocker.gameObject.AddComponent<TruthTableDialog>();
             dialog._ui = ui;
@@ -502,7 +502,7 @@ namespace DigitalLogicSandbox.UI.Dialogs
 
                 view.Row = row;
                 view.Root.anchoredPosition = new Vector2(0f, -row * RowHeight);
-                view.Stripe.color = row % 2 == 0 ? new Color(1f, 1f, 1f, 0.025f) : new Color(1f, 1f, 1f, 0.06f);
+                view.Stripe.color = row % 2 == 0 ? Color.clear : new Color(1f, 1f, 1f, 0.018f);
                 FormatRow(row);
                 view.Text.SetText(_builder);
             }
@@ -646,7 +646,7 @@ namespace DigitalLogicSandbox.UI.Dialogs
 
         private void Build(RectTransform blocker)
         {
-            Image window = _ui.Panel("Window", blocker, _ui.Theme.PanelBackground, rounded: true);
+            Image window = _ui.Card("Window", blocker, _ui.Theme.PanelBackground);
             RectTransform rect = window.rectTransform;
             rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
             rect.pivot = new Vector2(0.5f, 0.5f);
@@ -662,13 +662,13 @@ namespace DigitalLogicSandbox.UI.Dialogs
             _title = _ui.Text("Title", titleRow, "Truth table", 18f, _ui.Theme.TextPrimary,
                 TextAlignmentOptions.MidlineLeft, FontStyles.Bold);
             _title.gameObject.AddComponent<LayoutElement>().flexibleWidth = 1f;
-            _ui.Button("Close", titleRow, "X", Close, 30f);
+            _ui.IconButton("Close", titleRow, Icons.Close, "Close", Close, 30f, 15f);
 
             _summary = _ui.Text("Summary", column, string.Empty, 12.5f, _ui.Theme.TextSecondary);
             _summary.gameObject.AddComponent<LayoutElement>().preferredHeight = 18f;
 
             // Table: fixed header strip + virtualized body.
-            Image tableFrame = _ui.Panel("Table", column, _ui.Theme.WorkspaceBackground, rounded: true);
+            Image tableFrame = _ui.Panel("Table", column, _ui.Theme.WorkspaceBackground, rounded: true, radius: 10f);
             var tableLayout = tableFrame.gameObject.AddComponent<LayoutElement>();
             tableLayout.flexibleHeight = 1f;
             tableLayout.minHeight = 200f;
@@ -755,6 +755,7 @@ namespace DigitalLogicSandbox.UI.Dialogs
             _sequenceButton = _ui.Button("Sequence", buttons, "Sequence Analysis...", OpenSequenceAnalysis, 170f);
             _cancelButton = _ui.Button("Cancel", buttons, "Cancel", CancelGeneration, 90f);
             _generateButton = _ui.Button("Generate", buttons, "Generate", Generate, 100f);
+            _ui.MakePrimary(_generateButton);
             _ui.Button("Done", buttons, "Close", Close, 80f);
 
             _digitHalfWidth = _rows[0].Text.GetPreferredValues("0").x * 0.5f;

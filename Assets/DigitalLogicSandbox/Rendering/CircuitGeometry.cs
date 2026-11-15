@@ -15,6 +15,12 @@ namespace DigitalLogicSandbox.Rendering
     /// Cached world-space geometry of a circuit: gate shapes, pin positions and wire routes, derived from the model.
     /// Owned by <see cref="CircuitPresenter"/>, which forwards model changes so caches are invalidated before views
     /// update. Contains no GameObjects, so hit-testing works on the same data the views draw.
+    /// <para>
+    /// Wires are routed around nearby gates. Two spatial indexes (gate bodies and wire bounds) keep this cheap:
+    /// routing asks for the gates near a wire, and when a gate is added, moved, resized or removed only the wires
+    /// whose bounds touch its old or new body are invalidated. Every wire invalidated because of a gate change is
+    /// queued in <see cref="DrainInvalidatedWires"/> so the presenter can reroute exactly those views.
+    /// </para>
     /// </summary>
     public sealed class CircuitGeometry
     {
@@ -22,6 +28,21 @@ namespace DigitalLogicSandbox.Rendering
         private readonly Dictionary<NodeId, GateGeometry> _gates = new Dictionary<NodeId, GateGeometry>();
         private readonly Dictionary<PinRef, List<Vector3>> _wires = new Dictionary<PinRef, List<Vector3>>();
         private readonly List<ConnectionDefinition> _scratchConnections = new List<ConnectionDefinition>();
+
+        /// <summary>Cell size of the spatial indexes (world units; a few gates wide).</summary>
+        private const float IndexCellSize = 6f;
+
+        /// <summary>How far beyond its endpoint gates a wire looks for obstacles.</summary>
+        private const float ObstacleSearchMargin = 2f;
+
+        private readonly SpatialHash<NodeId> _nodeIndex = new SpatialHash<NodeId>(IndexCellSize);
+        private readonly SpatialHash<PinRef> _wireIndex = new SpatialHash<PinRef>(IndexCellSize);
+        private readonly HashSet<PinRef> _invalidated = new HashSet<PinRef>();
+        private readonly List<PinRef> _invalidatedOrder = new List<PinRef>();
+        private readonly List<NodeId> _scratchNodes = new List<NodeId>();
+        private readonly List<PinRef> _scratchWires = new List<PinRef>();
+        private readonly List<Rect> _obstacles = new List<Rect>(WireRouter.MaxObstacles);
+        private bool _nodeIndexBuilt;
 
         public CircuitGeometry(ComponentCatalog catalog)
         {
@@ -37,6 +58,23 @@ namespace DigitalLogicSandbox.Rendering
             Circuit = circuit;
             _gates.Clear();
             _wires.Clear();
+            _nodeIndex.Clear();
+            _wireIndex.Clear();
+            _invalidated.Clear();
+            _invalidatedOrder.Clear();
+            _nodeIndexBuilt = false;
+        }
+
+        /// <summary>
+        /// Wires whose cached route was dropped because a gate changed (an endpoint moved, or a gate appeared,
+        /// moved or disappeared across the route) since the last call. Appends to <paramref name="results"/> and
+        /// clears the queue. Connections that no longer exist may be included; callers skip unknown ones.
+        /// </summary>
+        public void DrainInvalidatedWires(List<PinRef> results)
+        {
+            results.AddRange(_invalidatedOrder);
+            _invalidated.Clear();
+            _invalidatedOrder.Clear();
         }
 
         /// <summary>Invalidates caches affected by a model change.</summary>
@@ -44,21 +82,28 @@ namespace DigitalLogicSandbox.Rendering
         {
             switch (change.Kind)
             {
+                case CircuitChangeKind.NodeAdded:
+                    UpdateNodeIndex(change.Node, removed: false);
+                    break;
                 case CircuitChangeKind.NodeRemoved:
                     _gates.Remove(change.Node);
                     InvalidateWiresOf(change.Node);
+                    UpdateNodeIndex(change.Node, removed: true);
                     break;
                 case CircuitChangeKind.NodeMoved:
                     InvalidateWiresOf(change.Node);
+                    UpdateNodeIndex(change.Node, removed: false);
                     break;
                 case CircuitChangeKind.NodeRotated:
                 case CircuitChangeKind.InterfacePortRenamed:
                     _gates.Remove(change.Node);
                     InvalidateWiresOf(change.Node);
+                    UpdateNodeIndex(change.Node, removed: false);
                     break;
                 case CircuitChangeKind.Connected:
                 case CircuitChangeKind.Disconnected:
                     _wires.Remove(change.Connection.Destination);
+                    _wireIndex.Remove(change.Connection.Destination);
                     break;
             }
         }
@@ -148,13 +193,168 @@ namespace DigitalLogicSandbox.Rendering
                 TryGetPin(connection.Source, out Vector2 from, out _) &&
                 TryGetPin(destination, out Vector2 to, out _))
             {
-                WireRouter.Route(from, GetPinNormal(connection.Source.Node, PortDirection.Output),
-                    GetBounds(connection.Source.Node), to, GetPinNormal(destination.Node, PortDirection.Input),
-                    GetBounds(destination.Node), path);
+                Rect fromBody = GetBounds(connection.Source.Node);
+                Rect toBody = GetBounds(destination.Node);
+                CollectObstacles(connection.Source.Node, destination.Node, from, to, fromBody, toBody);
+                WireRouter.Route(from, GetPinNormal(connection.Source.Node, PortDirection.Output), fromBody, to,
+                    GetPinNormal(destination.Node, PortDirection.Input), toBody, _obstacles, _obstacles.Count, path);
+                _wireIndex.Set(destination, PathBounds(path));
             }
 
             _wires[destination] = path;
             return path;
+        }
+
+        /// <summary>
+        /// Gathers the bodies of gates near the straight-line region of a wire (endpoint gates excluded), nearest
+        /// first, capped at <see cref="WireRouter.MaxObstacles"/>.
+        /// </summary>
+        private void CollectObstacles(NodeId source, NodeId destination, Vector2 from, Vector2 to, Rect fromBody,
+            Rect toBody)
+        {
+            _obstacles.Clear();
+            EnsureNodeIndex();
+            float xMin = Mathf.Min(from.x, to.x) - ObstacleSearchMargin;
+            float yMin = Mathf.Min(from.y, to.y) - ObstacleSearchMargin;
+            float xMax = Mathf.Max(from.x, to.x) + ObstacleSearchMargin;
+            float yMax = Mathf.Max(from.y, to.y) + ObstacleSearchMargin;
+            Rect area = Rect.MinMaxRect(xMin, yMin, xMax, yMax);
+
+            _scratchNodes.Clear();
+            _nodeIndex.Query(area, _scratchNodes);
+            Vector2 middle = (from + to) * 0.5f;
+            for (int i = 0; i < _scratchNodes.Count; i++)
+            {
+                NodeId node = _scratchNodes[i];
+                if (node == source || node == destination || !_nodeIndex.TryGetRect(node, out Rect body))
+                {
+                    continue;
+                }
+
+                // Gates overlapping an endpoint gate (stacked parts) would block every route; ignore them.
+                if (body.Overlaps(fromBody) || body.Overlaps(toBody))
+                {
+                    continue;
+                }
+
+                if (_obstacles.Count < WireRouter.MaxObstacles)
+                {
+                    _obstacles.Add(body);
+                    continue;
+                }
+
+                // Keep the nearest ones: replace the farthest kept obstacle when this one is closer.
+                int farthest = 0;
+                float farthestDistance = -1f;
+                for (int k = 0; k < _obstacles.Count; k++)
+                {
+                    float d = (_obstacles[k].center - middle).sqrMagnitude;
+                    if (d > farthestDistance)
+                    {
+                        farthestDistance = d;
+                        farthest = k;
+                    }
+                }
+
+                if ((body.center - middle).sqrMagnitude < farthestDistance)
+                {
+                    _obstacles[farthest] = body;
+                }
+            }
+        }
+
+        private void EnsureNodeIndex()
+        {
+            if (_nodeIndexBuilt || Circuit == null)
+            {
+                return;
+            }
+
+            _nodeIndexBuilt = true;
+            IReadOnlyList<NodeDefinition> nodes = Circuit.Nodes;
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                _nodeIndex.Set(nodes[i].Id, GetBounds(nodes[i].Id));
+            }
+        }
+
+        /// <summary>
+        /// Moves a gate's body in the index and drops the cached routes of wires that its old or new body touches
+        /// (they may now be blocked, or free to take a shorter path).
+        /// </summary>
+        private void UpdateNodeIndex(NodeId node, bool removed)
+        {
+            if (!_nodeIndexBuilt)
+            {
+                return; // built lazily from the model on the next route
+            }
+
+            bool hadOld = _nodeIndex.TryGetRect(node, out Rect oldBody);
+            if (removed || Circuit == null || !Circuit.ContainsNode(node))
+            {
+                _nodeIndex.Remove(node);
+            }
+            else
+            {
+                Rect newBody = GetBounds(node);
+                _nodeIndex.Set(node, newBody);
+                InvalidateWiresTouching(newBody);
+            }
+
+            if (hadOld)
+            {
+                InvalidateWiresTouching(oldBody);
+            }
+        }
+
+        private void InvalidateWiresTouching(Rect body)
+        {
+            if (_wireIndex.Count == 0)
+            {
+                return;
+            }
+
+            _scratchWires.Clear();
+            _wireIndex.Query(Inflate(body, WireRouter.BodyMargin), _scratchWires);
+            for (int i = 0; i < _scratchWires.Count; i++)
+            {
+                InvalidateWire(_scratchWires[i]);
+            }
+        }
+
+        private void InvalidateWire(PinRef destination)
+        {
+            _wires.Remove(destination);
+            _wireIndex.Remove(destination);
+            if (_invalidated.Add(destination))
+            {
+                _invalidatedOrder.Add(destination);
+            }
+        }
+
+        private static Rect PathBounds(List<Vector3> path)
+        {
+            if (path.Count == 0)
+            {
+                return default;
+            }
+
+            float xMin = path[0].x, xMax = path[0].x, yMin = path[0].y, yMax = path[0].y;
+            for (int i = 1; i < path.Count; i++)
+            {
+                Vector3 p = path[i];
+                xMin = Mathf.Min(xMin, p.x);
+                xMax = Mathf.Max(xMax, p.x);
+                yMin = Mathf.Min(yMin, p.y);
+                yMax = Mathf.Max(yMax, p.y);
+            }
+
+            return Rect.MinMaxRect(xMin, yMin, xMax, yMax);
+        }
+
+        private static Rect Inflate(Rect rect, float margin)
+        {
+            return Rect.MinMaxRect(rect.xMin - margin, rect.yMin - margin, rect.xMax + margin, rect.yMax + margin);
         }
 
         /// <summary>
@@ -275,7 +475,7 @@ namespace DigitalLogicSandbox.Rendering
             Circuit.GetConnectionsTo(node, _scratchConnections);
             for (int i = 0; i < _scratchConnections.Count; i++)
             {
-                _wires.Remove(_scratchConnections[i].Destination);
+                InvalidateWire(_scratchConnections[i].Destination);
             }
 
             // Connections already removed from the model (node deletion) are keyed by destination on this node.
@@ -295,6 +495,7 @@ namespace DigitalLogicSandbox.Rendering
                     for (int i = 0; i < stale.Count; i++)
                     {
                         _wires.Remove(stale[i]);
+                        _wireIndex.Remove(stale[i]);
                     }
                 }
             }

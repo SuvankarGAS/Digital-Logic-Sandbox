@@ -2,7 +2,6 @@ using System.Globalization;
 using DigitalLogicSandbox.Animation.Signals;
 using DigitalLogicSandbox.CircuitEditor.Workspace;
 using DigitalLogicSandbox.Rendering.Wires;
-using DigitalLogicSandbox.UI.Inspector;
 using TMPro;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -44,36 +43,37 @@ namespace DigitalLogicSandbox.UI.Panels
 
         public static SignalSettingsPanel Create(Transform parent, UiFactory ui, WorkspaceController workspace)
         {
-            Image window = ui.Panel("Signal Settings", parent, ui.Theme.PanelHeader, rounded: true);
+            Image window = ui.Card("Signal Settings", parent, ui.Theme.PanelHeader, radius: 12f);
             RectTransform rect = window.rectTransform;
-            rect.anchorMin = rect.anchorMax = new Vector2(1f, 1f);
-            rect.pivot = new Vector2(1f, 1f);
-            rect.sizeDelta = new Vector2(270f, 214f);
-            rect.anchoredPosition = new Vector2(-InspectorPanel.Width - 10f, -UiFactory.ToolbarHeight - NavigationBar.Height - 6f);
+            rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 1f);
+            rect.pivot = new Vector2(0.5f, 1f);
+            rect.sizeDelta = new Vector2(280f, 250f);
+            rect.anchoredPosition = new Vector2(0f, -UiFactory.TopInset + 4f);
 
             var panel = window.gameObject.AddComponent<SignalSettingsPanel>();
             panel._workspace = workspace;
             panel._settings = workspace.AnimationSettings;
 
-            RectTransform column = UiFactory.Column("Content", rect, 6f, new RectOffset(14, 14, 10, 12));
+            RectTransform column = UiFactory.Column("Content", rect, 6f, new RectOffset(16, 16, 6, 14));
             UiFactory.Stretch(column);
-            ui.Caption(column, "Signal visualization");
+            ui.Caption(column, "Signal animation");
             panel._enabled = ui.Toggle("Animate", column, "Animate signal propagation", panel._settings.Enabled,
                 value => panel._settings.Enabled = value);
 
             RectTransform speedRow = UiFactory.CreateRect("Speed", column);
             UiFactory.Row(speedRow, 6f, new RectOffset(0, 0, 0, 0));
             speedRow.gameObject.AddComponent<LayoutElement>().preferredHeight = 30f;
-            panel._slower = ui.Button("Slower", speedRow, "-", () => panel.StepSpeed(-1), 34f);
-            panel._speedLabel = ui.Text("Value", speedRow, string.Empty, 13f, ui.Theme.TextPrimary, TextAlignmentOptions.Center);
+            panel._speedLabel = ui.Text("Value", speedRow, string.Empty, 13f, ui.Theme.TextPrimary);
             panel._speedLabel.gameObject.AddComponent<LayoutElement>().flexibleWidth = 1f;
-            panel._faster = ui.Button("Faster", speedRow, "+", () => panel.StepSpeed(1), 34f);
+            panel._slower = ui.IconButton("Slower", speedRow, Icons.Minus, "Slower", () => panel.StepSpeed(-1), 28f, 14f);
+            panel._faster = ui.IconButton("Faster", speedRow, Icons.Plus, "Faster", () => panel.StepSpeed(1), 28f, 14f);
 
-            panel._particles = ui.Toggle("Particles", column, "Travelling particles", panel._settings.ShowParticles,
+            panel._particles = ui.Toggle("Particles", column, "Travelling sparks", panel._settings.ShowParticles,
                 value => panel._settings.ShowParticles = value);
             panel._highContrast = ui.Toggle("Contrast", column, "High-contrast signals",
                 workspace.VisualizationMode == SignalVisualizationMode.HighContrast,
                 value => workspace.VisualizationMode = value ? SignalVisualizationMode.HighContrast : SignalVisualizationMode.Standard);
+            ui.Separator(column, vertical: false);
             ui.Button("Reset", column, "Reset visual state", workspace.ResetVisualState);
 
             panel._settings.Changed += panel.Refresh;
@@ -81,6 +81,9 @@ namespace DigitalLogicSandbox.UI.Panels
             window.gameObject.SetActive(false);
             return panel;
         }
+
+        /// <summary>Raised when the popup opens (true) or closes (false).</summary>
+        public event System.Action<bool> OpenChanged;
 
         public void Toggle()
         {
@@ -93,12 +96,19 @@ namespace DigitalLogicSandbox.UI.Panels
                 Refresh();
                 gameObject.SetActive(true);
                 transform.SetAsLastSibling();
+                OpenChanged?.Invoke(true);
             }
         }
 
         public void Close()
         {
+            if (!gameObject.activeSelf)
+            {
+                return;
+            }
+
             gameObject.SetActive(false);
+            OpenChanged?.Invoke(false);
         }
 
         /// <summary>Moves the speed one step along 0.25x … 4x.</summary>
