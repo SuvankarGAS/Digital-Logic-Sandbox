@@ -238,6 +238,25 @@ namespace DigitalLogicSandbox.Rendering
         }
 
         /// <summary>
+        /// Switches wire routing to the fast candidate router while gates are being dragged. Turning it off reroutes
+        /// the wires that were routed the fast way with the maze router (see <see cref="CircuitGeometry"/>).
+        /// </summary>
+        public void SetInteractiveRouting(bool interactive)
+        {
+            if (_geometry.InteractiveRouting == interactive)
+            {
+                return;
+            }
+
+            _geometry.InteractiveRouting = interactive;
+            if (!interactive && _circuit != null)
+            {
+                RerouteInvalidatedWires();
+                UpdateJunctions();
+            }
+        }
+
+        /// <summary>
         /// Reroutes the wire views whose cached route the geometry dropped: wires of a moved or reshaped gate, and
         /// wires a gate now blocks or no longer blocks. Each view is rerouted at most once per change.
         /// </summary>

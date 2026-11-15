@@ -1139,4 +1139,49 @@ gates.
 ### Known issues / deferred
 - Routing is still candidate-based rather than a full maze search. In very dense areas a wire can still
   cross a gate when no candidate shape avoids every obstacle (capped at 10 per wire).
+  (Resolved: maze routing, see "Editor quality: maze wire routing".)
 - Wires do not avoid each other. Parallel wires from different sources can overlap on the same lane.
+  (Resolved: lane penalty in the maze router.)
+
+## Editor quality: maze wire routing (2026-11-16)
+
+### Implemented
+- `Rendering/Wires/GridRouter.cs`: an A* maze router over a 0.5-unit rectilinear grid, with lines through the
+  stub ends.
+  - Cost: length + bends + a lane penalty for running along another net + a small crossing cost.
+  - Every gate in the search area is an obstacle.
+  - Hand-written binary heap and static growing buffers.
+- `CircuitGeometry` uses the maze router for settled wires.
+  - It collects every gate body and other nets' cached segments in the search area.
+  - It retries with a wider area, then falls back to `WireRouter` (`RouteFallbackCount`).
+- Interactive routing: dragging gates uses the fast candidate router. Releasing (or cancelling) the drag
+  reroutes those wires with the maze router (`CircuitPresenter.SetInteractiveRouting`, called from
+  `WorkspaceInteraction`).
+
+### Decisions
+- Fast router while dragging, maze router at rest. Maze routing every wire on every drag frame was
+  unnecessary, and the candidate router is what users already see while dragging.
+- The search is bounded (area margin, line, node and expansion caps), with a fallback, so one pathological
+  wire cannot stall the editor.
+- Lane occupancy uses the existing cached routes and wire spatial index. It is not a separate global map,
+  so only wires near the one being routed are considered.
+
+### Test results
+- EditMode: **359 / 359 passed**. New `GridRouterTests` cover:
+  - the straight case;
+  - a detour around a row of gates;
+  - pin normals;
+  - lane avoidance;
+  - determinism;
+  - failure when walled in;
+  - zero allocation after warm-up;
+  - drag-then-settle in `CircuitGeometry`;
+  - a geometry-level row of gates.
+- PlayMode: **67 / 67 passed**. The new `DenseGrid_MazeRoutingStaysResponsive` test uses 1,200 gates and
+  1,102 wires that must weave between them. Results: load 1,463 ms (views and routing) with 0 fallbacks,
+  drag frame 11 ms, settle 2 ms.
+
+### Known issues / deferred
+- Routes depend on the order wires are routed in. A wire routed early is not rerouted when a later one
+  could have made room for it.
+- Crossings are allowed, with a small cost. There are no wire bridges or hops.

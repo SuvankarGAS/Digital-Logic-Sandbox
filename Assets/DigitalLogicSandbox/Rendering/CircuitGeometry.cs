@@ -21,6 +21,11 @@ namespace DigitalLogicSandbox.Rendering
     /// whose bounds touch its old or new body are invalidated. Every wire invalidated because of a gate change is
     /// queued in <see cref="DrainInvalidatedWires"/> so the presenter can reroute exactly those views.
     /// </para>
+    /// <para>
+    /// Settled wires use <see cref="GridRouter"/> (a maze search that avoids every gate in its area and keeps off
+    /// other nets' lanes). While the user drags gates, <see cref="InteractiveRouting"/> switches to the fast
+    /// candidate <see cref="WireRouter"/>; ending it reroutes the wires that were routed the fast way.
+    /// </para>
     /// </summary>
     public sealed class CircuitGeometry
     {
@@ -42,7 +47,19 @@ namespace DigitalLogicSandbox.Rendering
         private readonly List<NodeId> _scratchNodes = new List<NodeId>();
         private readonly List<PinRef> _scratchWires = new List<PinRef>();
         private readonly List<Rect> _obstacles = new List<Rect>(WireRouter.MaxObstacles);
+        private readonly List<Rect> _areaObstacles = new List<Rect>(64);
+        private readonly List<Vector4> _lanes = new List<Vector4>(128);
+        private readonly HashSet<PinRef> _fastRouted = new HashSet<PinRef>();
+        private readonly List<PinRef> _scratchFast = new List<PinRef>();
         private bool _nodeIndexBuilt;
+        private bool _interactive;
+
+        /// <summary>Margin around a wire's endpoints searched by the maze router (first try, then the wide retry).</summary>
+        private const float RouteMargin = 3f;
+        private const float WideRouteMargin = 12f;
+
+        /// <summary>Most gate bodies the maze router considers per wire.</summary>
+        private const int MaxAreaObstacles = 512;
 
         public CircuitGeometry(ComponentCatalog catalog)
         {
@@ -62,8 +79,47 @@ namespace DigitalLogicSandbox.Rendering
             _wireIndex.Clear();
             _invalidated.Clear();
             _invalidatedOrder.Clear();
+            _fastRouted.Clear();
+            _interactive = false;
             _nodeIndexBuilt = false;
         }
+
+        /// <summary>
+        /// While true (gates being dragged), wires are routed with the fast candidate router. Setting it back to
+        /// false invalidates those wires so the next <see cref="DrainInvalidatedWires"/> reroutes them properly.
+        /// </summary>
+        public bool InteractiveRouting
+        {
+            get => _interactive;
+            set
+            {
+                if (_interactive == value)
+                {
+                    return;
+                }
+
+                _interactive = value;
+                if (!value && _fastRouted.Count > 0)
+                {
+                    _scratchFast.Clear();
+                    foreach (PinRef destination in _fastRouted)
+                    {
+                        _scratchFast.Add(destination);
+                    }
+
+                    _fastRouted.Clear();
+                    // Deterministic order: the maze router sees earlier routes as occupied lanes.
+                    _scratchFast.Sort(PinRefComparer.Instance);
+                    for (int i = 0; i < _scratchFast.Count; i++)
+                    {
+                        InvalidateWire(_scratchFast[i]);
+                    }
+                }
+            }
+        }
+
+        /// <summary>Number of wires the maze router could not route (they fell back to the candidate router).</summary>
+        public int RouteFallbackCount { get; private set; }
 
         /// <summary>
         /// Wires whose cached route was dropped because a gate changed (an endpoint moved, or a gate appeared,
@@ -195,14 +251,93 @@ namespace DigitalLogicSandbox.Rendering
             {
                 Rect fromBody = GetBounds(connection.Source.Node);
                 Rect toBody = GetBounds(destination.Node);
-                CollectObstacles(connection.Source.Node, destination.Node, from, to, fromBody, toBody);
-                WireRouter.Route(from, GetPinNormal(connection.Source.Node, PortDirection.Output), fromBody, to,
-                    GetPinNormal(destination.Node, PortDirection.Input), toBody, _obstacles, _obstacles.Count, path);
+                Vector2 fromNormal = GetPinNormal(connection.Source.Node, PortDirection.Output);
+                Vector2 toNormal = GetPinNormal(destination.Node, PortDirection.Input);
+                bool routed = false;
+                if (!_interactive)
+                {
+                    routed = TryMazeRoute(connection, from, fromNormal, fromBody, to, toNormal, toBody, RouteMargin,
+                            path) ||
+                        TryMazeRoute(connection, from, fromNormal, fromBody, to, toNormal, toBody, WideRouteMargin, path);
+                    if (!routed)
+                    {
+                        RouteFallbackCount++;
+                    }
+                }
+                else
+                {
+                    _fastRouted.Add(destination);
+                }
+
+                if (!routed)
+                {
+                    CollectObstacles(connection.Source.Node, destination.Node, from, to, fromBody, toBody);
+                    WireRouter.Route(from, fromNormal, fromBody, to, toNormal, toBody, _obstacles, _obstacles.Count,
+                        path);
+                }
+
                 _wireIndex.Set(destination, PathBounds(path));
             }
 
             _wires[destination] = path;
             return path;
+        }
+
+        /// <summary>
+        /// Routes one wire with the maze router: every gate body in the search area is an obstacle (gates overlapping
+        /// an endpoint gate are ignored, as stacked parts would block every route) and every cached wire of another
+        /// source in the area is an occupied lane.
+        /// </summary>
+        private bool TryMazeRoute(ConnectionDefinition connection, Vector2 from, Vector2 fromNormal, Rect fromBody,
+            Vector2 to, Vector2 toNormal, Rect toBody, float margin, List<Vector3> path)
+        {
+            Rect area = Rect.MinMaxRect(
+                Mathf.Min(Mathf.Min(from.x, to.x), Mathf.Min(fromBody.xMin, toBody.xMin)) - margin,
+                Mathf.Min(Mathf.Min(from.y, to.y), Mathf.Min(fromBody.yMin, toBody.yMin)) - margin,
+                Mathf.Max(Mathf.Max(from.x, to.x), Mathf.Max(fromBody.xMax, toBody.xMax)) + margin,
+                Mathf.Max(Mathf.Max(from.y, to.y), Mathf.Max(fromBody.yMax, toBody.yMax)) + margin);
+
+            EnsureNodeIndex();
+            _areaObstacles.Clear();
+            _scratchNodes.Clear();
+            _nodeIndex.Query(area, _scratchNodes);
+            NodeId source = connection.Source.Node;
+            NodeId destination = connection.Destination.Node;
+            for (int i = 0; i < _scratchNodes.Count && _areaObstacles.Count < MaxAreaObstacles; i++)
+            {
+                NodeId node = _scratchNodes[i];
+                if (node == source || node == destination || !_nodeIndex.TryGetRect(node, out Rect body) ||
+                    body.Overlaps(fromBody) || body.Overlaps(toBody))
+                {
+                    continue;
+                }
+
+                _areaObstacles.Add(body);
+            }
+
+            _lanes.Clear();
+            _scratchWires.Clear();
+            _wireIndex.Query(area, _scratchWires);
+            for (int i = 0; i < _scratchWires.Count; i++)
+            {
+                PinRef other = _scratchWires[i];
+                if (other == connection.Destination || !_wires.TryGetValue(other, out List<Vector3> otherPath) ||
+                    !Circuit.TryGetConnectionTo(other, out ConnectionDefinition otherConnection) ||
+                    otherConnection.Source == connection.Source)
+                {
+                    continue; // fan-out wires of the same output may share their trunk
+                }
+
+                for (int k = 0; k < otherPath.Count - 1; k++)
+                {
+                    Vector3 p = otherPath[k];
+                    Vector3 q = otherPath[k + 1];
+                    _lanes.Add(new Vector4(p.x, p.y, q.x, q.y));
+                }
+            }
+
+            return GridRouter.TryRoute(from, fromNormal, fromBody, to, toNormal, toBody, area, _areaObstacles, _lanes,
+                path);
         }
 
         /// <summary>
@@ -324,6 +459,7 @@ namespace DigitalLogicSandbox.Rendering
 
         private void InvalidateWire(PinRef destination)
         {
+            _fastRouted.Remove(destination);
             _wires.Remove(destination);
             _wireIndex.Remove(destination);
             if (_invalidated.Add(destination))
@@ -498,6 +634,18 @@ namespace DigitalLogicSandbox.Rendering
                         _wireIndex.Remove(stale[i]);
                     }
                 }
+            }
+        }
+
+        /// <summary>Orders pins by node, then port (deterministic reroute order).</summary>
+        private sealed class PinRefComparer : IComparer<PinRef>
+        {
+            public static readonly PinRefComparer Instance = new PinRefComparer();
+
+            public int Compare(PinRef x, PinRef y)
+            {
+                int byNode = x.Node.CompareTo(y.Node);
+                return byNode != 0 ? byNode : x.Port.CompareTo(y.Port);
             }
         }
     }

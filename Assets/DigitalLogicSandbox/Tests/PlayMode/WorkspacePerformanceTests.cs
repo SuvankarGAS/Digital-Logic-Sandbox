@@ -129,5 +129,66 @@ namespace DigitalLogicSandbox.Tests.PlayMode
             Assert.That(toggleMs, Is.LessThan(1000));
             Assert.That(moveMs, Is.LessThan(1000));
         }
+
+        /// <summary>
+        /// A dense block of gates whose wires all have to find a way between other gates: every gate drives a gate
+        /// two columns ahead and one row down. Measures loading (every wire maze-routed), one drag frame with the
+        /// fast router, and the settle reroute when the drag ends.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator DenseGrid_MazeRoutingStaysResponsive()
+        {
+            const int columns = 40;
+            const int rows = 30;
+            var circuit = new CircuitDefinition(DefinitionId.New(), "Dense");
+            var gates = new NodeId[columns, rows];
+            for (int x = 0; x < columns; x++)
+            {
+                for (int y = 0; y < rows; y++)
+                {
+                    gates[x, y] = circuit.AddNode(ComponentRef.Primitive(BuiltInComponentIds.Not),
+                        new CircuitPoint(x * 5f, y * 3f)).Id;
+                }
+            }
+
+            int wireCount = 0;
+            for (int x = 0; x + 2 < columns; x++)
+            {
+                for (int y = 0; y + 1 < rows; y++)
+                {
+                    circuit.Connect(new PinRef(gates[x, y], NotGate.Output), new PinRef(gates[x + 2, y + 1], NotGate.Input));
+                    wireCount++;
+                }
+            }
+
+            var stopwatch = Stopwatch.StartNew();
+            _workspace.LoadCircuit(circuit);
+            yield return null;
+            long loadMs = stopwatch.ElapsedMilliseconds;
+            Assert.That(_workspace.Presenter.WireViewCount, Is.EqualTo(wireCount));
+            int fallbacks = _workspace.Geometry.RouteFallbackCount;
+
+            // One drag frame: wires of the moved gate use the fast router.
+            NodeId moved = gates[columns / 2, rows / 2];
+            _workspace.Presenter.SetInteractiveRouting(true);
+            stopwatch.Restart();
+            _workspace.Session.Circuit.MoveNode(moved, new CircuitPoint(columns * 2.5f + 1f, rows * 1.5f + 1f));
+            long dragMs = stopwatch.ElapsedMilliseconds;
+
+            // Drag ends: those wires are maze-routed.
+            _workspace.Presenter.ResetDiagnostics();
+            stopwatch.Restart();
+            _workspace.Presenter.SetInteractiveRouting(false);
+            long settleMs = stopwatch.ElapsedMilliseconds;
+            Assert.That(_workspace.Presenter.WireRerouteCount, Is.GreaterThan(0));
+            yield return null;
+
+            TestContext.WriteLine(columns * rows + " nodes / " + wireCount + " routed wires: load " + loadMs +
+                " ms (" + fallbacks + " fallbacks), drag frame " + dragMs + " ms, settle " + settleMs + " ms.");
+            Assert.That(fallbacks, Is.LessThan(wireCount / 20), "The maze router routes nearly every wire.");
+            Assert.That(loadMs, Is.LessThan(10000));
+            Assert.That(dragMs, Is.LessThan(100));
+            Assert.That(settleMs, Is.LessThan(200));
+        }
     }
 }

@@ -143,6 +143,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Interaction
             {
                 case Mode.DraggingNodes:
                     ApplyDrag(Vector2.zero);
+                    _workspace.Presenter.SetInteractiveRouting(false);
                     break;
                 case Mode.Wiring:
                     EndWiring();
@@ -450,6 +451,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Interaction
             TransformNodesCommand.CaptureTransforms(Circuit, _dragNodes, out _dragFrom, out _);
             _dragApplied = Vector2.zero;
             _mode = Mode.DraggingNodes;
+            _workspace.Presenter.SetInteractiveRouting(true);
             TickDragging(world);
         }
 
@@ -474,6 +476,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Interaction
                 }
 
                 _mode = Mode.Idle;
+                _workspace.Presenter.SetInteractiveRouting(false);
             }
         }
 

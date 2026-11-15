@@ -497,6 +497,26 @@ UI panels (toolbar, library) --> WorkspaceController --> CommandHistory --> Circ
     and gates overlapping them excluded) are passed in. Crossing one costs less than crossing an endpoint
     gate. Only when the best plain shape still crosses an obstacle does a second pass add lanes just outside
     each obstacle (one stub away), so unobstructed wires pay nothing.
+  - **Maze routing for settled wires.** `GridRouter` is the default router and `WireRouter` is the fast
+    fallback.
+    - It runs A* over a rectilinear grid: a line every 0.5 units, plus lines through both stub ends so
+      off-grid pins are exact nodes.
+    - The grid is clipped to the endpoints' bounds plus 3 units. If no route is found it retries once with
+      12 units.
+    - Search states are (node, heading). The cost is length, plus 1 per bend, plus 4 per unit when running in
+      a lane another net already uses, plus 0.3 per crossing. U-turns are not allowed.
+    - Obstacles: every gate body in the area, inflated by `BodyMargin`.
+    - Lanes: the cached routes of other sources' wires in the area (from the wire index). Fan-out wires of
+      the same output may share their trunk.
+    - Buffers are static and only grow, and the heap is written by hand (no .NET `PriorityQueue`), so
+      routing allocates nothing after warm-up.
+    - Limits: at most 400 lines per axis, 60,000 nodes and 40,000 expansions. Beyond them it falls back to
+      `WireRouter` (counted in `CircuitGeometry.RouteFallbackCount`).
+    - Order matters, since earlier routes become lanes for later ones. Reroutes run in a fixed order.
+  - **Interactive routing.** While gates are dragged, `WorkspaceInteraction` sets
+    `CircuitPresenter.SetInteractiveRouting(true)`. Wires invalidated during the drag use the candidate
+    router and are remembered. When the drag ends or is cancelled, those wires are invalidated again and
+    maze-routed.
   - **Spatial indexes.** `CircuitGeometry` keeps two uniform-grid `SpatialHash` indexes: gate bodies (for
     obstacle queries) and wire route bounds. When a gate is added, moved, reshaped or removed, only wires
     whose bounds touch its old or new body are invalidated. That covers both newly blocked wires and wires
