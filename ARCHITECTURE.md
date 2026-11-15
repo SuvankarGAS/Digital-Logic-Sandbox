@@ -422,7 +422,8 @@ TruthTableExporter`.
   and `AddSimulationSettingsMigration` fills in the defaults when opening v1 files. v3 (Phase C) adds optional
   node `width`/`arity`, the bus node kinds and decimal bus input values (`AddBusSupportMigration`, no-op).
   See section 16. v4 (Phase D) adds the `display` node kind with a `style`
-  (`AddDisplaysMigration`, no-op); see section 17.
+  (`AddDisplaysMigration`, no-op); see section 17. v5 adds an optional LED `color` on display nodes
+  (`AddLedColorsMigration`, no-op: files without it use the default colour).
 - Each `(id, version)` is written once, regardless of instance count. Instances reference definitions by id
   and version, so old versions stay pinned exactly as in memory.
 - **Loading:**
@@ -693,6 +694,12 @@ latches, and so on. The engine has no sequential primitive. What makes this well
 - **Layout.** `GateLayout.DisplaySize` gives each style's body and content area; content is drawn upright and
   scaled into the rotated `GateGeometry.DisplayArea`.
 - **Persistence (schema v4).** `{ "kind": "display", "style": "hex", "width": 8 }`.
+- **LED colour (schema v5).** `ComponentRef.LedColor` is an index into `LedColors` (signal, red, orange, green,
+  blue, pink). It is part of the reference (equality and hash) but has no effect on signatures or
+  simulation. `VisualTheme.LedColor(i)` supplies the colours, and index 0 is the HIGH signal colour. It is
+  saved as `"color": "green"` only when it is not the default. Unknown ids load as the default. In the
+  inspector, a swatch row marks the current colour with a check, so the choice is never shown by colour
+  alone. Changes go through `ChangeComponentCommand`.
 
 ## 18. Visual design system *(UI redesign, 2026-11-15)*
 

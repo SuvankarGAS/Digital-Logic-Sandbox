@@ -36,7 +36,7 @@ namespace DigitalLogicSandbox.Rendering.Gates
 
         /// <param name="icon">Optional short user icon of a custom gate, shown before the pin summary.</param>
         public static GateGeometry Compute(ComponentKind kind, ComponentSignature signature, Rotation rotation,
-            string title, string icon = null, DisplayStyle display = DisplayStyle.Led)
+            string title, string icon = null, DisplayStyle display = DisplayStyle.Led, int ledColor = 0)
         {
             Rect displayArea = default;
             IReadOnlyList<PortDescriptor> inputs = signature.Inputs;
@@ -207,7 +207,7 @@ namespace DigitalLogicSandbox.Rendering.Gates
             }
 
             return new GateGeometry(kind, title, subtitle, size, rotation, inputPorts, inputPins, outputPorts, outputPins,
-                inputNames, outputNames, bitCells, busWidth, display, displayArea);
+                inputNames, outputNames, bitCells, busWidth, display, displayArea, ledColor);
         }
 
         /// <summary>

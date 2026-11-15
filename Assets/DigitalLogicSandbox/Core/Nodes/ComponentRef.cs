@@ -11,7 +11,8 @@ namespace DigitalLogicSandbox.Core.Nodes
     /// <para>
     /// Parameterised utilities carry their parameters here, so a component's signature is a pure function of its
     /// reference: <see cref="Width"/> (bits of a bus boundary, splitter, merger or bus join) and
-    /// <see cref="Arity"/> (number of drivers a bus join accepts).
+    /// <see cref="Arity"/> (number of drivers a bus join accepts). LED displays also carry a presentational
+    /// <see cref="LedColor"/>, which never affects simulation.
     /// </para>
     /// </summary>
     public readonly struct ComponentRef : IEquatable<ComponentRef>
@@ -22,9 +23,12 @@ namespace DigitalLogicSandbox.Core.Nodes
         // Stored as "value - 1" so default(ComponentRef) means width 1 / arity 0.
         private readonly byte _widthMinusOne;
         private readonly byte _arity;
+        private readonly byte _color;
 
-        private ComponentRef(ComponentKind kind, string primitiveId, DefinitionRef definition, int width = 1, int arity = 0)
+        private ComponentRef(ComponentKind kind, string primitiveId, DefinitionRef definition, int width = 1, int arity = 0,
+            int color = 0)
         {
+            _color = (byte)(LedColors.IsValid(color) ? color : LedColors.Signal);
             Kind = kind;
             PrimitiveId = primitiveId;
             Definition = definition;
@@ -48,6 +52,26 @@ namespace DigitalLogicSandbox.Core.Nodes
 
         /// <summary>What a <see cref="ComponentKind.Display"/> node shows (LED for every other kind).</summary>
         public DisplayStyle DisplayStyle => Kind == ComponentKind.Display ? (DisplayStyle)_arity : DisplayStyle.Led;
+
+        /// <summary>Colour of an LED display (see <see cref="LedColors"/>); 0 for everything else.</summary>
+        public int LedColor => Kind == ComponentKind.Display && DisplayStyle == DisplayStyle.Led ? _color : 0;
+
+        /// <summary>The same LED display lit in another colour.</summary>
+        public ComponentRef WithLedColor(int color)
+        {
+            if (Kind != ComponentKind.Display || DisplayStyle != DisplayStyle.Led)
+            {
+                throw new InvalidOperationException("Only LED displays have a colour.");
+            }
+
+            if (!LedColors.IsValid(color))
+            {
+                throw new ArgumentOutOfRangeException(nameof(color), color,
+                    "LED colour must be between 0 and " + (LedColors.Count - 1) + ".");
+            }
+
+            return new ComponentRef(Kind, null, default, Width, _arity, color);
+        }
 
         public bool IsBoundary => Kind == ComponentKind.InputBoundary || Kind == ComponentKind.OutputBoundary;
 
@@ -155,7 +179,7 @@ namespace DigitalLogicSandbox.Core.Nodes
         /// Rebuilds a utility reference from persisted parameters (lenient: out-of-range values are clamped so a
         /// damaged file still loads).
         /// </summary>
-        public static ComponentRef Utility(ComponentKind kind, int width, int arity = 0)
+        public static ComponentRef Utility(ComponentKind kind, int width, int arity = 0, int color = 0)
         {
             switch (kind)
             {
@@ -173,7 +197,8 @@ namespace DigitalLogicSandbox.Core.Nodes
                 {
                     DisplayStyle style = arity >= 0 && arity <= (int)DisplayStyles.Last ? (DisplayStyle)arity : DisplayStyle.Led;
                     int clamped = Math.Max(DisplayStyles.MinWidth(style), Math.Min(DisplayStyles.MaxWidth(style), width));
-                    return new ComponentRef(kind, null, default, clamped, (int)style);
+                    return new ComponentRef(kind, null, default, clamped, (int)style,
+                        style == DisplayStyle.Led ? color : 0);
                 }
                 default:
                     throw new ArgumentException("Not a utility kind: " + kind + ".", nameof(kind));
@@ -196,6 +221,7 @@ namespace DigitalLogicSandbox.Core.Nodes
             return Kind == other.Kind
                 && _widthMinusOne == other._widthMinusOne
                 && _arity == other._arity
+                && _color == other._color
                 && string.Equals(PrimitiveId, other.PrimitiveId, StringComparison.Ordinal)
                 && Definition.Equals(other.Definition);
         }
@@ -212,7 +238,7 @@ namespace DigitalLogicSandbox.Core.Nodes
                 int hash = (int)Kind;
                 hash = (hash * 397) ^ (PrimitiveId == null ? 0 : StringComparer.Ordinal.GetHashCode(PrimitiveId));
                 hash = (hash * 397) ^ Definition.GetHashCode();
-                hash = (hash * 397) ^ (_widthMinusOne | (_arity << 8));
+                hash = (hash * 397) ^ (_widthMinusOne | (_arity << 8) | (_color << 16));
                 return hash;
             }
         }
@@ -228,7 +254,8 @@ namespace DigitalLogicSandbox.Core.Nodes
                 case ComponentKind.BusJoin:
                     return "BusJoin[" + Width + "x" + Arity + "]";
                 case ComponentKind.Display:
-                    return "Display:" + DisplayStyles.ToId(DisplayStyle) + (Width > 1 ? "[" + Width + "]" : string.Empty);
+                    return "Display:" + DisplayStyles.ToId(DisplayStyle) + (Width > 1 ? "[" + Width + "]" : string.Empty) +
+                        (LedColor != 0 ? ":" + LedColors.ToId(LedColor) : string.Empty);
                 default:
                     return Width > 1 ? Kind + "[" + Width + "]" : Kind.ToString();
             }

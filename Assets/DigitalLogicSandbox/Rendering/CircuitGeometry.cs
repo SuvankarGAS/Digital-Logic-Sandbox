@@ -190,7 +190,8 @@ namespace DigitalLogicSandbox.Rendering
                 _catalog.TryGetDefinition(component.Definition, out CircuitDefinition definition)
                     ? definition.Icon
                     : null;
-            return GateLayout.Compute(component.Kind, signature, Rotation.R0, title, icon, component.DisplayStyle);
+            return GateLayout.Compute(component.Kind, signature, Rotation.R0, title, icon, component.DisplayStyle,
+                component.LedColor);
         }
 
         public Vector2 GetPosition(NodeId id)
@@ -596,7 +597,7 @@ namespace DigitalLogicSandbox.Rendering
             }
 
             return GateLayout.Compute(node.Component.Kind, signature, node.Rotation, TitleOf(node), icon,
-                node.Component.DisplayStyle);
+                node.Component.DisplayStyle, node.Component.LedColor);
         }
 
         private void InvalidateWiresOf(NodeId node)

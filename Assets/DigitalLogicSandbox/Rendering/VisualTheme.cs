@@ -48,6 +48,11 @@ namespace DigitalLogicSandbox.Rendering
         [SerializeField] private Color _signalHigh = Hex(0x5CE8D0);
         [SerializeField] private Color _signalUnknown = Hex(0xF4B860);
         [SerializeField] private Color _signalHighImpedance = Hex(0xA98CF8);
+        [Tooltip("LED display colours 1-5 (Red, Orange, Green, Blue, Pink). Colour 0 is the HIGH signal colour.")]
+        [SerializeField] private Color[] _ledColors =
+        {
+            Hex(0xFF6B7A), Hex(0xFF9F43), Hex(0x8BE36B), Hex(0x63A9FF), Hex(0xFF7AD9),
+        };
         [Tooltip("Opacity of the soft glow drawn around energized wires and pins (0 disables it).")]
         [SerializeField, Range(0f, 1f)] private float _glowStrength = 0.2f;
 
@@ -183,6 +188,14 @@ namespace DigitalLogicSandbox.Rendering
 
                 return _iconFont != null ? _iconFont : UiFont;
             }
+        }
+
+        /// <summary>Lit colour of an LED display (index 0 = the HIGH signal colour; see <c>LedColors</c>).</summary>
+        public Color LedColor(int index)
+        {
+            return index > 0 && _ledColors != null && index - 1 < _ledColors.Length
+                ? _ledColors[index - 1]
+                : _signalHigh;
         }
 
         public Color SignalColor(Signal signal)

@@ -13,9 +13,10 @@ namespace DigitalLogicSandbox.Rendering.Gates
         public GateGeometry(ComponentKind kind, string title, string subtitle, Vector2 size, Rotation rotation,
             PortId[] inputPorts, Vector2[] inputPins, PortId[] outputPorts, Vector2[] outputPins,
             string[] inputNames = null, string[] outputNames = null, Vector2[] bitCells = null, int busWidth = 1,
-            DisplayStyle displayStyle = DisplayStyle.Led, Rect displayArea = default)
+            DisplayStyle displayStyle = DisplayStyle.Led, Rect displayArea = default, int ledColor = 0)
         {
             DisplayStyle = displayStyle;
+            LedColor = ledColor;
             DisplayArea = displayArea;
             BitCells = bitCells ?? System.Array.Empty<Vector2>();
             BusWidth = busWidth;
@@ -55,6 +56,9 @@ namespace DigitalLogicSandbox.Rendering.Gates
 
         /// <summary>What a display node shows (meaningless for other kinds).</summary>
         public DisplayStyle DisplayStyle { get; }
+
+        /// <summary>Colour index of an LED display (see <see cref="LedColors"/>).</summary>
+        public int LedColor { get; }
 
         /// <summary>Node-local area (rotation applied) holding a display's lamps or digits.</summary>
         public Rect DisplayArea { get; }

@@ -521,7 +521,7 @@ namespace DigitalLogicSandbox.UI.Inspector
         {
             ComponentRef component = node.Component;
             NodeId id = node.Id;
-            _ui.Caption(_content, "Size");
+            _ui.Caption(_content, component.Kind == ComponentKind.Display ? "Appearance" : "Size");
 
             bool fixedWidth = component.Kind == ComponentKind.Display &&
                 DisplayStyles.MinWidth(component.DisplayStyle) == DisplayStyles.MaxWidth(component.DisplayStyle);
@@ -577,6 +577,46 @@ namespace DigitalLogicSandbox.UI.Inspector
                     }
 
                     _ui.AddTooltip(button.gameObject, DisplayStyles.DisplayName(style));
+                }
+
+                if (component.DisplayStyle == DisplayStyle.Led)
+                {
+                    BuildLedColors(id, component.LedColor);
+                }
+            }
+        }
+
+        /// <summary>One swatch per LED colour; the current one carries a check mark.</summary>
+        private void BuildLedColors(NodeId id, int current)
+        {
+            RectTransform row = UiFactory.CreateRect("LedColors", _content);
+            UiFactory.Row(row, 6f, new RectOffset(0, 0, 2, 2));
+            row.gameObject.AddComponent<LayoutElement>().preferredHeight = 30f;
+            TextMeshProUGUI label = _ui.Text("Label", row, "Colour", 12.5f, _ui.Theme.TextSecondary);
+            label.gameObject.AddComponent<LayoutElement>().preferredWidth = 56f;
+            for (int i = 0; i < LedColors.Count; i++)
+            {
+                int color = i;
+                Color swatchColor = _ui.Theme.LedColor(color);
+                Image swatch = _ui.Panel("Colour " + LedColors.ToId(color), row, swatchColor, rounded: true, radius: 12f);
+                var size = swatch.gameObject.AddComponent<LayoutElement>();
+                size.preferredWidth = size.minWidth = 24f;
+                size.preferredHeight = size.minHeight = 24f;
+                var button = swatch.gameObject.AddComponent<Button>();
+                button.targetGraphic = swatch;
+                button.navigation = new Navigation { mode = Navigation.Mode.None };
+                ColorBlock colors = button.colors;
+                colors.highlightedColor = new Color(1.15f, 1.15f, 1.15f, 1f);
+                colors.pressedColor = new Color(0.85f, 0.85f, 0.85f, 1f);
+                colors.selectedColor = Color.white;
+                button.colors = colors;
+                button.onClick.AddListener(() => _workspace.ChangeLedColor(id, color));
+                _ui.AddTooltip(swatch.gameObject, LedColors.DisplayName(color));
+                if (color == current)
+                {
+                    // Not colour alone: the selected swatch is marked with a check.
+                    TextMeshProUGUI check = _ui.Icon("Check", swatch.transform, Icons.Check, 13f, _ui.Theme.WorkspaceBackground);
+                    UiFactory.Stretch(check.rectTransform);
                 }
             }
         }

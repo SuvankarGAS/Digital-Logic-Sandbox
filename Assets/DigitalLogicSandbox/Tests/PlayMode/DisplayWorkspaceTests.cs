@@ -249,5 +249,50 @@ namespace DigitalLogicSandbox.Tests.PlayMode
             Assert.That(node.Component, Is.EqualTo(ComponentRef.Display(DisplayStyle.Decimal, 6)));
             Assert.That(View(dec).DisplayText, Is.EqualTo("42"));
         }
+
+        [UnityTest]
+        public IEnumerator LedColour_FromTheInspector_SurvivesSaveAndOpen()
+        {
+            yield return LoadMain();
+            NodeId a = _workspace.PlaceNode(ComponentRef.InputBoundary, new Vector2(-6, 0));
+            NodeId led = _workspace.PlaceNode(ComponentRef.Display(DisplayStyle.Led), new Vector2(0, 0));
+            Assert.That(_workspace.Connect(Pin(a), Pin(led)), Is.EqualTo(ConnectionError.None));
+            _workspace.SetInput(a, Signal.High);
+            _workspace.Sync();
+            yield return null;
+            Assert.That(View(led).DisplayText, Is.EqualTo("ON"));
+
+            _workspace.Selection.Select(led);
+            _app.Shell.Inspector.Rebuild();
+            UnityEngine.UI.Button blue = null;
+            foreach (UnityEngine.UI.Button button in _app.Shell.Inspector.GetComponentsInChildren<UnityEngine.UI.Button>(true))
+            {
+                if (button.name == "Colour " + LedColors.ToId(4))
+                {
+                    blue = button;
+                }
+            }
+
+            Assert.That(blue, Is.Not.Null, "The inspector offers LED colour swatches.");
+            blue.onClick.Invoke();
+            _workspace.Sync();
+            yield return null;
+            Assert.That(_workspace.Circuit.GetNode(led).Component.LedColor, Is.EqualTo(4));
+            Assert.That(View(led).Geometry.LedColor, Is.EqualTo(4));
+            Assert.That(_workspace.Circuit.IsDriven(Pin(led)), Is.True, "Changing colour keeps the wire.");
+            Assert.That(View(led).DisplayText, Is.EqualTo("ON"), "Colour never changes the logic.");
+
+            string path = Path.Combine(_root, "leds" + DigitalLogicSandbox.Persistence.ProjectFormat.FileExtension);
+            Assert.That(_app.Projects.SaveAs(path, out string message), Is.True, message);
+            _app.Projects.NewProject();
+            yield return null;
+            Assert.That(_app.Projects.Open(path, out message), Is.True, message);
+            yield return null;
+            Assert.That(_workspace.Circuit.GetNode(led).Component.LedColor, Is.EqualTo(4));
+
+            Assert.That(_workspace.ChangeLedColor(led, 0), Is.True);
+            Assert.That(_workspace.Undo(), Is.True);
+            Assert.That(_workspace.Circuit.GetNode(led).Component.LedColor, Is.EqualTo(4));
+        }
     }
 }

@@ -315,7 +315,14 @@ namespace DigitalLogicSandbox.Persistence.Deserialization
                         throw new ArgumentException("Unknown display style '" + node.Style + "'.");
                     }
 
-                    circuit.RestoreNode(id, ComponentRef.Utility(ComponentKind.Display, WidthOf(node), (int)style),
+                    // An unknown colour id (e.g. from a newer palette) falls back to the default colour.
+                    int color = LedColors.Signal;
+                    if (node.Color != null)
+                    {
+                        LedColors.TryParseId(node.Color, out color);
+                    }
+
+                    circuit.RestoreNode(id, ComponentRef.Utility(ComponentKind.Display, WidthOf(node), (int)style, color),
                         position, rotation, node.Label);
                     break;
                 }

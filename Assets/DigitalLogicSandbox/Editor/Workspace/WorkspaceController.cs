@@ -787,6 +787,11 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
                         }
 
                         variant = ComponentRef.Display(newStyle, width);
+                        if (newStyle == DisplayStyle.Led && current.DisplayStyle == DisplayStyle.Led)
+                        {
+                            variant = variant.WithLedColor(current.LedColor);
+                        }
+
                         return true;
                     }
                     default:
@@ -872,6 +877,24 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             }
 
             return ChangeComponent(node, variant);
+        }
+
+        /// <summary>Lights an LED display in another colour (see <see cref="LedColors"/>) as one undoable step.</summary>
+        public bool ChangeLedColor(NodeId node, int color)
+        {
+            if (Circuit == null || !Circuit.TryGetNode(node, out NodeDefinition existing))
+            {
+                return false;
+            }
+
+            if (existing.Component.Kind != ComponentKind.Display || existing.Component.DisplayStyle != DisplayStyle.Led ||
+                !LedColors.IsValid(color))
+            {
+                Notify("Only LED displays have a colour.");
+                return false;
+            }
+
+            return ChangeComponent(node, existing.Component.WithLedColor(color));
         }
 
         private static string DescribeComponent(ComponentRef component)

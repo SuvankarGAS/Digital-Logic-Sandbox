@@ -186,7 +186,7 @@ namespace DigitalLogicSandbox.Tests.EditMode.Components
         }
 
         [Test]
-        public void Displays_RoundTripThroughSchemaV4()
+        public void Displays_RoundTripThroughTheCurrentSchema()
         {
             var circuit = new CircuitDefinition(DefinitionId.New(), "Displays");
             NodeDefinition a = circuit.AddInputBoundary("A", CircuitPoint.Zero, 8);
@@ -198,7 +198,7 @@ namespace DigitalLogicSandbox.Tests.EditMode.Components
 
             string json = ProjectSerializer.ToJson(document);
             JObject parsed = JObject.Parse(json);
-            Assert.That((int)parsed["schemaVersion"], Is.EqualTo(4));
+            Assert.That((int)parsed["schemaVersion"], Is.EqualTo(ProjectFormat.CurrentSchemaVersion));
             var node = (JObject)((JArray)parsed["rootCircuit"]["nodes"])[1];
             Assert.That((string)node["kind"], Is.EqualTo("display"));
             Assert.That((string)node["style"], Is.EqualTo("signeddecimal"));
@@ -219,6 +219,61 @@ namespace DigitalLogicSandbox.Tests.EditMode.Components
             var result = new ProjectDeserializer(null, PrimitiveRegistry.CreateDefault()).Read(json.ToString());
             Assert.That(result.StoredSchemaVersion, Is.EqualTo(3));
             Assert.That(result.Document.RootCircuit.Inputs.Count, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void LedColor_IsPresentational_AndPartOfTheReference()
+        {
+            ComponentRef plain = ComponentRef.Display(DisplayStyle.Led);
+            ComponentRef red = plain.WithLedColor(1);
+            Assert.That(plain.LedColor, Is.EqualTo(LedColors.Signal));
+            Assert.That(red.LedColor, Is.EqualTo(1));
+            Assert.That(red, Is.Not.EqualTo(plain), "The colour is part of the component reference.");
+            Assert.That(red.WithLedColor(0), Is.EqualTo(plain));
+            Assert.Throws<InvalidOperationException>(() => ComponentRef.Display(DisplayStyle.Hex, 4).WithLedColor(1));
+            Assert.Throws<ArgumentOutOfRangeException>(() => plain.WithLedColor(LedColors.Count));
+
+            // Same pins, so colour can never change simulation.
+            Assert.That(_env.Catalog.TryGetSignature(red, out ComponentSignature redPins), Is.True);
+            Assert.That(_env.Catalog.TryGetSignature(plain, out ComponentSignature plainPins), Is.True);
+            Assert.That(redPins.Inputs.Count, Is.EqualTo(plainPins.Inputs.Count));
+            Assert.That(redPins.Inputs[0].Id, Is.EqualTo(plainPins.Inputs[0].Id));
+
+            GateGeometry geometry = GateLayout.Compute(ComponentKind.Display, redPins, Rotation.R0, string.Empty, null,
+                DisplayStyle.Led, red.LedColor);
+            Assert.That(geometry.LedColor, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void LedColor_RoundTrips_AndOlderFilesUseTheDefault()
+        {
+            var circuit = new CircuitDefinition(DefinitionId.New(), "Leds");
+            NodeDefinition green = circuit.AddNode(ComponentRef.Display(DisplayStyle.Led).WithLedColor(3), CircuitPoint.Zero);
+            NodeDefinition plain = circuit.AddNode(ComponentRef.Display(DisplayStyle.Led), new CircuitPoint(0, 3));
+            string json = ProjectSerializer.ToJson(new ProjectDocument { Name = "Leds", RootCircuit = circuit });
+
+            JObject parsed = JObject.Parse(json);
+            JArray nodes = (JArray)parsed["rootCircuit"]["nodes"];
+            Assert.That((string)nodes[0]["color"], Is.EqualTo("green"));
+            Assert.That(nodes[1]["color"], Is.Null, "The default colour is not written.");
+
+            var deserializer = new ProjectDeserializer(null, PrimitiveRegistry.CreateDefault());
+            ProjectDocument loaded = deserializer.Read(json).Document;
+            Assert.That(loaded.RootCircuit.GetNode(green.Id).Component.LedColor, Is.EqualTo(3));
+            Assert.That(loaded.RootCircuit.GetNode(plain.Id).Component.LedColor, Is.EqualTo(LedColors.Signal));
+
+            // A version 4 file (before LED colours) migrates and loads with the default colour.
+            nodes[0].Value<JObject>().Remove("color");
+            parsed["schemaVersion"] = 4;
+            ProjectLoadResult old = deserializer.Read(parsed.ToString());
+            Assert.That(old.StoredSchemaVersion, Is.EqualTo(4));
+            Assert.That(old.Document.RootCircuit.GetNode(green.Id).Component.LedColor, Is.EqualTo(LedColors.Signal));
+
+            // An unknown colour id (from a newer palette) falls back to the default instead of failing.
+            nodes[0]["color"] = "ultraviolet";
+            parsed["schemaVersion"] = ProjectFormat.CurrentSchemaVersion;
+            Assert.That(deserializer.Read(parsed.ToString()).Document.RootCircuit.GetNode(green.Id).Component.LedColor,
+                Is.EqualTo(LedColors.Signal));
         }
     }
 }

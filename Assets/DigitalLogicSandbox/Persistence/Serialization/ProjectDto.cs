@@ -104,6 +104,10 @@ namespace DigitalLogicSandbox.Persistence.Serialization
         [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
         public string Style;
 
+        /// <summary>Lit colour of an LED display (see <c>LedColors.ToId</c>); omitted for the default colour.</summary>
+        [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+        public string Color;
+
         public float X;
         public float Y;
         public string Rotation;

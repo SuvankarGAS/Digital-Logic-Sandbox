@@ -1066,7 +1066,7 @@ compiler, truth tables and the built-in gate library (still exactly AND and NOT)
 - A display's style and width are fixed when it is placed (as for bus components); place a new one to change
   them. (Resolved: inspector style picker.)
 - LEDs have a single colour (the HIGH signal colour); per-LED colours would need one more `ComponentRef`
-  parameter.
+  parameter. (Resolved: LED colours, see "Editor quality: LED colours".)
 - Decimal displays are integer only (no fixed-point or BCD input mode); BCD can be shown with 4-bit hex
   displays, one per digit.
 
@@ -1243,3 +1243,30 @@ gates.
 - PlayMode: **69 / 69 passed**. The new `ChangingDisplayStyleAndBusWidth_AfterPlacement` test covers style
   changes from both the workspace and the inspector buttons, narrowing a bus, and undoing back to the
   original value.
+
+## Editor quality: LED colours (2026-11-16)
+
+### Implemented
+- `Core/Nodes/LedColors`: six colours (signal, red, orange, green, blue, pink) with stable ids.
+- `ComponentRef.LedColor` and `WithLedColor`. The colour is part of the reference's equality, hash and
+  `ToString`, and `Utility(...)` takes it for loading. It never changes pins or simulation.
+- `VisualTheme.LedColor(i)` holds a serialized palette, and index 0 is the HIGH signal colour.
+  `GateGeometry.LedColor` carries the colour to `DisplayVisual`, which lights LEDs in it.
+- Persistence schema **v5**: optional `"color"` on display nodes, written only when it is not the default.
+  `AddLedColorsMigration` is a no-op, and unknown ids fall back to the default.
+- `WorkspaceController.ChangeLedColor`. An undoable inspector swatch row marks the current colour with a check
+  mark. Switching to another style and back to LED keeps the colour.
+
+### Test results
+- EditMode: **372 / 372 passed**. New tests check:
+  - the colour is part of the reference, is validated, and leaves pins and layout unchanged;
+  - the colour survives a save and load;
+  - the default colour is omitted from files;
+  - a v4 file migrates to the default colour;
+  - an unknown id falls back to the default.
+- PlayMode: **70 / 70 passed**. The new `LedColour_FromTheInspector_SurvivesSaveAndOpen` test covers the
+  swatch click, the wire being kept, the logic being unchanged, save and reopen, and undo.
+
+### Known issues / deferred
+- Project files saved by this version (schema 5) cannot be opened by older builds. The newer-version error
+  message explains this.

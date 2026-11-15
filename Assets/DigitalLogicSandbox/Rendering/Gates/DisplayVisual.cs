@@ -27,6 +27,7 @@ namespace DigitalLogicSandbox.Rendering.Gates
         private Signal[] _inputs = System.Array.Empty<Signal>();
         private byte[] _digits = System.Array.Empty<byte>();
         private DisplayStyle _style;
+        private int _ledColor;
         private int _width;
         private int _digitCount;
         private int _lampCount;
@@ -78,6 +79,7 @@ namespace DigitalLogicSandbox.Rendering.Gates
             }
 
             _style = geometry.DisplayStyle;
+            _ledColor = geometry.LedColor;
             _width = geometry.BusWidth;
             _digitCount = DisplayEncoding.DigitCount(_style, _width);
             _lampCount = DisplayEncoding.LampCount(_style, _width);
@@ -245,7 +247,7 @@ namespace DigitalLogicSandbox.Rendering.Gates
 
         private void ApplyColors()
         {
-            Color lit = _theme.SignalColor(Signal.High);
+            Color lit = _style == DisplayStyle.Led ? _theme.LedColor(_ledColor) : _theme.SignalColor(Signal.High);
             Color screen = _theme.WorkspaceBackground;
             Color segmentOff = Color.Lerp(screen, _theme.GateOutline, 0.45f);
             _screen.color = Tint(screen);
