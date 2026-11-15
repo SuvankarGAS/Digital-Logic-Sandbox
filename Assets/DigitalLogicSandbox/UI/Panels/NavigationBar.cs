@@ -160,6 +160,10 @@ namespace DigitalLogicSandbox.UI.Panels
                     _mode.text = level.HasUnsavedChanges ? "EDITING · UNSAVED" : "EDITING";
                     _mode.color = _ui.Theme.Warning;
                     break;
+                case NavigationLevelKind.Preview:
+                    _mode.text = "PREVIEW · READ-ONLY";
+                    _mode.color = _ui.Theme.TextMuted;
+                    break;
                 default:
                     _mode.text = "INSPECTING · READ-ONLY";
                     _mode.color = _ui.Theme.TextMuted;
@@ -172,7 +176,7 @@ namespace DigitalLogicSandbox.UI.Panels
             gameObject.SetActive(_workspace.Navigator.Levels.Count > 1 || draft != null);
 
             _up.interactable = _workspace.Navigator.CurrentIndex > 0;
-            _edit.gameObject.SetActive(level.Kind == NavigationLevelKind.Inspect && draft == null);
+            _edit.gameObject.SetActive((level.Kind == NavigationLevelKind.Inspect || level.IsPreview) && draft == null);
             _save.gameObject.SetActive(draft != null);
             _discard.gameObject.SetActive(draft != null);
             _save.interactable = draft != null && draft.HasUnsavedChanges;

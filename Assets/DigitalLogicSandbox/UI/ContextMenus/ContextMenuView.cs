@@ -153,6 +153,11 @@ namespace DigitalLogicSandbox.UI.ContextMenus
                 ComponentRef component = request.Component;
                 string name = request.DisplayName;
                 Add("Truth Table", () => ComponentTruthTableRequested?.Invoke(component, name), true);
+                if (component.Kind == ComponentKind.Custom)
+                {
+                    Add("Open Internal Circuit", () => _workspace.OpenDefinition(component.Definition),
+                        _workspace.CanOpenDefinition(component.Definition));
+                }
             }
 
             gameObject.SetActive(true);

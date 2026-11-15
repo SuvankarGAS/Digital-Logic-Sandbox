@@ -23,6 +23,12 @@ namespace DigitalLogicSandbox.CircuitEditor.Navigation
         /// undo history. Saved explicitly as a new version, or discarded.
         /// </summary>
         Draft = 2,
+
+        /// <summary>
+        /// A published gate opened straight from the library, without an instance: read-only, simulated on its own
+        /// session so its inputs can be toggled without touching the main circuit.
+        /// </summary>
+        Preview = 3,
     }
 
     /// <summary>One entry of the breadcrumb path (Main Circuit → ALU → Full Adder …).</summary>
@@ -62,7 +68,10 @@ namespace DigitalLogicSandbox.CircuitEditor.Navigation
         /// <summary>For drafts: the published version the draft was created from.</summary>
         public DefinitionRef DraftSource { get; }
 
-        public bool IsEditable => Kind != NavigationLevelKind.Inspect;
+        public bool IsEditable => Kind == NavigationLevelKind.Root || Kind == NavigationLevelKind.Draft;
+
+        /// <summary>True for a gate opened from the library (no instance in the main circuit).</summary>
+        public bool IsPreview => Kind == NavigationLevelKind.Preview;
 
         /// <summary>Input switches can be flipped only where they are not driven by an enclosing circuit.</summary>
         public bool CanToggleInputs => Path.Length == 0;

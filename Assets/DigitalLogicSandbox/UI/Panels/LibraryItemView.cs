@@ -117,7 +117,9 @@ namespace DigitalLogicSandbox.UI.Panels
             if (!string.IsNullOrEmpty(tip))
             {
                 ui.AddTooltip(background.gameObject, tip + "\n<color=#" + ColorUtility.ToHtmlStringRGB(ui.Theme.TextMuted) +
-                    ">Click or drag to place</color>");
+                    ">" + (request.Component.Kind == Core.Nodes.ComponentKind.Custom
+                        ? "Click or drag to place, double-click to open"
+                        : "Click or drag to place") + "</color>");
             }
 
             return view;
@@ -133,6 +135,14 @@ namespace DigitalLogicSandbox.UI.Panels
         {
             if (eventData.button == PointerEventData.InputButton.Left && !eventData.dragging)
             {
+                if (eventData.clickCount == 2 && Request.Component.Kind == Core.Nodes.ComponentKind.Custom)
+                {
+                    // Double-click opens the gate's internal circuit (the first click armed placement; drop it).
+                    _workspace.CancelPlacement();
+                    _workspace.OpenDefinition(Request.Component.Definition);
+                    return;
+                }
+
                 _workspace.BeginPlacement(Request, fromDrag: false);
             }
             else if (eventData.button == PointerEventData.InputButton.Right)

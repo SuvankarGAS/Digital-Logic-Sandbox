@@ -326,7 +326,9 @@ namespace DigitalLogicSandbox.UI.Inspector
             string text = level.IsDraft
                 ? "Draft of version " + level.Circuit.Version + ". Existing instances keep using " + level.DraftSource +
                   " until you save."
-                : level.CanToggleInputs
+                : level.IsPreview
+                    ? "Preview of a library gate. Toggle its inputs to try it; the main circuit is not affected."
+                    : level.CanToggleInputs
                     ? "Read-only view of this gate's implementation."
                     : "Read-only view. Signals are live values of this instance; its inputs are driven by the enclosing circuit.";
             TextMeshProUGUI note = _ui.Text("Mode", _content, text, 12f,

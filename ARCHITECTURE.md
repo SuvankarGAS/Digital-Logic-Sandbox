@@ -270,9 +270,11 @@ CircuitNavigator (engine-free, CircuitEditor/Navigation)
   levels: [Root(main circuit, root session, root history)]
           [Inspect(definition, session = owner's, path = node ids from that session's root)]
           [Draft(definition vN+1, own session, own history, DraftSource = vN)]   ← at most one
+          [Preview(published definition, own preview session, no history)]   ← opened from the library
   TryOpen(node)       checks: custom gate · definition resolvable · id not already on the path · depth limit
   TryNavigateTo(i)    refuses to leave a draft with unsaved changes (unless discardChanges)
-  TryBeginEdit()      replaces the top Inspect level by a Draft (CloneAsVersion(NextVersion))
+  TryOpenDefinition(ref) replaces every level above Root by a Preview (refused while a draft has unsaved changes)
+  TryBeginEdit()      replaces the top Inspect or Preview level by a Draft (CloneAsVersion(NextVersion))
   DiscardDraft()      drops the draft and goes back to inspecting vN
   ResolveScope(level) walks Compiled.Root.TryGetChild(path) → CompiledInstance whose nets colour the views
   ValidateStack()     drops levels whose node vanished or no longer references the shown definition
@@ -287,6 +289,12 @@ CircuitNavigator (engine-free, CircuitEditor/Navigation)
   duplicate, rotate, move, rename, properties, packaging) is refused with a `Notification`. Inputs inside an
   instance cannot be toggled because the parent drives them (`CanToggleInputs` is true only at a session root).
   The interaction layer never starts wiring or dragging there.
+- **Library preview.** A published gate can be opened without placing it (library context menu
+  "Open Internal Circuit", or double-click a library entry). The Preview level is read-only. Its own
+  `CircuitSession` simulates the definition as a session root, so its inputs can be toggled without touching
+  the main circuit. Nested gates open from it as normal Inspect levels on the preview session, and Edit turns
+  it into a draft. The navigator disposes the preview session once no level uses it. A draft started from the
+  preview keeps the session alive, because discarding the draft returns to the preview.
 - **Edit mode.** A draft is a mutable copy with the same `DefinitionId` and the next version number. It has its
   own `CircuitSession` (inputs toggleable, so the user can test the edit in isolation) and its own undo
   history. Published versions are frozen and never modified. Placing a gate that contains the draft's gate

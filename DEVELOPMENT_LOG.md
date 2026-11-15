@@ -764,7 +764,8 @@ Delivered – see the Phase 3 section below.
 ### Known issues / deferred
 - Wires avoid only their own endpoint gates, not third-party gates in between.
 - Opening a custom gate from the library without an instance is still not offered. Place an instance, or
-  use the library Truth Table.
+  use the library Truth Table. (Resolved: library preview, see "Editor quality: open custom gates from the
+  library".)
 - `com.coplaydev.unity-mcp` still tracks `#main`. It is development tooling; pin or remove it before
   release builds.
 - `ProjectSettings/EditorSettings.asset` has an uncommitted local change: Enter Play Mode Options was
@@ -1185,3 +1186,32 @@ gates.
 - Routes depend on the order wires are routed in. A wire routed early is not rerouted when a later one
   could have made room for it.
 - Crossings are allowed, with a small cost. There are no wire bridges or hops.
+
+## Editor quality: open custom gates from the library (2026-11-16)
+
+### Implemented
+- New `NavigationLevelKind.Preview`. `CircuitNavigator.TryOpenDefinition` / `CanOpenDefinition` and
+  `WorkspaceController.OpenDefinition` / `CanOpenDefinition` open a published gate without an instance.
+  - It is read-only, with its own simulation session, and its inputs can be toggled.
+  - It replaces the levels above the main circuit.
+- The library context menu has "Open Internal Circuit" for custom gates. Double-clicking a custom gate in the
+  library opens it too, and the tooltip says so.
+- Edit works from a preview. Discarding the draft returns to the preview, and leaving it releases the preview
+  session.
+- The navigation bar shows "PREVIEW · READ-ONLY" and the Edit button. The inspector explains that the preview
+  is isolated.
+- `NavigationLevel.IsEditable` is now true only for Root and Draft levels (it used to mean "not Inspect").
+
+### Test results
+- EditMode: **365 / 365 passed**. New `PreviewNavigationTests` cover:
+  - an isolated session;
+  - replacing opened levels;
+  - nested open from a preview;
+  - edit and discard from a preview;
+  - refusing a missing definition or an unsaved draft;
+  - dropping the preview when its definition is removed.
+- PlayMode: **68 / 68 passed**. The new `OpenFromLibrary_PreviewsGateWithoutAnInstance` test checks that the
+  main circuit is untouched, the preview is read-only, and edit, discard and back all work.
+- Fixed a timing flake in `SequentialWorkspaceTests.TruthTable_RefusesClockedCircuits_…`. The live clock
+  could tick between frames before the assertion. The test now measures only across the synchronous
+  analysis run.

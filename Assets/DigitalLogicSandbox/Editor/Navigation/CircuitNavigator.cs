@@ -15,7 +15,9 @@ namespace DigitalLogicSandbox.CircuitEditor.Navigation
     /// The breadcrumb stack of circuit levels: the main circuit at the bottom, then opened custom gates. Each level
     /// knows which session simulates it and its instance path inside that session, so an inspected gate shows the
     /// live signals of exactly that instance. Edit mode turns the top inspection level into a draft (the next version
-    /// of the gate) with its own session and undo history; at most one draft exists at a time.
+    /// of the gate) with its own session and undo history; at most one draft exists at a time. A gate can also be
+    /// opened from the library without an instance (<see cref="TryOpenDefinition"/>): it becomes a preview level
+    /// above the main circuit with its own session.
     /// <para>
     /// Safety: opening is refused for missing definitions, for any definition already on the path (circular
     /// navigation) and beyond the hierarchy depth limit. Contains no Unity objects.
@@ -30,6 +32,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Navigation
         private readonly CircuitSession _rootSession;
         private readonly CommandHistory _rootHistory;
         private CircuitSession _draftSession;
+        private CircuitSession _previewSession;
         private CommandHistory _draftHistory;
         private NavigationLevel _draftReplaced;
 
@@ -80,6 +83,11 @@ namespace DigitalLogicSandbox.CircuitEditor.Navigation
                 {
                     _draftSession.Runner.ClockFrequency = value;
                 }
+
+                if (_previewSession != null)
+                {
+                    _previewSession.Runner.ClockFrequency = value;
+                }
             }
         }
 
@@ -94,6 +102,11 @@ namespace DigitalLogicSandbox.CircuitEditor.Navigation
                 {
                     _draftSession.Runner.ClockEnabled = value;
                 }
+
+                if (_previewSession != null)
+                {
+                    _previewSession.Runner.ClockEnabled = value;
+                }
             }
         }
 
@@ -107,6 +120,11 @@ namespace DigitalLogicSandbox.CircuitEditor.Navigation
                 if (_draftSession != null)
                 {
                     _draftSession.Runner.PowerOnState = value;
+                }
+
+                if (_previewSession != null)
+                {
+                    _previewSession.Runner.PowerOnState = value;
                 }
             }
         }
@@ -161,6 +179,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Navigation
         {
             CloseDraft();
             _levels.Clear();
+            ReleaseUnusedPreview();
             _rootHistory.Clear();
             _rootSession.Bind(circuit);
             if (circuit != null)
@@ -242,6 +261,63 @@ namespace DigitalLogicSandbox.CircuitEditor.Navigation
         }
 
         /// <summary>
+        /// Checks whether the published gate <paramref name="reference"/> can be opened from the library.
+        /// </summary>
+        public bool CanOpenDefinition(DefinitionRef reference, out CircuitDefinition definition, out string error)
+        {
+            definition = null;
+            if (Root == null)
+            {
+                error = "No circuit is loaded.";
+                return false;
+            }
+
+            if (!reference.IsValid || !_catalog.TryGetDefinition(reference, out definition))
+            {
+                error = "The definition of this gate (" + reference + ") is missing from the library.";
+                definition = null;
+                return false;
+            }
+
+            for (int i = 1; i < _levels.Count; i++)
+            {
+                if (_levels[i].HasUnsavedChanges)
+                {
+                    error = "Save or discard the changes to '" + _levels[i].Circuit.Name + "' first.";
+                    definition = null;
+                    return false;
+                }
+            }
+
+            error = null;
+            return true;
+        }
+
+        /// <summary>
+        /// Opens a published gate from the library (read-only preview with its own simulation), replacing every level
+        /// above the main circuit. Nested gates inside it open normally from there, and Edit turns it into a draft.
+        /// </summary>
+        public bool TryOpenDefinition(DefinitionRef reference, out string error)
+        {
+            if (!CanOpenDefinition(reference, out CircuitDefinition definition, out error))
+            {
+                return false;
+            }
+
+            Truncate(1);
+            ReleaseUnusedPreview();
+            _previewSession = new CircuitSession(_catalog, _options);
+            ApplyClockSettings(_previewSession.Runner);
+            _previewSession.Rebuilt += RaiseActivity;
+            _previewSession.Runner.StateChanged += OnRunnerStateChanged;
+            _previewSession.Bind(definition);
+            _levels.Add(new NavigationLevel(NavigationLevelKind.Preview, definition, _previewSession, null, null,
+                NodeId.None, default));
+            LevelsChanged?.Invoke();
+            return true;
+        }
+
+        /// <summary>
         /// Returns to the level at <paramref name="index"/> (a breadcrumb click). Leaving a draft with unsaved
         /// changes is refused unless <paramref name="discardChanges"/>.
         /// </summary>
@@ -269,6 +345,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Navigation
             }
 
             Truncate(index + 1);
+            ReleaseUnusedPreview();
             error = null;
             LevelsChanged?.Invoke();
             return true;
@@ -290,7 +367,8 @@ namespace DigitalLogicSandbox.CircuitEditor.Navigation
         public bool CanBeginEdit(out string error)
         {
             NavigationLevel current = Current;
-            if (current == null || current.Kind != NavigationLevelKind.Inspect)
+            if (current == null ||
+                (current.Kind != NavigationLevelKind.Inspect && current.Kind != NavigationLevelKind.Preview))
             {
                 error = current != null && current.IsDraft
                     ? "This gate is already being edited."
@@ -378,6 +456,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Navigation
             }
 
             Truncate(1);
+            ReleaseUnusedPreview();
             LevelsChanged?.Invoke();
         }
 
@@ -414,6 +493,14 @@ namespace DigitalLogicSandbox.CircuitEditor.Navigation
             for (int i = 1; i < _levels.Count; i++)
             {
                 NavigationLevel level = _levels[i];
+                if (level.IsPreview && !_library.Contains(level.Circuit.Reference))
+                {
+                    Truncate(i);
+                    ReleaseUnusedPreview();
+                    LevelsChanged?.Invoke();
+                    return true;
+                }
+
                 if (level.Kind != NavigationLevelKind.Inspect)
                 {
                     continue; // drafts own their circuit; only their parent link matters for saving
@@ -426,6 +513,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Navigation
                     !_library.Contains(level.Circuit.Reference))
                 {
                     Truncate(i);
+                    ReleaseUnusedPreview();
                     LevelsChanged?.Invoke();
                     return true;
                 }
@@ -439,6 +527,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Navigation
         {
             _rootSession.MarkDirty();
             _draftSession?.MarkDirty();
+            _previewSession?.MarkDirty();
         }
 
         /// <summary>Recompiles dirty sessions. Returns true when the session of the current level was rebuilt.</summary>
@@ -446,14 +535,17 @@ namespace DigitalLogicSandbox.CircuitEditor.Navigation
         {
             bool rootRebuilt = _rootSession.RebuildIfDirty();
             bool draftRebuilt = _draftSession != null && _draftSession.RebuildIfDirty();
+            bool previewRebuilt = _previewSession != null && _previewSession.RebuildIfDirty();
             CircuitSession current = Current?.Session;
-            return (rootRebuilt && current == _rootSession) || (draftRebuilt && current == _draftSession);
+            return (rootRebuilt && current == _rootSession) || (draftRebuilt && current == _draftSession) ||
+                (previewRebuilt && current == _previewSession);
         }
 
         public void Dispose()
         {
             CloseDraft();
             _levels.Clear();
+            ReleaseUnusedPreview();
             _rootSession.Rebuilt -= RaiseActivity;
             _rootSession.Runner.StateChanged -= OnRunnerStateChanged;
             _rootHistory.Changed -= RaiseHistoryChanged;
@@ -492,6 +584,39 @@ namespace DigitalLogicSandbox.CircuitEditor.Navigation
                 _draftHistory = null;
             }
         }
+
+        /// <summary>
+        /// Disposes the preview session once no level uses it any more (a draft started from the preview keeps it
+        /// alive, because discarding the draft returns to the preview).
+        /// </summary>
+        private void ReleaseUnusedPreview()
+        {
+            if (_previewSession == null)
+            {
+                return;
+            }
+
+            if (_draftReplaced != null && _draftReplaced.Session == _previewSession)
+            {
+                return;
+            }
+
+            for (int i = 0; i < _levels.Count; i++)
+            {
+                if (_levels[i].Session == _previewSession)
+                {
+                    return;
+                }
+            }
+
+            _previewSession.Rebuilt -= RaiseActivity;
+            _previewSession.Runner.StateChanged -= OnRunnerStateChanged;
+            _previewSession.Dispose();
+            _previewSession = null;
+        }
+
+        /// <summary>The session of the library preview, or null when none is open.</summary>
+        public CircuitSession PreviewSession => _previewSession;
 
         private void OnRunnerStateChanged(SimulationState state)
         {

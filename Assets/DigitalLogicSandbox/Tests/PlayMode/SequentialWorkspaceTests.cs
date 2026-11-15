@@ -137,7 +137,6 @@ namespace DigitalLogicSandbox.Tests.PlayMode
             yield return LoadMain();
             BuildClocked();
             yield return null;
-            long liveEdges = _workspace.Runner.ClockEdges;
 
             _app.Shell.Toolbar.TruthTableButton.onClick.Invoke();
             yield return null;
@@ -157,6 +156,9 @@ namespace DigitalLogicSandbox.Tests.PlayMode
             Assert.That(sequence.Table.Clocked, Is.True);
 
             sequence.StepsField.text = "3";
+            // The live clock keeps ticking in real time between frames; the analysis itself runs synchronously
+            // and must not advance it.
+            long liveEdges = _workspace.Runner.ClockEdges;
             Assert.That(sequence.Run(), Is.Not.Null);
             Assert.That(sequence.Table.RowCount, Is.EqualTo(4));
             Assert.That(sequence.TableText, Does.Contain("Cycle").And.Contain("Power-on"));

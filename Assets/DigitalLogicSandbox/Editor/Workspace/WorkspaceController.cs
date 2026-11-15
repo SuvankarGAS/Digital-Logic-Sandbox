@@ -961,6 +961,31 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             return false;
         }
 
+        /// <summary>Whether the published gate <paramref name="reference"/> can be opened from the library.</summary>
+        public bool CanOpenDefinition(DefinitionRef reference)
+        {
+            return IsInitialized && _navigator.CanOpenDefinition(reference, out _, out _);
+        }
+
+        /// <summary>
+        /// Opens a published gate from the library without placing it: a read-only preview with its own simulation,
+        /// replacing any opened levels. Refusals are reported through <see cref="Notification"/>.
+        /// </summary>
+        public bool OpenDefinition(DefinitionRef reference)
+        {
+            EnsureInitialized();
+            Sync();
+            StoreCurrentView();
+            if (_navigator.TryOpenDefinition(reference, out string error))
+            {
+                Sync();
+                return true;
+            }
+
+            Notify(error);
+            return false;
+        }
+
         /// <summary>Opens the single selected custom gate.</summary>
         public bool OpenSelected()
         {

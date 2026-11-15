@@ -165,6 +165,43 @@ namespace DigitalLogicSandbox.Tests.PlayMode
         }
 
         [UnityTest]
+        public IEnumerator OpenFromLibrary_PreviewsGateWithoutAnInstance()
+        {
+            _workspace.SetInput(_a, Signal.High);
+            _workspace.SetInput(_b, Signal.High);
+            yield return null;
+            Assert.That(OutputValue(), Is.EqualTo(Signal.Low));
+
+            Assert.That(_workspace.CanOpenDefinition(_nand.Reference), Is.True);
+            Assert.That(_workspace.OpenDefinition(_nand.Reference), Is.True, string.Join("\n", _notifications));
+            yield return null;
+
+            Assert.That(_workspace.CurrentLevel.IsPreview, Is.True);
+            Assert.That(_workspace.Circuit, Is.SameAs(_nand));
+            Assert.That(_workspace.IsEditable, Is.False);
+            Assert.That(_workspace.Presenter.GateViewCount, Is.EqualTo(_nand.Nodes.Count));
+
+            // The preview's inputs are its own: toggling them never reaches the main circuit.
+            NodeId previewA = HierarchyFixtures.Boundary(_nand, true, 0);
+            Assert.That(_workspace.CanToggleInputs, Is.True);
+            Assert.That(_workspace.ToggleInput(previewA), Is.True);
+            yield return null;
+            Assert.That(OutputValue(), Is.EqualTo(Signal.Low), "Main circuit unchanged.");
+            Assert.That(_workspace.PlaceNode(ComponentRef.Primitive(BuiltInComponentIds.Not), Vector2.zero),
+                Is.EqualTo(NodeId.None), "Previews are read-only.");
+
+            // Edit from the preview, then back to the main circuit.
+            Assert.That(_workspace.BeginEdit(), Is.True, string.Join("\n", _notifications));
+            Assert.That(_workspace.CurrentLevel.IsDraft, Is.True);
+            Assert.That(_workspace.DiscardDraft(), Is.True);
+            Assert.That(_workspace.CurrentLevel.IsPreview, Is.True);
+            Assert.That(_workspace.NavigateTo(0), Is.True);
+            yield return null;
+            Assert.That(_workspace.Circuit, Is.Not.SameAs(_nand));
+            Assert.That(_workspace.Navigator.PreviewSession, Is.Null);
+        }
+
+        [UnityTest]
         public IEnumerator InspectionMode_IsReadOnly()
         {
             _workspace.OpenNode(_gate);
