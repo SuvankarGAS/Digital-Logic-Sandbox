@@ -77,9 +77,7 @@ namespace DigitalLogicSandbox.UI.ContextMenus
         /// <summary>Builds and shows the menu for <paramref name="request"/>.</summary>
         public void Show(ContextMenuRequest request)
         {
-            UiFactory.DestroyChildren(_menu);
-            _labels.Clear();
-            _buttons.Clear();
+            ClearItems();
             CircuitDefinition circuit = _workspace.Circuit;
             if (circuit == null)
             {
@@ -143,9 +141,7 @@ namespace DigitalLogicSandbox.UI.ContextMenus
         /// <summary>Menu for a gate library entry: place it, or show its truth table.</summary>
         public void ShowForLibraryEntry(Vector2 screen, PlacementRequest request)
         {
-            UiFactory.DestroyChildren(_menu);
-            _labels.Clear();
-            _buttons.Clear();
+            ClearItems();
             bool canPlace = _workspace.Circuit != null && _workspace.IsEditable;
             Add("Place", () => _workspace.BeginPlacement(request, fromDrag: false), canPlace);
             if (!request.Component.IsUtility)
@@ -199,6 +195,23 @@ namespace DigitalLogicSandbox.UI.ContextMenus
             {
                 Close();
             }
+        }
+
+        /// <summary>
+        /// Removes the rows of the previous menu. Only the rows: the card's shadow, fill and border are children of
+        /// the menu too, and destroying them left the menu without a background.
+        /// </summary>
+        private void ClearItems()
+        {
+            for (int i = 0; i < _buttons.Count; i++)
+            {
+                GameObject row = _buttons[i].gameObject;
+                row.SetActive(false);
+                Destroy(row);
+            }
+
+            _buttons.Clear();
+            _labels.Clear();
         }
 
         private void Add(string label, Action action, bool enabled)

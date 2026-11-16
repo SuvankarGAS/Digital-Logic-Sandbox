@@ -1296,3 +1296,15 @@ gates.
   checks that every inspector button shows its resting or disabled tint in the same frame as a rebuild, and
   again after an input toggle. Before the snap was added, this test caught the disabled Truth Table button
   still mid-fade.
+
+## Fix: context menu had no background (2026-11-16)
+
+- Cause: `UiFactory.Card` keeps the card's shadow, fill and border as child decorations of the menu.
+  `ContextMenuView.Show` / `ShowForLibraryEntry` cleared the old rows with `UiFactory.DestroyChildren(_menu)`,
+  which destroyed those decorations too. From the first time it opened, the menu was rows on a transparent
+  hit image.
+- Fix: the new `ContextMenuView.ClearItems()` destroys only the row buttons it created.
+- Test: `UiFlickerTests.ContextMenu_KeepsItsBackground_AcrossReopens` opens the menu on empty space, then on a
+  node, then on empty space again. Each time it checks that the shadow, fill and border are present, that the
+  fill uses the theme colour, and that old rows don't pile up.
+- Results: EditMode **372 / 372**, PlayMode **72 / 72**.

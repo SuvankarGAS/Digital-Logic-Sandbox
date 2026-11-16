@@ -11,8 +11,9 @@ using UnityEngine.UI;
 namespace DigitalLogicSandbox.Tests.PlayMode
 {
     /// <summary>
-    /// Panels rebuilt on selection/history changes must not flash: a freshly built button has to show its resting
-    /// tint in the same frame instead of cross-fading in from Unity's default white tint.
+    /// Regressions in rebuilt UI: panels rebuilt on selection/history changes must not flash (a freshly built
+    /// button shows its resting tint in the same frame instead of cross-fading in from Unity's default white tint),
+    /// and the context menu keeps its card background when its rows are rebuilt.
     /// </summary>
     public sealed class UiFlickerTests
     {
@@ -68,6 +69,40 @@ namespace DigitalLogicSandbox.Tests.PlayMode
             _workspace.ToggleInput(input);
             yield return null;
             AssertRestingTint(_app.Shell.Inspector);
+        }
+
+        [UnityTest]
+        public IEnumerator ContextMenu_KeepsItsBackground_AcrossReopens()
+        {
+            yield return LoadMain();
+            _workspace.PlaceNode(ComponentRef.InputBoundary, new Vector2(4f, 0f));
+            yield return null;
+
+            Vector2 empty = _workspace.WorkspaceCamera.WorldToScreen(new Vector2(-20f, 10f));
+            Vector2 onGate = _workspace.WorkspaceCamera.WorldToScreen(new Vector2(4f, 0f));
+            Vector2[] points = { empty, onGate, empty };
+            foreach (Vector2 screen in points)
+            {
+                _workspace.RequestContextMenu(screen, _workspace.WorkspaceCamera.ScreenToWorld(screen));
+                yield return null;
+                Assert.That(_app.Shell.ContextMenu.IsOpen, Is.True);
+
+                Transform menu = _app.Shell.ContextMenu.transform.Find("Menu");
+                Assert.That(menu, Is.Not.Null);
+                foreach (string part in new[] { "Shadow", "Fill", "Border" })
+                {
+                    Transform child = menu.Find(part);
+                    Assert.That(child != null && child.gameObject.activeInHierarchy, Is.True, "menu lost its " + part);
+                }
+
+                Color fill = menu.Find("Fill").GetComponent<Image>().color;
+                Assert.That(fill, Is.EqualTo(_app.Shell.Factory.Theme.PanelHeader));
+                Assert.That(fill.a, Is.GreaterThan(0f));
+
+                int rows = menu.GetComponentsInChildren<Button>().Length;
+                Assert.That(rows, Is.EqualTo(_app.Shell.ContextMenu.Labels.Count), "old rows piled up");
+                _app.Shell.ContextMenu.Close();
+            }
         }
     }
 }
