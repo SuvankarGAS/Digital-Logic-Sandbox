@@ -77,6 +77,7 @@ namespace DigitalLogicSandbox.Tests.EditMode.PersistenceTests
             document.Settings.GridVisible = false;
             document.Settings.SnapToGrid = false;
             document.Settings.VisualizationMode = "HighContrast";
+            document.Settings.WireCrossings = "Gap";
             document.Settings.Animation.Enabled = false;
             document.Settings.Animation.Speed = 2f;
             document.Settings.Animation.ShowParticles = false;
@@ -212,6 +213,7 @@ namespace DigitalLogicSandbox.Tests.EditMode.PersistenceTests
             Assert.That(settings.GridVisible, Is.False);
             Assert.That(settings.SnapToGrid, Is.False);
             Assert.That(settings.VisualizationMode, Is.EqualTo("HighContrast"));
+            Assert.That(settings.WireCrossings, Is.EqualTo("Gap"));
             Assert.That(settings.Animation.Enabled, Is.False);
             Assert.That(settings.Animation.Speed, Is.EqualTo(2f));
             Assert.That(settings.Animation.ShowParticles, Is.False);
@@ -415,6 +417,20 @@ namespace DigitalLogicSandbox.Tests.EditMode.PersistenceTests
             Assert.That(simulation.ClockEnabled, Is.True);
             Assert.That(simulation.PowerOnState, Is.EqualTo("Resolved"));
             Assert.That(result.Document.Settings.GridVisible, Is.False, "Other settings are untouched.");
+        }
+
+        [Test]
+        public void MissingWireCrossingSetting_LoadsAsHop()
+        {
+            JObject json = JObject.Parse(ProjectSerializer.ToJson(BuildDocument(BuildRoot())));
+            var settings = (JObject)json["settings"];
+            Assume.That(settings.ContainsKey("wireCrossings"), Is.True);
+            settings.Remove("wireCrossings");
+
+            ProjectLoadResult result = new ProjectDeserializer().Read(json.ToString());
+
+            Assert.That(result.Document.Settings.WireCrossings, Is.EqualTo("Hop"));
+            Assert.That(result.Document.Settings.VisualizationMode, Is.EqualTo("HighContrast"), "Other settings are kept.");
         }
 
         [Test]

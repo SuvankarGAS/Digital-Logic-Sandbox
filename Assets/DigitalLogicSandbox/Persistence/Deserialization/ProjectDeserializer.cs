@@ -431,6 +431,7 @@ namespace DigitalLogicSandbox.Persistence.Deserialization
             settings.Simulation ??= new SimulationSettingsData();
             settings.Simulation.PowerOnState ??= "Resolved";
             settings.VisualizationMode ??= "Standard";
+            settings.WireCrossings ??= "Hop";
         }
     }
 }

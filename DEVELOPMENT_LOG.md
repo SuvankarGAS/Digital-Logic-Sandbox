@@ -1185,8 +1185,10 @@ gates.
 
 ### Known issues / deferred
 - Routes depend on the order wires are routed in. A wire routed early is not rerouted when a later one
-  could have made room for it.
-- Crossings are allowed, with a small cost. There are no wire bridges or hops.
+  could have made room for it. (Resolved: rip-up and reroute, see "Editor quality: rip-up-and-reroute and
+  wire crossings".)
+- Crossings are allowed, with a small cost. There are no wire bridges or hops. (Resolved: hop, gap or plain
+  crossings.)
 
 ## Editor quality: open custom gates from the library (2026-11-16)
 
@@ -1308,3 +1310,91 @@ gates.
   node, then on empty space again. Each time it checks that the shadow, fill and border are present, that the
   fill uses the theme colour, and that old rows don't pile up.
 - Results: EditMode **372 / 372**, PlayMode **72 / 72**.
+
+## Editor quality: rip-up-and-reroute and wire crossings (2026-11-16)
+
+Goal: settled routes that do not depend on the order wires were routed in and that improve when room opens
+up, and crossings of unrelated nets that can't be mistaken for connections.
+
+### Implemented
+- **Rip-up and reroute** (`CircuitGeometry.ImproveRoutes`, run by the presenter after each change, after
+  `Bind` and when a drag settles). It reconsiders:
+  - wires shaped by other nets near a dropped route;
+  - other nets' wires overlapping a new route;
+  - wires lying on the ideal (lane-free) route of a newly routed wire that had to detour.
+  Detoured wires' ideal routes become soft lanes (`GridRouter.SoftLaneCost`), so an earlier wire can step
+  off a lane it took only by tie-breaking. A new route is accepted when `GridRouter.PathCost` (same lanes)
+  drops by more than 0.05, or when it yields to a demand route while giving up at most two crossings' worth
+  of cost. Each wire is tried at most twice per pass. The budget is 64 searches per change, or
+  `max(64, wires / 4)` on bind. Nothing runs during a drag.
+- `GridRouter`:
+  - `LastLaneInfluenced`, `PathCost`, `SoftCost` and `OverlapLength`, all allocation-free;
+  - a soft-lane overload of `TryRoute`;
+  - lanes claim parallel lines closer than `LaneProximity` (0.3), so a wire on an off-grid stub line no
+    longer gets a neighbour 0.25 away;
+  - the straight-wire shortcut now also requires that no other net runs along the line.
+- **Crossings.** `Rendering/Wires/WireCrossings` finds where a wire's vertical segments cross other nets.
+  Fan-out siblings and touches near bends and pins are excluded.
+  - `CircuitGeometry.GetCrossings` and `DrainCrossingChanges` cache the points and queue changes.
+  - `WireView.SetCrossings` draws a semicircular hop, a gap (split quad, path distances kept), or a plain
+    crossing. Only the vertical wire is decorated. Routing, hit-testing and junctions are unchanged.
+- **Setting.** `WireCrossingStyle` (Hop by default):
+  - set through `CircuitPresenter.SetWireCrossingStyle` and `WorkspaceController.WireCrossingStyle`;
+  - a Hop / Gap / Plain row in the Signal Settings popover (the current choice has an accent, bold label);
+  - persisted as the optional `settings.wireCrossings`. A missing field loads as Hop, so there is no schema
+    bump.
+- Diagnostics: `CircuitGeometry.ImprovementAttempts` / `ImprovedRoutes` and
+  `CircuitPresenter.WireImprovementCount`.
+
+### Decisions
+- **Only the vertical wire is decorated.** Rectilinear crossings always pair one vertical and one horizontal
+  segment, so the rule is deterministic and the horizontal wire (often a long bus or signal line) stays
+  straight.
+- **Hops are drawn, not routed.** The geometry path stays orthogonal, so routing costs, hit-testing,
+  junction dots and simulation never see the hop.
+- **Acceptance by cost decrease** rather than a global negotiated-congestion loop. It is local, bounded and
+  monotone in the common case, and cheap enough to run on every change.
+- **Straight shortcut respects lanes.** Before this change a straight wire could be drawn on top of another
+  net, which is the worst possible routing result. The search now decides, and the improvement pass usually
+  moves the other wire out of the way.
+
+### Test results
+- EditMode: **395 / 395 passed** (23 new).
+  - `RouteImprovementTests` (9):
+    - an earlier wire steps aside so a detoured wire runs straight;
+    - the result is the same in either connection order;
+    - convergence (a second pass changes nothing);
+    - a wire straightens when the wire in its way is removed, or its gate moves;
+    - nothing happens during a drag, and it runs on settle;
+    - unrelated wires are not searched again;
+    - the budget is respected.
+  - `WireCrossingsTests` (7): a crossing is found on the vertical wire only; T-touches, near-bend points and
+    duplicates are ignored; fan-out wires don't cross; moving or removing a wire queues the wires it crossed.
+  - `GridRouterTests` (+6): lane influence, `PathCost` terms, the searched route beats an overlapping
+    straight one, soft lanes break ties, no allocations, and too-close lanes are avoided.
+  - `PersistenceTests`: the setting round-trips, and a missing setting loads as Hop.
+- PlayMode: **77 / 77 passed** (5 new, `WireCrossingWorkspaceTests`):
+  - Hop is the default, and only the vertical wire hops (more points, longer drawn length);
+  - Gap and Plain change only the drawing;
+  - a signal travels over a hop and settles on the right value;
+  - moving gates updates the crossings;
+  - popover buttons set the style, which survives Save, New and Open.
+- Performance (`DenseGrid_MazeRoutingStaysResponsive`, 1,200 gates and 1,102 wires; baseline measured on the
+  same machine and day, before the change):
+
+  | | Load | Drag frame | Settle |
+  |---|---|---|---|
+  | Before | 2,588 ms | 20 ms | 3 ms |
+  | After | 2,703 ms | 16 ms | 24 ms |
+
+  Load and drag frame are within run-to-run noise. Settle grew because of 35 improvement searches, 3 of
+  them accepted. The thousands-of-gates test still reroutes only the affected wires.
+- Manual: play-mode screenshots of hops (including a LOW wire hopping a HIGH one), gaps, and the popover
+  with the crossing row. This check found the 0.25-unit near-parallel lanes that led to `LaneProximity`.
+
+### Known issues / deferred
+- Settling a drag in a very dense area costs about 20 ms more, for the improvement searches.
+- Improvement is local: a better layout that needs several wires to move together at a temporary cost is not
+  found.
+- Hops always bulge towards +x. Crossings closer than a hop's diameter on one segment are drawn as one hop
+  (the second is skipped).

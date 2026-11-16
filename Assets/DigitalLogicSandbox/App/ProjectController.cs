@@ -307,6 +307,7 @@ namespace DigitalLogicSandbox.App
             settings.GridVisible = _workspace.GridVisible;
             settings.SnapToGrid = _workspace.SnapToGrid;
             settings.VisualizationMode = _workspace.VisualizationMode.ToString();
+            settings.WireCrossings = _workspace.WireCrossingStyle.ToString();
             if (_animation != null)
             {
                 settings.Animation.Enabled = _animation.Enabled;
@@ -392,6 +393,10 @@ namespace DigitalLogicSandbox.App
             _workspace.VisualizationMode = Enum.TryParse(settings.VisualizationMode, out SignalVisualizationMode mode)
                 ? mode
                 : SignalVisualizationMode.Standard;
+            _workspace.WireCrossingStyle = Enum.TryParse(settings.WireCrossings, out WireCrossingStyle crossings) &&
+                Enum.IsDefined(typeof(WireCrossingStyle), crossings)
+                    ? crossings
+                    : WireCrossingStyle.Hop;
             if (_animation != null && settings.Animation != null)
             {
                 _animation.Enabled = settings.Animation.Enabled;

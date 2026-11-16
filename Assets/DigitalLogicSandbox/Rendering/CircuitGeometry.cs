@@ -26,6 +26,11 @@ namespace DigitalLogicSandbox.Rendering
     /// other nets' lanes). While the user drags gates, <see cref="InteractiveRouting"/> switches to the fast
     /// candidate <see cref="WireRouter"/>; ending it reroutes the wires that were routed the fast way.
     /// </para>
+    /// <para>
+    /// Routing one wire at a time makes routes depend on the order: <see cref="ImproveRoutes"/> (rip-up and reroute)
+    /// reconsiders the wires that could do better after a change. <see cref="GetCrossings"/> gives the points where
+    /// a wire crosses another net, queued through <see cref="DrainCrossingChanges"/> when they may have changed.
+    /// </para>
     /// </summary>
     public sealed class CircuitGeometry
     {
@@ -53,6 +58,49 @@ namespace DigitalLogicSandbox.Rendering
         private readonly List<PinRef> _scratchFast = new List<PinRef>();
         private bool _nodeIndexBuilt;
         private bool _interactive;
+
+        // Route improvement (rip-up and reroute): see ImproveRoutes.
+        private readonly HashSet<PinRef> _laneSensitive = new HashSet<PinRef>();
+        private readonly List<Rect> _freedAreas = new List<Rect>();
+        private readonly List<PinRef> _recentRoutes = new List<PinRef>();
+        private readonly List<PinRef> _improveQueue = new List<PinRef>();
+        private readonly HashSet<PinRef> _improveQueued = new HashSet<PinRef>();
+        private readonly Dictionary<PinRef, int> _improveAttempts = new Dictionary<PinRef, int>();
+        private readonly List<PinRef> _scratchImprove = new List<PinRef>();
+        private readonly List<Vector3> _candidatePath = new List<Vector3>(16);
+        private readonly Dictionary<PinRef, List<Vector3>> _demand = new Dictionary<PinRef, List<Vector3>>();
+        private readonly Stack<List<Vector3>> _pathPool = new Stack<List<Vector3>>();
+        private readonly List<Vector4> _softLanes = new List<Vector4>(32);
+        private static readonly List<Vector4> NoLanes = new List<Vector4>();
+        private bool _hasInteractiveFreed;
+        private Rect _interactiveFreed;
+
+        // Crossings of other nets (drawn as hops or gaps): see GetCrossings.
+        private readonly Dictionary<PinRef, List<Vector2>> _crossings = new Dictionary<PinRef, List<Vector2>>();
+        private readonly Stack<List<Vector2>> _crossingPool = new Stack<List<Vector2>>();
+        private readonly HashSet<PinRef> _crossingDirty = new HashSet<PinRef>();
+        private readonly List<PinRef> _crossingDirtyOrder = new List<PinRef>();
+        private readonly List<PinRef> _scratchCrossWires = new List<PinRef>();
+        private readonly List<Vector4> _crossSegments = new List<Vector4>(64);
+        private static readonly List<Vector2> NoCrossings = new List<Vector2>();
+
+        /// <summary>
+        /// Padding for wire-bounds queries: a straight wire has zero-height (or zero-width) bounds, which a strict
+        /// rectangle overlap test would never match against another straight wire on the same line.
+        /// </summary>
+        private const float QueryPadding = 0.05f;
+
+        /// <summary>Most times one wire is rerouted by a single <see cref="ImproveRoutes"/> call.</summary>
+        private const int MaxImprovementsPerWire = 2;
+
+        /// <summary>Least cost reduction (world units) for an improved route to replace the current one.</summary>
+        private const float ImprovementEpsilon = 0.05f;
+
+        /// <summary>
+        /// Most real cost a wire may give up to step off another wire's ideal route (a couple of crossings): enough
+        /// to break ties, never enough to make a wire noticeably worse.
+        /// </summary>
+        private const float YieldTolerance = 2f * GridRouter.CrossingCost;
 
         /// <summary>Margin around a wire's endpoints searched by the maze router (first try, then the wide retry).</summary>
         private const float RouteMargin = 3f;
@@ -82,6 +130,18 @@ namespace DigitalLogicSandbox.Rendering
             _fastRouted.Clear();
             _interactive = false;
             _nodeIndexBuilt = false;
+            _laneSensitive.Clear();
+            _freedAreas.Clear();
+            _recentRoutes.Clear();
+            _hasInteractiveFreed = false;
+            foreach (List<Vector2> list in _crossings.Values)
+            {
+                ReleaseCrossingList(list);
+            }
+
+            _crossings.Clear();
+            _crossingDirty.Clear();
+            _crossingDirtyOrder.Clear();
         }
 
         /// <summary>
@@ -99,6 +159,13 @@ namespace DigitalLogicSandbox.Rendering
                 }
 
                 _interactive = value;
+                if (!value && _hasInteractiveFreed)
+                {
+                    // Room opened during the drag (the dragged wires' original routes) is offered on settle.
+                    _freedAreas.Add(_interactiveFreed);
+                    _hasInteractiveFreed = false;
+                }
+
                 if (!value && _fastRouted.Count > 0)
                 {
                     _scratchFast.Clear();
@@ -158,8 +225,7 @@ namespace DigitalLogicSandbox.Rendering
                     break;
                 case CircuitChangeKind.Connected:
                 case CircuitChangeKind.Disconnected:
-                    _wires.Remove(change.Connection.Destination);
-                    _wireIndex.Remove(change.Connection.Destination);
+                    DropRoute(change.Connection.Destination);
                     break;
             }
         }
@@ -275,9 +341,17 @@ namespace DigitalLogicSandbox.Rendering
                     CollectObstacles(connection.Source.Node, destination.Node, from, to, fromBody, toBody);
                     WireRouter.Route(from, fromNormal, fromBody, to, toNormal, toBody, _obstacles, _obstacles.Count,
                         path);
+                    _laneSensitive.Remove(destination);
+                }
+                else
+                {
+                    SetLaneSensitive(destination, GridRouter.LastLaneInfluenced);
+                    _recentRoutes.Add(destination);
                 }
 
-                _wireIndex.Set(destination, PathBounds(path));
+                Rect bounds = PathBounds(path);
+                _wireIndex.Set(destination, bounds);
+                MarkCrossingsAround(destination, bounds);
             }
 
             _wires[destination] = path;
@@ -290,7 +364,8 @@ namespace DigitalLogicSandbox.Rendering
         /// source in the area is an occupied lane.
         /// </summary>
         private bool TryMazeRoute(ConnectionDefinition connection, Vector2 from, Vector2 fromNormal, Rect fromBody,
-            Vector2 to, Vector2 toNormal, Rect toBody, float margin, List<Vector3> path)
+            Vector2 to, Vector2 toNormal, Rect toBody, float margin, List<Vector3> path,
+            LaneMode lanes = LaneMode.OtherNets)
         {
             Rect area = Rect.MinMaxRect(
                 Mathf.Min(Mathf.Min(from.x, to.x), Mathf.Min(fromBody.xMin, toBody.xMin)) - margin,
@@ -316,29 +391,506 @@ namespace DigitalLogicSandbox.Rendering
                 _areaObstacles.Add(body);
             }
 
-            _lanes.Clear();
-            _scratchWires.Clear();
-            _wireIndex.Query(area, _scratchWires);
-            for (int i = 0; i < _scratchWires.Count; i++)
+            if (lanes == LaneMode.None)
             {
-                PinRef other = _scratchWires[i];
+                _lanes.Clear();
+            }
+            else
+            {
+                GatherSegments(connection, area, _lanes, _scratchWires);
+            }
+
+            List<Vector4> soft = null;
+            if (lanes == LaneMode.OtherNetsAndDemand && _demand.Count > 0)
+            {
+                GatherDemand(connection, area);
+                soft = _softLanes;
+            }
+
+            return GridRouter.TryRoute(from, fromNormal, fromBody, to, toNormal, toBody, area, _areaObstacles, _lanes,
+                soft, path);
+        }
+
+        /// <summary>Which other wires a maze search sees.</summary>
+        private enum LaneMode
+        {
+            /// <summary>Other nets' wires are lanes to keep off (normal routing).</summary>
+            OtherNets,
+
+            /// <summary>No lanes: the route the wire would take if it were alone (its ideal route).</summary>
+            None,
+
+            /// <summary>Other nets' lanes plus soft lanes along other wires' ideal routes (route improvement).</summary>
+            OtherNetsAndDemand,
+        }
+
+        /// <summary>Collects into <see cref="_softLanes"/> the ideal routes of other sources' detoured wires.</summary>
+        private void GatherDemand(ConnectionDefinition connection, Rect area)
+        {
+            _softLanes.Clear();
+            foreach (KeyValuePair<PinRef, List<Vector3>> pair in _demand)
+            {
+                if (pair.Key == connection.Destination || !PathBounds(pair.Value).Overlaps(Inflate(area, QueryPadding)) ||
+                    !Circuit.TryGetConnectionTo(pair.Key, out ConnectionDefinition other) ||
+                    other.Source == connection.Source)
+                {
+                    continue;
+                }
+
+                List<Vector3> ideal = pair.Value;
+                for (int k = 0; k < ideal.Count - 1; k++)
+                {
+                    _softLanes.Add(new Vector4(ideal[k].x, ideal[k].y, ideal[k + 1].x, ideal[k + 1].y));
+                }
+            }
+        }
+
+        /// <summary>
+        /// Collects the segments (x0, y0, x1, y1) of every cached wire of <em>another</em> source whose bounds touch
+        /// <paramref name="area"/>. Fan-out wires of the same output are skipped: they may share a trunk.
+        /// </summary>
+        private void GatherSegments(ConnectionDefinition connection, Rect area, List<Vector4> segments,
+            List<PinRef> scratch)
+        {
+            segments.Clear();
+            scratch.Clear();
+            _wireIndex.Query(area, scratch);
+            for (int i = 0; i < scratch.Count; i++)
+            {
+                PinRef other = scratch[i];
                 if (other == connection.Destination || !_wires.TryGetValue(other, out List<Vector3> otherPath) ||
                     !Circuit.TryGetConnectionTo(other, out ConnectionDefinition otherConnection) ||
                     otherConnection.Source == connection.Source)
                 {
-                    continue; // fan-out wires of the same output may share their trunk
+                    continue;
                 }
 
                 for (int k = 0; k < otherPath.Count - 1; k++)
                 {
                     Vector3 p = otherPath[k];
                     Vector3 q = otherPath[k + 1];
-                    _lanes.Add(new Vector4(p.x, p.y, q.x, q.y));
+                    segments.Add(new Vector4(p.x, p.y, q.x, q.y));
                 }
             }
+        }
 
-            return GridRouter.TryRoute(from, fromNormal, fromBody, to, toNormal, toBody, area, _areaObstacles, _lanes,
-                path);
+        /// <summary>Number of wires <see cref="ImproveRoutes"/> tried to reroute (for tests and profiling).</summary>
+        public int ImprovementAttempts { get; private set; }
+
+        /// <summary>Number of wires <see cref="ImproveRoutes"/> gave a better route.</summary>
+        public int ImprovedRoutes { get; private set; }
+
+        /// <summary>
+        /// Rip-up and reroute. Wires are routed one at a time, each seeing only the wires routed before it, so a wire
+        /// routed early may share a lane with a later one, or keep a detour around a wire that has since moved away.
+        /// This pass reconsiders exactly those wires:
+        /// <list type="bullet">
+        /// <item>wires that were shaped by other nets (<see cref="GridRouter.LastLaneInfluenced"/>) near a route that
+        /// was dropped since the last call (room may have opened up);</item>
+        /// <item>wires overlapping a newly routed wire of another net, and that new wire itself;</item>
+        /// <item>wires lying on the <em>ideal</em> route (the route it would take alone) of a newly routed wire that
+        /// had to detour around them, and then that detoured wire.</item>
+        /// </list>
+        /// Each candidate is searched again with every other wire as a lane, plus soft lanes
+        /// (<see cref="GridRouter.SoftLaneCost"/>) along the ideal routes of detoured wires. The new route replaces the
+        /// current one when it lowers <see cref="GridRouter.PathCost"/> by more than <see cref="ImprovementEpsilon"/>,
+        /// or when it steps off a detoured wire's ideal route while giving up at most <see cref="YieldTolerance"/>.
+        /// Lane and crossing costs are shared by the two wires involved, so improvements lower the total cost of the
+        /// layout; yields are bounded by the per-wire limit. Accepted changes cascade to wires near the vacated route.
+        /// <paramref name="budget"/> caps the searches (ideal-route searches included); each wire is tried at most
+        /// <see cref="MaxImprovementsPerWire"/> times. Does nothing while <see cref="InteractiveRouting"/> is on.
+        /// </summary>
+        /// <param name="budget">Most wires searched again by this call.</param>
+        /// <param name="changed">Receives the wires whose cached route changed (their views need the new path).</param>
+        /// <returns>The number of improved wires.</returns>
+        public int ImproveRoutes(int budget, List<PinRef> changed)
+        {
+            if (_interactive)
+            {
+                return 0; // seeds are kept until the drag settles
+            }
+
+            _improveQueue.Clear();
+            _improveQueued.Clear();
+            _improveAttempts.Clear();
+            ReleaseDemand();
+            int attempts = 0;
+            int improved = 0;
+            if (Circuit != null && budget > 0)
+            {
+                for (int i = 0; i < _freedAreas.Count; i++)
+                {
+                    EnqueueSensitiveNear(_freedAreas[i], default, hasExclude: false);
+                }
+
+                _recentRoutes.Sort(PinRefComparer.Instance);
+                for (int i = 0; i < _recentRoutes.Count; i++)
+                {
+                    PinRef recent = _recentRoutes[i];
+                    EnqueueOverlapping(recent);
+                    if (attempts < budget && _laneSensitive.Contains(recent) && TryRecordDemand(recent))
+                    {
+                        attempts++; // the ideal-route search counts against the budget
+                    }
+                }
+
+                _improveQueue.Sort(PinRefComparer.Instance);
+            }
+
+            _freedAreas.Clear();
+            _recentRoutes.Clear();
+
+            for (int q = 0; q < _improveQueue.Count && attempts < budget; q++)
+            {
+                PinRef destination = _improveQueue[q];
+                _improveQueued.Remove(destination);
+                if (!_wires.TryGetValue(destination, out List<Vector3> current) || current.Count < 2 ||
+                    !Circuit.TryGetConnectionTo(destination, out ConnectionDefinition connection) ||
+                    !TryGetPin(connection.Source, out Vector2 from, out _) ||
+                    !TryGetPin(destination, out Vector2 to, out _))
+                {
+                    continue;
+                }
+
+                attempts++;
+                ImprovementAttempts++;
+                Rect fromBody = GetBounds(connection.Source.Node);
+                Rect toBody = GetBounds(destination.Node);
+                Vector2 fromNormal = GetPinNormal(connection.Source.Node, PortDirection.Output);
+                Vector2 toNormal = GetPinNormal(destination.Node, PortDirection.Input);
+                bool routed =
+                    TryMazeRoute(connection, from, fromNormal, fromBody, to, toNormal, toBody, RouteMargin,
+                        _candidatePath, LaneMode.OtherNetsAndDemand) ||
+                    TryMazeRoute(connection, from, fromNormal, fromBody, to, toNormal, toBody, WideRouteMargin,
+                        _candidatePath, LaneMode.OtherNetsAndDemand);
+                if (!routed)
+                {
+                    continue;
+                }
+
+                bool influenced = GridRouter.LastLaneInfluenced;
+
+                // _lanes / _softLanes hold the wires around the last search: compare both routes under the same lanes.
+                float currentCost = GridRouter.PathCost(current, _lanes);
+                float candidateCost = GridRouter.PathCost(_candidatePath, _lanes);
+                bool better = candidateCost < currentCost - ImprovementEpsilon;
+                if (!better)
+                {
+                    bool hasSoft = _demand.Count > 0 && _softLanes.Count > 0;
+                    bool yields = hasSoft && candidateCost <= currentCost + YieldTolerance &&
+                        GridRouter.SoftCost(_candidatePath, _softLanes) <
+                        GridRouter.SoftCost(current, _softLanes) - ImprovementEpsilon;
+                    if (!yields)
+                    {
+                        continue;
+                    }
+                }
+
+                // A wire that found a better route no longer needs others to make room for it.
+                RemoveDemand(destination);
+
+                Rect oldBounds = PathBounds(current);
+                current.Clear();
+                current.AddRange(_candidatePath);
+                Rect newBounds = PathBounds(current);
+                _wireIndex.Set(destination, newBounds);
+                SetLaneSensitive(destination, influenced);
+                MarkCrossingsAround(destination, oldBounds);
+                MarkCrossingsAround(destination, newBounds);
+                changed.Add(destination);
+                improved++;
+                ImprovedRoutes++;
+
+                // Cascade: the vacated route may let nearby wires straighten; wires the new route runs along may
+                // now prefer another lane.
+                EnqueueSensitiveNear(oldBounds, destination, hasExclude: true);
+                EnqueueOverlapping(destination);
+            }
+
+            _improveQueue.Clear();
+            _improveQueued.Clear();
+            ReleaseDemand();
+            return improved;
+        }
+
+        /// <summary>
+        /// If <paramref name="destination"/>'s route is worse than the route it would take alone (its ideal route),
+        /// records that ideal route as demand and queues the other nets' wires lying on it, then the wire itself.
+        /// </summary>
+        /// <returns>True when an ideal-route search was run.</returns>
+        private bool TryRecordDemand(PinRef destination)
+        {
+            if (!_wires.TryGetValue(destination, out List<Vector3> current) || current.Count < 2 ||
+                !Circuit.TryGetConnectionTo(destination, out ConnectionDefinition connection) ||
+                !TryGetPin(connection.Source, out Vector2 from, out _) ||
+                !TryGetPin(destination, out Vector2 to, out _))
+            {
+                return false;
+            }
+
+            Rect fromBody = GetBounds(connection.Source.Node);
+            Rect toBody = GetBounds(destination.Node);
+            Vector2 fromNormal = GetPinNormal(connection.Source.Node, PortDirection.Output);
+            Vector2 toNormal = GetPinNormal(destination.Node, PortDirection.Input);
+            List<Vector3> ideal = _pathPool.Count > 0 ? _pathPool.Pop() : new List<Vector3>(16);
+            bool routed = TryMazeRoute(connection, from, fromNormal, fromBody, to, toNormal, toBody, RouteMargin, ideal,
+                    LaneMode.None) ||
+                TryMazeRoute(connection, from, fromNormal, fromBody, to, toNormal, toBody, WideRouteMargin, ideal,
+                    LaneMode.None);
+            if (!routed || GridRouter.PathCost(ideal, NoLanes) >= GridRouter.PathCost(current, NoLanes) - ImprovementEpsilon)
+            {
+                ideal.Clear();
+                _pathPool.Push(ideal);
+                return true; // already as good as it gets alone: nothing to ask of other wires
+            }
+
+            bool found = false;
+            _scratchImprove.Clear();
+            _wireIndex.Query(Inflate(PathBounds(ideal), QueryPadding), _scratchImprove);
+            for (int i = 0; i < _scratchImprove.Count; i++)
+            {
+                PinRef other = _scratchImprove[i];
+                if (other == destination || !_wires.TryGetValue(other, out List<Vector3> otherPath) ||
+                    !Circuit.TryGetConnectionTo(other, out ConnectionDefinition otherConnection) ||
+                    otherConnection.Source == connection.Source ||
+                    GridRouter.OverlapLength(ideal, otherPath) < 0.01f)
+                {
+                    continue;
+                }
+
+                EnqueueImprovement(other);
+                found = true;
+            }
+
+            if (!found)
+            {
+                ideal.Clear();
+                _pathPool.Push(ideal);
+                return true; // detoured around gates, not wires
+            }
+
+            RemoveDemand(destination);
+            _demand[destination] = ideal;
+            EnqueueImprovement(destination);
+            return true;
+        }
+
+        private void RemoveDemand(PinRef destination)
+        {
+            if (_demand.TryGetValue(destination, out List<Vector3> ideal))
+            {
+                _demand.Remove(destination);
+                ideal.Clear();
+                _pathPool.Push(ideal);
+            }
+        }
+
+        private void ReleaseDemand()
+        {
+            foreach (List<Vector3> ideal in _demand.Values)
+            {
+                ideal.Clear();
+                _pathPool.Push(ideal);
+            }
+
+            _demand.Clear();
+        }
+
+        private void EnqueueImprovement(PinRef destination)
+        {
+            _improveAttempts.TryGetValue(destination, out int tried);
+            if (tried >= MaxImprovementsPerWire || !_improveQueued.Add(destination))
+            {
+                return;
+            }
+
+            _improveAttempts[destination] = tried + 1;
+            _improveQueue.Add(destination);
+        }
+
+        /// <summary>Queues the lane-sensitive wires whose bounds touch <paramref name="area"/>.</summary>
+        private void EnqueueSensitiveNear(Rect area, PinRef exclude, bool hasExclude)
+        {
+            if (_laneSensitive.Count == 0)
+            {
+                return;
+            }
+
+            _scratchImprove.Clear();
+            _wireIndex.Query(Inflate(area, WireRouter.Stub), _scratchImprove);
+            for (int i = 0; i < _scratchImprove.Count; i++)
+            {
+                PinRef wire = _scratchImprove[i];
+                if ((!hasExclude || wire != exclude) && _laneSensitive.Contains(wire))
+                {
+                    EnqueueImprovement(wire);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Queues every wire of another source that runs along <paramref name="destination"/>'s route, then the wire
+        /// itself, so the earlier-routed partner gets the first chance to move away.
+        /// </summary>
+        private void EnqueueOverlapping(PinRef destination)
+        {
+            if (!_wires.TryGetValue(destination, out List<Vector3> path) || path.Count < 2 ||
+                !Circuit.TryGetConnectionTo(destination, out ConnectionDefinition connection))
+            {
+                return;
+            }
+
+            bool found = false;
+            _scratchImprove.Clear();
+            _wireIndex.Query(Inflate(PathBounds(path), QueryPadding), _scratchImprove);
+            for (int i = 0; i < _scratchImprove.Count; i++)
+            {
+                PinRef other = _scratchImprove[i];
+                if (other == destination || !_wires.TryGetValue(other, out List<Vector3> otherPath) ||
+                    !Circuit.TryGetConnectionTo(other, out ConnectionDefinition otherConnection) ||
+                    otherConnection.Source == connection.Source ||
+                    GridRouter.OverlapLength(path, otherPath) < 0.01f)
+                {
+                    continue;
+                }
+
+                EnqueueImprovement(other);
+                found = true;
+            }
+
+            if (found)
+            {
+                EnqueueImprovement(destination);
+            }
+        }
+
+        private void SetLaneSensitive(PinRef destination, bool sensitive)
+        {
+            if (sensitive)
+            {
+                _laneSensitive.Add(destination);
+            }
+            else
+            {
+                _laneSensitive.Remove(destination);
+            }
+        }
+
+        /// <summary>
+        /// Points where <paramref name="destination"/>'s wire crosses another net's wire, on its own vertical segments
+        /// (see <see cref="WireCrossings"/>). Cached until this wire or a wire near it is rerouted; those wires are
+        /// queued for <see cref="DrainCrossingChanges"/>.
+        /// </summary>
+        public IReadOnlyList<Vector2> GetCrossings(PinRef destination)
+        {
+            if (_crossings.TryGetValue(destination, out List<Vector2> crossings))
+            {
+                return crossings;
+            }
+
+            if (Circuit == null || !Circuit.TryGetConnectionTo(destination, out ConnectionDefinition connection))
+            {
+                return NoCrossings;
+            }
+
+            GetWirePath(destination);
+            crossings = _crossingPool.Count > 0 ? _crossingPool.Pop() : new List<Vector2>(4);
+            crossings.Clear();
+            List<Vector3> path = _wires[destination];
+            if (path.Count >= 2)
+            {
+                GatherSegments(connection, Inflate(PathBounds(path), QueryPadding), _crossSegments,
+                    _scratchCrossWires);
+                WireCrossings.Find(path, _crossSegments, crossings);
+            }
+
+            _crossings[destination] = crossings;
+            return crossings;
+        }
+
+        /// <summary>
+        /// Wires whose crossings may have changed since the last call (appended to <paramref name="results"/>; the
+        /// queue is cleared). Wires that no longer exist may be included; callers skip unknown ones.
+        /// </summary>
+        public void DrainCrossingChanges(List<PinRef> results)
+        {
+            results.AddRange(_crossingDirtyOrder);
+            _crossingDirty.Clear();
+            _crossingDirtyOrder.Clear();
+        }
+
+        /// <summary>
+        /// Drops the cached crossings of <paramref name="destination"/> and of every wire whose bounds touch
+        /// <paramref name="bounds"/> (its old or new route), and queues them.
+        /// </summary>
+        private void MarkCrossingsAround(PinRef destination, Rect bounds)
+        {
+            DirtyCrossings(destination);
+            _scratchCrossWires.Clear();
+            _wireIndex.Query(Inflate(bounds, QueryPadding), _scratchCrossWires);
+            for (int i = 0; i < _scratchCrossWires.Count; i++)
+            {
+                if (_scratchCrossWires[i] != destination)
+                {
+                    DirtyCrossings(_scratchCrossWires[i]);
+                }
+            }
+        }
+
+        private void DirtyCrossings(PinRef destination)
+        {
+            if (_crossings.TryGetValue(destination, out List<Vector2> list))
+            {
+                _crossings.Remove(destination);
+                ReleaseCrossingList(list);
+            }
+
+            if (_crossingDirty.Add(destination))
+            {
+                _crossingDirtyOrder.Add(destination);
+            }
+        }
+
+        private void ReleaseCrossingList(List<Vector2> list)
+        {
+            list.Clear();
+            _crossingPool.Push(list);
+        }
+
+        /// <summary>
+        /// Forgets a wire's cached route: its old bounds are remembered as freed room for
+        /// <see cref="ImproveRoutes"/>, and the crossings around it are queued for an update.
+        /// </summary>
+        private void DropRoute(PinRef destination)
+        {
+            if (_wireIndex.TryGetRect(destination, out Rect old))
+            {
+                if (_interactive)
+                {
+                    _interactiveFreed = _hasInteractiveFreed ? Union(_interactiveFreed, old) : old;
+                    _hasInteractiveFreed = true;
+                }
+                else
+                {
+                    _freedAreas.Add(old);
+                }
+
+                MarkCrossingsAround(destination, old);
+            }
+            else
+            {
+                DirtyCrossings(destination);
+            }
+
+            _wires.Remove(destination);
+            _wireIndex.Remove(destination);
+            _laneSensitive.Remove(destination);
+        }
+
+        private static Rect Union(Rect a, Rect b)
+        {
+            return Rect.MinMaxRect(Mathf.Min(a.xMin, b.xMin), Mathf.Min(a.yMin, b.yMin), Mathf.Max(a.xMax, b.xMax),
+                Mathf.Max(a.yMax, b.yMax));
         }
 
         /// <summary>
@@ -461,8 +1013,7 @@ namespace DigitalLogicSandbox.Rendering
         private void InvalidateWire(PinRef destination)
         {
             _fastRouted.Remove(destination);
-            _wires.Remove(destination);
-            _wireIndex.Remove(destination);
+            DropRoute(destination);
             if (_invalidated.Add(destination))
             {
                 _invalidatedOrder.Add(destination);
@@ -631,8 +1182,7 @@ namespace DigitalLogicSandbox.Rendering
                 {
                     for (int i = 0; i < stale.Count; i++)
                     {
-                        _wires.Remove(stale[i]);
-                        _wireIndex.Remove(stale[i]);
+                        DropRoute(stale[i]);
                     }
                 }
             }

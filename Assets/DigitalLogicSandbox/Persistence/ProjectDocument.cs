@@ -48,6 +48,9 @@ namespace DigitalLogicSandbox.Persistence
         /// <summary>Signal visualization mode name ("Standard" or "HighContrast").</summary>
         public string VisualizationMode = "Standard";
 
+        /// <summary>How wire crossings are drawn ("Hop", "Gap" or "Plain"). Optional; missing means "Hop".</summary>
+        public string WireCrossings = "Hop";
+
         public TruthTableSettingsData TruthTable = new TruthTableSettingsData();
         public CameraSettingsData Camera = new CameraSettingsData();
         public SimulationSettingsData Simulation = new SimulationSettingsData();

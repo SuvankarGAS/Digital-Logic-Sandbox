@@ -213,6 +213,21 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             }
         }
 
+        /// <summary>How wires are drawn where they cross another net (hop, gap or plain).</summary>
+        public WireCrossingStyle WireCrossingStyle
+        {
+            get => _presenter != null ? _presenter.CrossingStyle : WireCrossingStyle.Hop;
+            set
+            {
+                if (_presenter != null && _presenter.CrossingStyle != value)
+                {
+                    _presenter.SetWireCrossingStyle(value);
+                    MarkStatusDirty();
+                    SettingsChanged?.Invoke();
+                }
+            }
+        }
+
         public CircuitGeometry Geometry => _geometry;
 
         public WorkspaceCamera WorkspaceCamera => _camera;

@@ -167,6 +167,8 @@ namespace DigitalLogicSandbox.Tests.PlayMode
             long loadMs = stopwatch.ElapsedMilliseconds;
             Assert.That(_workspace.Presenter.WireViewCount, Is.EqualTo(wireCount));
             int fallbacks = _workspace.Geometry.RouteFallbackCount;
+            int loadAttempts = _workspace.Geometry.ImprovementAttempts;
+            int loadImproved = _workspace.Geometry.ImprovedRoutes;
 
             // One drag frame: wires of the moved gate use the fast router.
             NodeId moved = gates[columns / 2, rows / 2];
@@ -181,10 +183,14 @@ namespace DigitalLogicSandbox.Tests.PlayMode
             _workspace.Presenter.SetInteractiveRouting(false);
             long settleMs = stopwatch.ElapsedMilliseconds;
             Assert.That(_workspace.Presenter.WireRerouteCount, Is.GreaterThan(0));
+            int settleAttempts = _workspace.Geometry.ImprovementAttempts - loadAttempts;
+            int settleImproved = _workspace.Geometry.ImprovedRoutes - loadImproved;
             yield return null;
 
             TestContext.WriteLine(columns * rows + " nodes / " + wireCount + " routed wires: load " + loadMs +
-                " ms (" + fallbacks + " fallbacks), drag frame " + dragMs + " ms, settle " + settleMs + " ms.");
+                " ms (" + fallbacks + " fallbacks; improvement " + loadImproved + "/" + loadAttempts +
+                "), drag frame " + dragMs + " ms, settle " + settleMs + " ms (improvement " + settleImproved + "/" +
+                settleAttempts + ").");
             Assert.That(fallbacks, Is.LessThan(wireCount / 20), "The maze router routes nearly every wire.");
             Assert.That(loadMs, Is.LessThan(10000));
             Assert.That(dragMs, Is.LessThan(100));

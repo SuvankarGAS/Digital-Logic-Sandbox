@@ -12,6 +12,7 @@ namespace DigitalLogicSandbox.Rendering.Wires
     /// endpoints are exact grid nodes even when a pin sits off the half-unit grid. Search states are (node, heading):
     /// a move costs its length, a bend costs <see cref="BendCost"/>, running along a lane another net already uses
     /// costs <see cref="LaneCost"/> extra per unit, and crossing another net costs a little. U-turns are not allowed.
+    /// <see cref="PathCost"/> evaluates the same terms on an existing route, so routes can be compared.
     /// The heuristic is the Manhattan distance, so the result is the cheapest route under that cost.
     /// </para>
     /// <para>
@@ -35,6 +36,18 @@ namespace DigitalLogicSandbox.Rendering.Wires
         /// <summary>Extra cost for crossing another net's wire.</summary>
         public const float CrossingCost = 0.3f;
 
+        /// <summary>
+        /// Extra cost per unit of length along a <em>soft</em> lane: where another wire would like to run (its ideal
+        /// route). Lower than <see cref="LaneCost"/>, so it only breaks ties between otherwise similar routes.
+        /// </summary>
+        public const float SoftLaneCost = 0.75f;
+
+        /// <summary>Parallel wires closer than this (world units) count as sharing a lane.</summary>
+        public const float LaneProximity = 0.3f;
+
+        private const byte EdgeLane = 1;
+        private const byte EdgeSoft = 2;
+
         private const float ReversalCost = 200f;
 
         /// <summary>Most grid lines per axis and grid nodes per search; larger areas fall back.</summary>
@@ -57,8 +70,8 @@ namespace DigitalLogicSandbox.Rendering.Wires
         private static int _ny;
 
         private static byte[] _flags = new byte[1024];
-        private static byte[] _laneRight = new byte[1024]; // edge node -> node + 1 used by another net
-        private static byte[] _laneUp = new byte[1024]; // edge node -> node + nx used by another net
+        private static byte[] _laneRight = new byte[1024]; // edge node -> node + 1: EdgeLane / EdgeSoft bits
+        private static byte[] _laneUp = new byte[1024]; // edge node -> node + nx: EdgeLane / EdgeSoft bits
         private static float[] _g = new float[4096];
         private static int[] _parent = new int[4096];
         private static int[] _seen = new int[4096];
@@ -73,6 +86,12 @@ namespace DigitalLogicSandbox.Rendering.Wires
 
         /// <summary>Number of states expanded by the last search (for tests and profiling).</summary>
         public static int LastExpansions { get; private set; }
+
+        /// <summary>
+        /// True when other nets' lanes or crossings added cost anywhere during the last search. When false, the route
+        /// would be the same with no other wires present, so it never needs improving when other wires move.
+        /// </summary>
+        public static bool LastLaneInfluenced { get; private set; }
 
         /// <summary>
         /// Routes a wire between two pins.
@@ -91,15 +110,29 @@ namespace DigitalLogicSandbox.Rendering.Wires
         public static bool TryRoute(Vector2 from, Vector2 fromNormal, Rect fromBody, Vector2 to, Vector2 toNormal,
             Rect toBody, Rect area, IReadOnlyList<Rect> obstacles, IReadOnlyList<Vector4> lanes, List<Vector3> points)
         {
+            return TryRoute(from, fromNormal, fromBody, to, toNormal, toBody, area, obstacles, lanes, null, points);
+        }
+
+        /// <summary>
+        /// As <see cref="TryRoute(Vector2, Vector2, Rect, Vector2, Vector2, Rect, Rect, IReadOnlyList{Rect}, IReadOnlyList{Vector4}, List{Vector3})"/>,
+        /// with optional <paramref name="softLanes"/>: segments other wires would like to use, which cost
+        /// <see cref="SoftLaneCost"/> per unit (they never set <see cref="LastLaneInfluenced"/>).
+        /// </summary>
+        public static bool TryRoute(Vector2 from, Vector2 fromNormal, Rect fromBody, Vector2 to, Vector2 toNormal,
+            Rect toBody, Rect area, IReadOnlyList<Rect> obstacles, IReadOnlyList<Vector4> lanes,
+            IReadOnlyList<Vector4> softLanes, List<Vector3> points)
+        {
             points.Clear();
             LastExpansions = 0;
+            LastLaneInfluenced = false;
             int fromDir = DirectionOf(fromNormal);
             int entryDir = DirectionOf(-toNormal);
 
-            // Straight wire: pins face each other on one line with nothing in between.
+            // Straight wire: pins face each other on one line with nothing in between (no gate, and no other net
+            // already running along that line; the search below decides whether overlapping it is still cheapest).
             if (fromDir == entryDir && IsAligned(from, to, fromNormal) &&
                 Vector2.Dot(to - from, fromNormal) >= 2f * WireRouter.Stub &&
-                !StraightBlocked(from, to, fromBody, toBody, obstacles))
+                !StraightBlocked(from, to, fromBody, toBody, obstacles) && !StraightOnLane(from, to, lanes))
             {
                 points.Add(from);
                 points.Add(to);
@@ -133,7 +166,15 @@ namespace DigitalLogicSandbox.Rendering.Wires
 
             for (int i = 0; i < lanes.Count; i++)
             {
-                MarkLane(lanes[i]);
+                MarkLane(lanes[i], EdgeLane);
+            }
+
+            if (softLanes != null)
+            {
+                for (int i = 0; i < softLanes.Count; i++)
+                {
+                    MarkLane(softLanes[i], EdgeSoft);
+                }
             }
 
             int start = IndexOf(a);
@@ -169,6 +210,130 @@ namespace DigitalLogicSandbox.Rendering.Wires
             points.Add(to);
             WireRouter.Simplify(points);
             return true;
+        }
+
+        /// <summary>
+        /// Cost of an existing orthogonal route under the same terms the search minimises: length, bends, length
+        /// running along another net's lane (<paramref name="lanes"/>) and crossings of other nets. Used to compare a
+        /// wire's current route with a freshly searched one. Allocation-free.
+        /// </summary>
+        public static float PathCost(IReadOnlyList<Vector3> path, IReadOnlyList<Vector4> lanes)
+        {
+            float cost = 0f;
+            int previousDirection = -1;
+            for (int i = 1; i < path.Count; i++)
+            {
+                Vector2 p = path[i - 1];
+                Vector2 q = path[i];
+                float length = Mathf.Abs(q.x - p.x) + Mathf.Abs(q.y - p.y);
+                if (length < 1e-5f)
+                {
+                    continue;
+                }
+
+                cost += length;
+                int direction = DirectionOf(q - p);
+                if (previousDirection >= 0 && direction != previousDirection)
+                {
+                    cost += BendCost;
+                }
+
+                previousDirection = direction;
+                for (int k = 0; k < lanes.Count; k++)
+                {
+                    Vector4 lane = lanes[k];
+                    float overlap = SegmentOverlap(p, q, new Vector2(lane.x, lane.y), new Vector2(lane.z, lane.w));
+                    if (overlap > 0f)
+                    {
+                        cost += overlap * LaneCost;
+                    }
+                    else if (SegmentsCross(p, q, new Vector2(lane.x, lane.y), new Vector2(lane.z, lane.w)))
+                    {
+                        cost += CrossingCost;
+                    }
+                }
+            }
+
+            return cost;
+        }
+
+        /// <summary>Cost of an existing route along <paramref name="softLanes"/> (see <see cref="SoftLaneCost"/>).</summary>
+        public static float SoftCost(IReadOnlyList<Vector3> path, IReadOnlyList<Vector4> softLanes)
+        {
+            float overlap = 0f;
+            for (int i = 1; i < path.Count; i++)
+            {
+                for (int k = 0; k < softLanes.Count; k++)
+                {
+                    Vector4 lane = softLanes[k];
+                    overlap += SegmentOverlap(path[i - 1], path[i], new Vector2(lane.x, lane.y),
+                        new Vector2(lane.z, lane.w));
+                }
+            }
+
+            return overlap * SoftLaneCost;
+        }
+
+        /// <summary>Total length over which two orthogonal polylines run along the same line (allocation-free).</summary>
+        public static float OverlapLength(IReadOnlyList<Vector3> a, IReadOnlyList<Vector3> b)
+        {
+            float total = 0f;
+            for (int i = 1; i < a.Count; i++)
+            {
+                for (int j = 1; j < b.Count; j++)
+                {
+                    total += SegmentOverlap(a[i - 1], a[i], b[j - 1], b[j]);
+                }
+            }
+
+            return total;
+        }
+
+        /// <summary>
+        /// Length shared by two parallel axis-aligned segments on the same line, or on lines closer than
+        /// <see cref="LaneProximity"/> (0 otherwise).
+        /// </summary>
+        private static float SegmentOverlap(Vector2 p, Vector2 q, Vector2 r, Vector2 s)
+        {
+            const float epsilon = 0.02f;
+            bool pqHorizontal = Mathf.Abs(q.y - p.y) < epsilon;
+            bool rsHorizontal = Mathf.Abs(s.y - r.y) < epsilon;
+            bool pqVertical = Mathf.Abs(q.x - p.x) < epsilon;
+            bool rsVertical = Mathf.Abs(s.x - r.x) < epsilon;
+            if (pqHorizontal && rsHorizontal && !pqVertical && !rsVertical && Mathf.Abs(p.y - r.y) <= LaneProximity)
+            {
+                float lo = Mathf.Max(Mathf.Min(p.x, q.x), Mathf.Min(r.x, s.x));
+                float hi = Mathf.Min(Mathf.Max(p.x, q.x), Mathf.Max(r.x, s.x));
+                return Mathf.Max(hi - lo, 0f);
+            }
+
+            if (pqVertical && rsVertical && !pqHorizontal && !rsHorizontal && Mathf.Abs(p.x - r.x) <= LaneProximity)
+            {
+                float lo = Mathf.Max(Mathf.Min(p.y, q.y), Mathf.Min(r.y, s.y));
+                float hi = Mathf.Min(Mathf.Max(p.y, q.y), Mathf.Max(r.y, s.y));
+                return Mathf.Max(hi - lo, 0f);
+            }
+
+            return 0f;
+        }
+
+        /// <summary>True when a horizontal and a vertical segment intersect (endpoints included).</summary>
+        private static bool SegmentsCross(Vector2 p, Vector2 q, Vector2 r, Vector2 s)
+        {
+            const float epsilon = 0.02f;
+            bool pqHorizontal = Mathf.Abs(q.y - p.y) < epsilon;
+            bool rsHorizontal = Mathf.Abs(s.y - r.y) < epsilon;
+            if (pqHorizontal == rsHorizontal)
+            {
+                return false;
+            }
+
+            Vector2 h0 = pqHorizontal ? p : r;
+            Vector2 h1 = pqHorizontal ? q : s;
+            Vector2 v0 = pqHorizontal ? r : p;
+            Vector2 v1 = pqHorizontal ? s : q;
+            return v0.x >= Mathf.Min(h0.x, h1.x) - epsilon && v0.x <= Mathf.Max(h0.x, h1.x) + epsilon &&
+                h0.y >= Mathf.Min(v0.y, v1.y) - epsilon && h0.y <= Mathf.Max(v0.y, v1.y) + epsilon;
         }
 
         private static int Search(int start, int goal, int fromDir, int entryDir, Vector2 goalPoint)
@@ -236,13 +401,21 @@ namespace DigitalLogicSandbox.Rendering.Wires
                         cost += BendCost;
                     }
 
-                    if (horizontal ? _laneRight[Mathf.Min(node, next)] != 0 : _laneUp[Mathf.Min(node, next)] != 0)
+                    byte edge = horizontal ? _laneRight[Mathf.Min(node, next)] : _laneUp[Mathf.Min(node, next)];
+                    if ((edge & EdgeSoft) != 0)
+                    {
+                        cost += length * SoftLaneCost;
+                    }
+
+                    if ((edge & EdgeLane) != 0)
                     {
                         cost += length * LaneCost;
+                        LastLaneInfluenced = true;
                     }
                     else if ((_flags[next] & (horizontal ? FlagLaneV : FlagLaneH)) != 0)
                     {
                         cost += CrossingCost;
+                        LastLaneInfluenced = true;
                     }
 
                     if (next == goal && dir != entryDir)
@@ -345,7 +518,12 @@ namespace DigitalLogicSandbox.Rendering.Wires
             }
         }
 
-        private static void MarkLane(Vector4 segment)
+        /// <summary>
+        /// Marks the grid lines a segment of another wire occupies. A lane also claims every parallel grid line closer
+        /// than <see cref="LaneProximity"/>: grid lines are <see cref="Step"/> apart, so only an off-grid line (through a
+        /// stub end) can be that close, and two wires that near look like one.
+        /// </summary>
+        private static void MarkLane(Vector4 segment, byte bit)
         {
             const float epsilon = 0.02f;
             float x0 = Mathf.Min(segment.x, segment.z);
@@ -354,39 +532,43 @@ namespace DigitalLogicSandbox.Rendering.Wires
             float y1 = Mathf.Max(segment.y, segment.w);
             if (y1 - y0 < epsilon)
             {
-                int iy = FindLine(_ys, _ny, y0);
-                if (iy < 0)
-                {
-                    return;
-                }
-
+                FindRange(_ys, _ny, y0 - LaneProximity, y0 + LaneProximity, out int r0, out int r1, inclusive: true);
                 FindRange(_xs, _nx, x0 - epsilon, x1 + epsilon, out int a, out int b, inclusive: true);
-                for (int ix = a; ix <= b; ix++)
+                for (int iy = r0; iy <= r1; iy++)
                 {
-                    int node = iy * _nx + ix;
-                    _flags[node] |= FlagLaneH;
-                    if (ix < b)
+                    for (int ix = a; ix <= b; ix++)
                     {
-                        _laneRight[node] = 1;
+                        int node = iy * _nx + ix;
+                        if (bit == EdgeLane)
+                        {
+                            _flags[node] |= FlagLaneH;
+                        }
+
+                        if (ix < b)
+                        {
+                            _laneRight[node] |= bit;
+                        }
                     }
                 }
             }
             else if (x1 - x0 < epsilon)
             {
-                int ix = FindLine(_xs, _nx, x0);
-                if (ix < 0)
-                {
-                    return;
-                }
-
+                FindRange(_xs, _nx, x0 - LaneProximity, x0 + LaneProximity, out int c0, out int c1, inclusive: true);
                 FindRange(_ys, _ny, y0 - epsilon, y1 + epsilon, out int a, out int b, inclusive: true);
-                for (int iy = a; iy <= b; iy++)
+                for (int ix = c0; ix <= c1; ix++)
                 {
-                    int node = iy * _nx + ix;
-                    _flags[node] |= FlagLaneV;
-                    if (iy < b)
+                    for (int iy = a; iy <= b; iy++)
                     {
-                        _laneUp[node] = 1;
+                        int node = iy * _nx + ix;
+                        if (bit == EdgeLane)
+                        {
+                            _flags[node] |= FlagLaneV;
+                        }
+
+                        if (iy < b)
+                        {
+                            _laneUp[node] |= bit;
+                        }
                     }
                 }
             }
@@ -463,6 +645,20 @@ namespace DigitalLogicSandbox.Rendering.Wires
                 if (WireRouter.SegmentCrossesRect(from, to, Rect.MinMaxRect(body.xMin - WireRouter.BodyMargin,
                         body.yMin - WireRouter.BodyMargin, body.xMax + WireRouter.BodyMargin,
                         body.yMax + WireRouter.BodyMargin)))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool StraightOnLane(Vector2 from, Vector2 to, IReadOnlyList<Vector4> lanes)
+        {
+            for (int i = 0; i < lanes.Count; i++)
+            {
+                Vector4 lane = lanes[i];
+                if (SegmentOverlap(from, to, new Vector2(lane.x, lane.y), new Vector2(lane.z, lane.w)) > 0.01f)
                 {
                     return true;
                 }

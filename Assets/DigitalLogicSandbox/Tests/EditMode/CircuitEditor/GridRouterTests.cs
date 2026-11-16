@@ -93,6 +93,27 @@ namespace DigitalLogicSandbox.Tests.EditMode.CircuitEditor
         }
 
         [Test]
+        public void KeepsOffLanesThatAreTooCloseToShare()
+        {
+            // Another net runs along y = 0.25 (an off-grid stub line). Running on y = 0 or y = 0.5 next to it would
+            // look like one wire, so the route must stay at least LaneProximity away for most of the span.
+            var lanes = new List<Vector4> { new Vector4(1f, 0.25f, 9f, 0.25f) };
+            var points = new List<Vector3>();
+            bool routed = GridRouter.TryRoute(new Vector2(0f, 0f), Vector2.right, default, new Vector2(10f, 0f),
+                Vector2.left, default, Area(-3f, -4f, 13f, 4f), NoRects, lanes, points);
+
+            Assert.That(routed, Is.True);
+            Assert.That(points.Count, Is.GreaterThan(2), "The straight run is too close to the other net.");
+            for (int i = 0; i < points.Count - 1; i++)
+            {
+                bool horizontal = Mathf.Abs(points[i].y - points[i + 1].y) < 1e-4f;
+                float length = Mathf.Abs(points[i + 1].x - points[i].x);
+                Assert.That(horizontal && Mathf.Abs(points[i].y - 0.25f) <= GridRouter.LaneProximity && length > 1.5f,
+                    Is.False, $"Segment {i} ({points[i]} -> {points[i + 1]}) runs right next to the other net.");
+            }
+        }
+
+        [Test]
         public void SameInputGivesSameRoute()
         {
             var obstacles = new List<Rect> { new Rect(4f, -2f, 2f, 4f) };
@@ -141,6 +162,83 @@ namespace DigitalLogicSandbox.Tests.EditMode.CircuitEditor
             }
 
             Assert.That(System.GC.GetAllocatedBytesForCurrentThread() - before, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void LaneInfluence_IsReportedOnlyWhenOtherNetsAddCost()
+        {
+            var points = new List<Vector3>();
+            GridRouter.TryRoute(new Vector2(0f, 0f), Vector2.right, default, new Vector2(10f, 1f), Vector2.left,
+                default, Area(-3f, -4f, 13f, 4f), NoRects, NoLanes, points);
+            Assert.That(GridRouter.LastLaneInfluenced, Is.False, "No other wires: nothing influenced the route.");
+
+            var lanes = new List<Vector4> { new Vector4(1f, 0f, 9f, 0f) };
+            GridRouter.TryRoute(new Vector2(0f, 0f), Vector2.right, default, new Vector2(10f, 1f), Vector2.left,
+                default, Area(-3f, -4f, 13f, 4f), NoRects, lanes, points);
+            Assert.That(GridRouter.LastLaneInfluenced, Is.True);
+        }
+
+        [Test]
+        public void PathCost_CountsLengthBendsLanesAndCrossings()
+        {
+            var path = new List<Vector3> { new Vector3(0f, 0f), new Vector3(4f, 0f), new Vector3(4f, 3f) };
+            Assert.That(GridRouter.PathCost(path, NoLanes), Is.EqualTo(7f + GridRouter.BendCost).Within(1e-4f));
+
+            var lanes = new List<Vector4>
+            {
+                new Vector4(1f, 0f, 3f, 0f), // runs along 2 units of the first segment
+                new Vector4(2f, 1f, 6f, 1f), // crosses the second segment
+            };
+            float expected = 7f + GridRouter.BendCost + 2f * GridRouter.LaneCost + GridRouter.CrossingCost;
+            Assert.That(GridRouter.PathCost(path, lanes), Is.EqualTo(expected).Within(1e-4f));
+        }
+
+        [Test]
+        public void PathCost_PrefersTheSearchedRoute()
+        {
+            // The searched route is never worse than a straight run along another net's lane.
+            var lanes = new List<Vector4> { new Vector4(1f, 0f, 9f, 0f) };
+            var points = new List<Vector3>();
+            GridRouter.TryRoute(new Vector2(0f, 0f), Vector2.right, default, new Vector2(10f, 0f), Vector2.left,
+                default, Area(-3f, -4f, 13f, 4f), NoRects, lanes, points);
+            var straight = new List<Vector3> { new Vector3(0f, 0f), new Vector3(10f, 0f) };
+
+            Assert.That(GridRouter.PathCost(points, lanes), Is.LessThan(GridRouter.PathCost(straight, lanes)));
+        }
+
+        [Test]
+        public void SoftLanes_BreakTiesWithoutSettingLaneInfluence()
+        {
+            // From (0, 0) to (10, 4): every column for the vertical jog costs the same. A soft lane on the early
+            // columns' path pushes the jog elsewhere.
+            var soft = new List<Vector4> { new Vector4(0.5f, 0f, 9.5f, 0f) };
+            var points = new List<Vector3>();
+            bool routed = GridRouter.TryRoute(new Vector2(0f, 0f), Vector2.right, default, new Vector2(10f, 4f),
+                Vector2.left, default, Area(-3f, -4f, 13f, 8f), NoRects, NoLanes, soft, points);
+
+            Assert.That(routed, Is.True);
+            Assert.That(GridRouter.LastLaneInfluenced, Is.False);
+            Assert.That(GridRouter.SoftCost(points, soft), Is.LessThan(1f), "Leaves the soft lane almost at once.");
+        }
+
+        [Test]
+        public void PathCost_AllocatesNothing()
+        {
+            var path = new List<Vector3> { new Vector3(0f, 0f), new Vector3(4f, 0f), new Vector3(4f, 3f) };
+            var lanes = new List<Vector4> { new Vector4(1f, 0f, 3f, 0f), new Vector4(2f, 1f, 6f, 1f) };
+            GridRouter.PathCost(path, lanes);
+            GridRouter.OverlapLength(path, path);
+
+            long before = System.GC.GetAllocatedBytesForCurrentThread();
+            float sum = 0f;
+            for (int i = 0; i < 200; i++)
+            {
+                sum += GridRouter.PathCost(path, lanes) + GridRouter.OverlapLength(path, path) +
+                    GridRouter.SoftCost(path, lanes);
+            }
+
+            Assert.That(System.GC.GetAllocatedBytesForCurrentThread() - before, Is.EqualTo(0));
+            Assert.That(sum, Is.GreaterThan(0f));
         }
 
         [Test]

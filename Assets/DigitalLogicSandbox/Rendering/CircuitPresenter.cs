@@ -35,12 +35,18 @@ namespace DigitalLogicSandbox.Rendering
         private readonly HashSet<NodeId> _selectedNodes = new HashSet<NodeId>();
         private readonly List<PinRef> _highlightedPins = new List<PinRef>();
         private readonly List<PinRef> _scratchReroutes = new List<PinRef>();
+        private readonly List<PinRef> _scratchCrossings = new List<PinRef>();
         private readonly HashSet<PinRef> _junctionSources = new HashSet<PinRef>();
         private readonly List<ConnectionDefinition> _scratchSiblings = new List<ConnectionDefinition>();
 
         /// <summary>A shared trunk shorter than this (world units) gets no junction dot (the pin marks it).</summary>
         private const float MinJunctionTrunk = 0.2f;
+
+        /// <summary>Most wires searched again by the route improvement pass after one model change.</summary>
+        public const int MaxImprovementsPerChange = 64;
+
         private readonly SignalStyle _style;
+        private WireCrossingStyle _crossingStyle = WireCrossingStyle.Hop;
 
         private CircuitDefinition _circuit;
         private SimulationContext _context;
@@ -77,6 +83,9 @@ namespace DigitalLogicSandbox.Rendering
 
         public SignalVisualizationMode VisualizationMode => _style.Mode;
 
+        /// <summary>How wires are drawn where they cross another net without connecting.</summary>
+        public WireCrossingStyle CrossingStyle => _crossingStyle;
+
         public Transform Root => _wireRoot.parent;
 
         public CircuitDefinition Circuit => _circuit;
@@ -91,6 +100,12 @@ namespace DigitalLogicSandbox.Rendering
         /// </summary>
         public int WireRerouteCount { get; private set; }
 
+        /// <summary>
+        /// Diagnostics: wire views given a better route by the improvement pass (rip-up and reroute; since the last
+        /// reset). Counted apart from <see cref="WireRerouteCount"/>.
+        /// </summary>
+        public int WireImprovementCount { get; private set; }
+
         /// <summary>Diagnostics: nets whose value was pushed to views (since the last reset).</summary>
         public int NetSignalUpdateCount { get; private set; }
 
@@ -98,6 +113,7 @@ namespace DigitalLogicSandbox.Rendering
         public void ResetDiagnostics()
         {
             WireRerouteCount = 0;
+            WireImprovementCount = 0;
             NetSignalUpdateCount = 0;
         }
 
@@ -150,6 +166,8 @@ namespace DigitalLogicSandbox.Rendering
 
             _scratchReroutes.Clear();
             _geometry.DrainInvalidatedWires(_scratchReroutes); // nothing to reroute on a fresh bind
+            ImproveRoutes(Mathf.Max(MaxImprovementsPerChange, connections.Count / 4));
+            UpdateCrossings();
             UpdateJunctions();
         }
 
@@ -213,6 +231,8 @@ namespace DigitalLogicSandbox.Rendering
             }
 
             RerouteInvalidatedWires();
+            ImproveRoutes(MaxImprovementsPerChange);
+            UpdateCrossings();
             UpdateJunctions();
         }
 
@@ -252,7 +272,85 @@ namespace DigitalLogicSandbox.Rendering
             if (!interactive && _circuit != null)
             {
                 RerouteInvalidatedWires();
+                ImproveRoutes(MaxImprovementsPerChange);
+                UpdateCrossings();
                 UpdateJunctions();
+            }
+        }
+
+        /// <summary>Switches how wire crossings are drawn (all wires update at once).</summary>
+        public void SetWireCrossingStyle(WireCrossingStyle style)
+        {
+            if (_crossingStyle == style)
+            {
+                return;
+            }
+
+            _crossingStyle = style;
+            if (_geometry.InteractiveRouting)
+            {
+                return; // applied when the drag settles
+            }
+
+            foreach (KeyValuePair<PinRef, WireView> pair in _wires)
+            {
+                pair.Value.SetCrossings(_geometry.GetCrossings(pair.Key), style);
+            }
+        }
+
+        /// <summary>
+        /// Rip-up and reroute: gives better routes to the wires that could improve after the last change (see
+        /// <see cref="CircuitGeometry.ImproveRoutes"/>) and updates their views.
+        /// </summary>
+        private void ImproveRoutes(int budget)
+        {
+            _scratchReroutes.Clear();
+            _geometry.ImproveRoutes(budget, _scratchReroutes);
+            for (int i = 0; i < _scratchReroutes.Count; i++)
+            {
+                PinRef destination = _scratchReroutes[i];
+                if (_wires.TryGetValue(destination, out WireView view))
+                {
+                    view.ClearCrossings(); // set again by UpdateCrossings
+                    view.SetPath(_geometry.GetWirePath(destination));
+                    WireImprovementCount++;
+                    if (_circuit.TryGetConnectionTo(destination, out ConnectionDefinition connection))
+                    {
+                        _junctionSources.Add(connection.Source);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Pushes crossing points to the wire views whose crossings may have changed. Skipped while gates are being
+        /// dragged: crossings are drawn again when the drag settles.
+        /// </summary>
+        private void UpdateCrossings()
+        {
+            if (_geometry.InteractiveRouting || _circuit == null)
+            {
+                return;
+            }
+
+            // Computing a crossing can route a wire that was not routed yet, queuing more; two rounds settle it.
+            for (int round = 0; round < 2; round++)
+            {
+                _scratchCrossings.Clear();
+                _geometry.DrainCrossingChanges(_scratchCrossings);
+                if (_scratchCrossings.Count == 0)
+                {
+                    return;
+                }
+
+                for (int i = 0; i < _scratchCrossings.Count; i++)
+                {
+                    PinRef destination = _scratchCrossings[i];
+                    if (_wires.TryGetValue(destination, out WireView view))
+                    {
+                        view.SetCrossings(_geometry.GetCrossings(destination), _crossingStyle);
+                    }
+                }
             }
         }
 
@@ -269,6 +367,7 @@ namespace DigitalLogicSandbox.Rendering
                 PinRef destination = _scratchReroutes[i];
                 if (_wires.TryGetValue(destination, out WireView view))
                 {
+                    view.ClearCrossings(); // set again by UpdateCrossings (or after the drag settles)
                     view.SetPath(_geometry.GetWirePath(destination));
                     WireRerouteCount++;
                     if (_circuit.TryGetConnectionTo(destination, out ConnectionDefinition connection))

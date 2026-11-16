@@ -521,6 +521,11 @@ UI panels (toolbar, library) --> WorkspaceController --> CommandHistory --> Circ
       12 units.
     - Search states are (node, heading). The cost is length, plus 1 per bend, plus 4 per unit when running in
       a lane another net already uses, plus 0.3 per crossing. U-turns are not allowed.
+    - A lane also claims every parallel line closer than `GridRouter.LaneProximity` (0.3). Grid lines are
+      0.5 apart, so this only affects off-grid stub lines, where two wires would otherwise look like one.
+    - The straight-wire shortcut is taken only when nothing (no gate and no other net's lane) lies on the
+      line. Otherwise the search decides.
+    - `GridRouter.PathCost` evaluates the same terms on an existing route, so two routes can be compared.
     - Obstacles: every gate body in the area, inflated by `BodyMargin`.
     - Lanes: the cached routes of other sources' wires in the area (from the wire index). Fan-out wires of
       the same output may share their trunk.
@@ -528,7 +533,41 @@ UI panels (toolbar, library) --> WorkspaceController --> CommandHistory --> Circ
       routing allocates nothing after warm-up.
     - Limits: at most 400 lines per axis, 60,000 nodes and 40,000 expansions. Beyond them it falls back to
       `WireRouter` (counted in `CircuitGeometry.RouteFallbackCount`).
-    - Order matters, since earlier routes become lanes for later ones. Reroutes run in a fixed order.
+    - Order matters, since earlier routes become lanes for later ones. Reroutes run in a fixed order, and the
+      improvement pass below removes most of the order dependence.
+  - **Rip-up and reroute** (`CircuitGeometry.ImproveRoutes`). After every change the presenter has applied
+    (and after `Bind` and drag settle), a bounded pass reconsiders the wires that could do better:
+    - *Freed room.* Wires whose last search was shaped by other nets (`GridRouter.LastLaneInfluenced`) and
+      that lie near a route dropped since the last pass.
+    - *Overlaps.* Other nets' wires that run along a newly routed wire, followed by that wire.
+    - *Regret.* A newly routed, lane-influenced wire is searched once more with no lanes. If that ideal
+      route is cheaper, it is recorded as *demand*, and the wires lying on it are queued, then the wire itself.
+      Those wires are searched again with soft lanes along the demand (`SoftLaneCost` 0.75 per unit). This
+      lets an earlier wire step off a lane it chose only by tie-breaking.
+    - Acceptance: a new route replaces the old one when `PathCost` (under the same lanes) drops by more than
+      0.05, or when it steps off a demand route while giving up at most two crossings' worth of cost.
+      Overlap and crossing costs are shared by the two wires involved, so improvements lower the layout's
+      total cost. Each wire is tried at most twice per pass, and a budget caps the searches (64 per change,
+      or `max(64, wires / 4)` on `Bind`). Together these guarantee termination.
+    - Accepted routes cascade: wires near the vacated route are offered the room. Nothing runs while
+      dragging. Seeds collected during a drag (as one union rectangle) are used on settle.
+    - `CircuitPresenter.WireImprovementCount` counts improved views separately from `WireRerouteCount`.
+  - **Crossings.** `WireCrossings.Find` lists the points where a wire's *vertical* segments strictly cross
+    another net's horizontal segments. Points closer than 0.3 to a bend, pin or T-touch are skipped, and so
+    are fan-out wires of the same source. Only the vertical wire is decorated, so the horizontal one stays
+    straight.
+    - `CircuitGeometry.GetCrossings` caches them per wire. Any route change queues that wire and every wire
+      near its old and new bounds (`DrainCrossingChanges`). The presenter pushes them to the views after
+      reroutes and improvements, but not during a drag.
+    - `WireView.SetCrossings(points, style)` draws `WireCrossingStyle.Hop`, `Gap` or `Plain`:
+      - Hop: an 8-segment semicircle of radius 0.18 (x1.3 on buses) bulging towards +x. It is inserted into
+        the drawn polyline, so the travelling front and particles follow the arc.
+      - Gap: the crossed segment's quad is split around the crossing (+/-0.2). The pieces keep the full
+        segment's path distances, so a transition jumps the gap.
+      - Plain: the wire is drawn unchanged.
+    - Routing, hit-testing and junction dots always use the plain geometry path.
+    - The style is a project setting (`settings.wireCrossings`, optional, default `"Hop"`; no schema bump),
+      chosen in the Signal Settings popover.
   - **Interactive routing.** While gates are dragged, `WorkspaceInteraction` sets
     `CircuitPresenter.SetInteractiveRouting(true)`. Wires invalidated during the drag use the candidate
     router and are remembered. When the drag ends or is cancelled, those wires are invalidated again and

@@ -11,8 +11,8 @@ namespace DigitalLogicSandbox.UI.Panels
 {
     /// <summary>
     /// Small popup (toolbar "Signals") with the signal visualization controls: animation on/off, speed,
-    /// travelling particles, high-contrast style and "reset visual state". Changes apply immediately and never
-    /// affect simulation results.
+    /// travelling particles, high-contrast style, how wire crossings are drawn and "reset visual state". Changes apply
+    /// immediately and never affect simulation results.
     /// </summary>
     public sealed class SignalSettingsPanel : MonoBehaviour
     {
@@ -26,6 +26,7 @@ namespace DigitalLogicSandbox.UI.Panels
         private TextMeshProUGUI _speedLabel;
         private Button _slower;
         private Button _faster;
+        private readonly Button[] _crossingButtons = new Button[3];
 
         public bool IsOpen => gameObject.activeSelf;
 
@@ -39,6 +40,9 @@ namespace DigitalLogicSandbox.UI.Panels
 
         public Button FasterButton => _faster;
 
+        /// <summary>The crossing style button for <paramref name="style"/> (Hop, Gap, Plain).</summary>
+        public Button CrossingButton(WireCrossingStyle style) => _crossingButtons[(int)style];
+
         public string SpeedText => _speedLabel.text;
 
         public static SignalSettingsPanel Create(Transform parent, UiFactory ui, WorkspaceController workspace)
@@ -47,7 +51,7 @@ namespace DigitalLogicSandbox.UI.Panels
             RectTransform rect = window.rectTransform;
             rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 1f);
             rect.pivot = new Vector2(0.5f, 1f);
-            rect.sizeDelta = new Vector2(280f, 250f);
+            rect.sizeDelta = new Vector2(280f, 316f);
             rect.anchoredPosition = new Vector2(0f, -UiFactory.TopInset + 4f);
 
             var panel = window.gameObject.AddComponent<SignalSettingsPanel>();
@@ -73,6 +77,24 @@ namespace DigitalLogicSandbox.UI.Panels
             panel._highContrast = ui.Toggle("Contrast", column, "High-contrast signals",
                 workspace.VisualizationMode == SignalVisualizationMode.HighContrast,
                 value => workspace.VisualizationMode = value ? SignalVisualizationMode.HighContrast : SignalVisualizationMode.Standard);
+            ui.Caption(column, "Wire crossings");
+            RectTransform crossingRow = UiFactory.CreateRect("Crossings", column);
+            UiFactory.Row(crossingRow, 6f, new RectOffset(0, 0, 0, 0));
+            crossingRow.gameObject.AddComponent<LayoutElement>().preferredHeight = 32f;
+            for (int i = 0; i < panel._crossingButtons.Length; i++)
+            {
+                var style = (WireCrossingStyle)i;
+                panel._crossingButtons[i] = ui.Button("Crossing " + style, crossingRow, style.ToString(),
+                    () =>
+                    {
+                        workspace.WireCrossingStyle = style;
+                        panel.Refresh();
+                    }, 78f, 12.5f);
+            }
+
+            ui.AddTooltip(panel._crossingButtons[(int)WireCrossingStyle.Hop].gameObject, "Hop over other wires");
+            ui.AddTooltip(panel._crossingButtons[(int)WireCrossingStyle.Gap].gameObject, "Break the wire at crossings");
+            ui.AddTooltip(panel._crossingButtons[(int)WireCrossingStyle.Plain].gameObject, "Wires simply cross");
             ui.Separator(column, vertical: false);
             ui.Button("Reset", column, "Reset visual state", workspace.ResetVisualState);
 
@@ -135,6 +157,22 @@ namespace DigitalLogicSandbox.UI.Panels
             _slower.interactable = _settings.Speed > SignalAnimationSettings.MinSpeed;
             _faster.interactable = _settings.Speed < SignalAnimationSettings.MaxSpeed;
             _particles.interactable = _settings.Enabled;
+            for (int i = 0; i < _crossingButtons.Length; i++)
+            {
+                // The current style has an accent label, and (not colour alone) a bold one.
+                bool current = (int)_workspace.WireCrossingStyle == i;
+                ButtonVisual visual = _crossingButtons[i].GetComponent<ButtonVisual>();
+                if (visual != null)
+                {
+                    visual.Active = current;
+                }
+
+                TextMeshProUGUI label = _crossingButtons[i].GetComponentInChildren<TextMeshProUGUI>();
+                if (label != null)
+                {
+                    label.fontStyle = current ? FontStyles.Bold : FontStyles.Normal;
+                }
+            }
         }
 
         private void Update()
