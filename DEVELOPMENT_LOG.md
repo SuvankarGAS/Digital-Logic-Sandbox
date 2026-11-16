@@ -1270,3 +1270,29 @@ gates.
 ### Known issues / deferred
 - Project files saved by this version (schema 5) cannot be opened by older builds. The newer-version error
   message explains this.
+
+## Fix: button colour flicker on input toggle / drag-select (2026-11-16)
+
+### Cause
+- Toggling an input (a history change) and drag-selecting (selection changes on most frames) both rebuild
+  the inspector card, so every button in it is destroyed and created again.
+- A new `Button` takes Unity's default white tint in `OnEnable`. Assigning our `ColorBlock` afterwards then
+  starts a 0.08 s cross-fade from white to the real colour.
+- Buttons that are set `interactable = false` after creation also faded from bright to dim.
+- Repeated rebuilds during a drag-select turned this into a continuous flicker.
+
+### Fix
+- `UiFactory.SetColorsInstant` assigns a colour block with a zero fade first, so the tint jumps straight to
+  its target, and then restores the fade. It is used for every button built by `UiFactory` and for the
+  per-site overrides: LED swatches, breadcrumbs, context-menu rows, the file menu, and the first state of
+  `ButtonVisual`.
+- `UiFactory.SnapTransitions(root)` snaps every selectable under a root to its current state. It runs at the
+  end of `InspectorPanel.Rebuild`.
+- Hover, press and real interactable changes still fade.
+
+### Test results
+- EditMode: **372 / 372 passed**.
+- PlayMode: **71 / 71 passed**. New test `UiFlickerTests.RebuiltInspectorButtons_ShowTheirRestingTintImmediately`
+  checks that every inspector button shows its resting or disabled tint in the same frame as a rebuild, and
+  again after an input toggle. Before the snap was added, this test caught the disabled Truth Table button
+  still mid-fade.

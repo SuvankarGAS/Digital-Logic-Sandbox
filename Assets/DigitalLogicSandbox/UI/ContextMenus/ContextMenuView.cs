@@ -216,7 +216,7 @@ namespace DigitalLogicSandbox.UI.ContextMenus
             colors.normalColor = new Color(hover.r, hover.g, hover.b, 0f);
             colors.selectedColor = colors.normalColor;
             colors.disabledColor = colors.normalColor;
-            button.colors = colors;
+            UiFactory.SetColorsInstant(button, colors);
             button.interactable = enabled;
             _labels.Add(label);
             _buttons.Add(button);

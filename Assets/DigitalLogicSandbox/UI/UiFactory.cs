@@ -286,7 +286,39 @@ namespace DigitalLogicSandbox.UI
             colors.disabledColor = new Color(normal.r, normal.g, normal.b, normal.a * 0.45f);
             colors.colorMultiplier = 1f;
             colors.fadeDuration = 0.08f;
-            button.colors = colors;
+            SetColorsInstant(button, colors);
+        }
+
+        /// <summary>
+        /// Applies a colour block without the cross-fade Unity starts on assignment. A freshly built button has
+        /// already taken the default (white) tint in OnEnable, so a plain assignment fades it in from white, which
+        /// shows as a flash whenever a panel is rebuilt. Later hover/press/interactable changes still fade.
+        /// </summary>
+        public static void SetColorsInstant(Selectable selectable, ColorBlock colors)
+        {
+            float fade = colors.fadeDuration;
+            colors.fadeDuration = 0f;
+            selectable.colors = colors; // zero-length cross-fade: applied immediately
+            colors.fadeDuration = fade;
+            selectable.colors = colors; // target already reached: no visual change
+        }
+
+        private static readonly System.Collections.Generic.List<Selectable> SnapBuffer =
+            new System.Collections.Generic.List<Selectable>();
+
+        /// <summary>
+        /// Jumps every selectable under <paramref name="root"/> straight to its current tint. Call after rebuilding
+        /// a panel: controls built interactable and then disabled would otherwise fade from bright to dim.
+        /// </summary>
+        public static void SnapTransitions(Transform root)
+        {
+            root.GetComponentsInChildren(SnapBuffer);
+            for (int i = 0; i < SnapBuffer.Count; i++)
+            {
+                SetColorsInstant(SnapBuffer[i], SnapBuffer[i].colors);
+            }
+
+            SnapBuffer.Clear();
         }
 
         public RectTransform Separator(Transform parent, bool vertical)

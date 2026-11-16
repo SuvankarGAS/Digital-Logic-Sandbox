@@ -220,6 +220,8 @@ namespace DigitalLogicSandbox.UI.Inspector
             }
 
             RefreshLiveValues();
+            // Rebuilt controls must not fade in (this runs on every selection and history change).
+            UiFactory.SnapTransitions(_content);
         }
 
         private void OnStatusChanged()
@@ -609,7 +611,7 @@ namespace DigitalLogicSandbox.UI.Inspector
                 colors.highlightedColor = new Color(1.15f, 1.15f, 1.15f, 1f);
                 colors.pressedColor = new Color(0.85f, 0.85f, 0.85f, 1f);
                 colors.selectedColor = Color.white;
-                button.colors = colors;
+                UiFactory.SetColorsInstant(button, colors);
                 button.onClick.AddListener(() => _workspace.ChangeLedColor(id, color));
                 _ui.AddTooltip(swatch.gameObject, LedColors.DisplayName(color));
                 if (color == current)

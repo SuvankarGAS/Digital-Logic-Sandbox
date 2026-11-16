@@ -62,7 +62,7 @@ namespace DigitalLogicSandbox.UI.Toolbar
             colors.pressedColor = _ui.Theme.ButtonPressed;
             colors.disabledColor = colors.normalColor;
             colors.fadeDuration = 0.06f;
-            button.colors = colors;
+            UiFactory.SetColorsInstant(button, colors);
             button.navigation = new Navigation { mode = Navigation.Mode.None };
             button.onClick.AddListener(() =>
             {

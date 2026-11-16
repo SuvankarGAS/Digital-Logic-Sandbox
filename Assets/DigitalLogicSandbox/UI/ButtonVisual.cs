@@ -91,6 +91,7 @@ namespace DigitalLogicSandbox.UI
                 return;
             }
 
+            bool first = _appliedState == -1;
             _appliedState = state;
             Color color = _labelColor;
             if (_active)
@@ -122,7 +123,14 @@ namespace DigitalLogicSandbox.UI
                         colors.normalColor = normal;
                         colors.selectedColor = normal;
                         colors.disabledColor = new Color(normal.r, normal.g, normal.b, normal.a * 0.45f);
-                        _button.colors = colors;
+                        if (first)
+                        {
+                            UiFactory.SetColorsInstant(_button, colors);
+                        }
+                        else
+                        {
+                            _button.colors = colors;
+                        }
                     }
                 }
             }

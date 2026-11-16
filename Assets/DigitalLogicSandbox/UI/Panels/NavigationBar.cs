@@ -109,7 +109,7 @@ namespace DigitalLogicSandbox.UI.Panels
                 colors.normalColor = new Color(hover.r, hover.g, hover.b, 0f);
                 colors.selectedColor = colors.normalColor;
                 colors.disabledColor = colors.normalColor;
-                crumb.colors = colors;
+                UiFactory.SetColorsInstant(crumb, colors);
                 TextMeshProUGUI label = crumb.GetComponentInChildren<TextMeshProUGUI>();
                 label.fontWeight = current ? FontWeight.SemiBold : FontWeight.Regular;
                 Color color = levels[i].IsDraft ? _ui.Theme.Warning : current ? _ui.Theme.TextPrimary : _ui.Theme.TextSecondary;
