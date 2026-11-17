@@ -516,7 +516,7 @@ Delivered – see the Phase 3 section below.
 - Wire routing is still the simple orthogonal router from Phase 3, so pulses follow it. Better routing comes in
   Phase 9.
 - Inside an inspected gate, nets are recoloured instantly, not animated, because the animator follows the
-  shown level's log.
+  shown level's log. (Resolved: see "Known-issue cleanup 2".)
 - Animation settings are not persisted until Phase 8.
 
 ---
@@ -604,7 +604,7 @@ Delivered – see the Phase 3 section below.
 
 ### Known issues / deferred
 - Truth table limits are not persisted with the project yet (Phase 8 persistence).
-- Library items have no truth table entry of their own; place the gate, or use the inspector or context menu.
+- Library items have no truth table entry of their own; place the gate, or use the inspector or context menu. (Resolved: see "Known-issue cleanup 2".)
 - No sequential analysis mode yet. It needs clocked components, which arrive with sequential logic.
 - Very wide tables (many long port names) scroll horizontally. Columns are capped at 150 px and names are
   truncated with an ellipsis.
@@ -881,9 +881,9 @@ like the input and output boundaries.
 ### Known issues / deferred
 - Only one clock domain: all clock nodes share one frequency. (Resolved: clock dividers, see "Known-issue
   cleanup".)
-- The sequence analysis panel shows up to 256 steps (`MaxDisplaySteps`). The analyzer's own limit is 1 024.
+- The sequence analysis panel shows up to 256 steps (`MaxDisplaySteps`). The analyzer's own limit is 1 024. (Resolved: see "Known-issue cleanup 2".)
 - While a draft is being edited only the draft's clock ticks. The main circuit's clock waits until you
-  return to it.
+  return to it. (Resolved: see "Known-issue cleanup 2".)
 ---
 
 ## Phase C – Multi-bit logic (2026-11-14)
@@ -1114,7 +1114,7 @@ Goal: a minimal, calm, satisfying interface that does not overwhelm a newcomer.
 - The breadcrumb pill and the signal settings popover share the top-centre position. When both are open
   inside a custom gate, the popover covers the crumbs until it is closed. (Resolved: the popover opens below
   the breadcrumbs, see "Known-issue cleanup".)
-- The fonts use the Latin subset. Missing glyphs (such as →) fall back to LiberationSans.
+- The fonts use the Latin subset. Missing glyphs (such as →) fall back to LiberationSans. (Resolved: see "Known-issue cleanup 2".)
 
 ## Wire rendering and routing (2026-11-15)
 
@@ -1473,7 +1473,7 @@ Three of the four small known issues are fixed. The fourth, the font fallback, i
     cut off. Both are fixed.
 
 ### Known issues / deferred
-- **Missing glyphs (not fixed).**
+- **Missing glyphs (not fixed).** (Resolved: see "Known-issue cleanup 2".)
   - The bundled Nunito TTFs are Latin subsets. Today → comes from TMP's dynamic LiberationSans fallback
     and ÷ from the static LiberationSans asset, so these characters render, but in a different typeface.
   - The planned fix, building a fallback from an OS font at runtime, does not work with TMP 3.0.9:
@@ -1482,5 +1482,64 @@ Three of the four small known issues are fixed. The fourth, the font fallback, i
   - The remaining option is to bundle a wider OFL font, such as full Nunito or a Noto symbols font, as an extra
     fallback. That adds a third-party asset, so it waits for a decision.
 - A gate that moves next to a wire without rerouting it keeps the wire's old hop side until that wire's
-  crossings are recomputed.
+  crossings are recomputed. (Resolved: see "Known-issue cleanup 2".)
+
+## Known-issue cleanup 2 (2026-11-17)
+
+The remaining small known issues from earlier phases. Two had already been fixed by later work and only needed
+a test and a note; four are fixed here.
+
+### Already fixed (now covered by tests)
+- **Animation inside an inspected gate.** Phase 6 recoloured inner nets instantly. Since Phase 5's per-instance
+  inspection, `CircuitPresenter.SetSimulation(context, scope)` maps the inspected instance's nets, and the
+  workspace feeds the root change log to the animator, so inner wires get pulses like any other.
+- **Truth table from the library.** A library item's context menu has had a Truth Table entry
+  (`ComponentTruthTableRequested` → `TruthTableDialog.OpenForComponent`) since the library preview work.
+
+### Implemented
+- **Full Nunito.** The three bundled TTFs were Latin subsets (230 glyphs). They are replaced by static Regular
+  (400), SemiBold (600) and Bold (700) instances of the official variable font from `googlefonts/nunito` (SIL OFL
+  1.1, same copyright line), cut with fontTools in a throwaway environment; nothing new is added to the project.
+  - Each file has 938 glyphs. Every non-ASCII character in the runtime UI strings (÷ × ≈ ≥ › … – • · °) now
+    renders in Nunito. The `.ttf.meta` GUIDs are unchanged, so the SDF assets kept their references; their
+    dynamic atlases were cleared once to regenerate.
+  - `→` is not in Nunito either, but it appears only in code comments, never on screen (breadcrumbs use the
+    Lucide chevron). LiberationSans stays as the last fallback for text users type.
+- **Hop side after a nearby gate moves.** `CircuitGeometry.UpdateNodeIndex` now also calls
+  `DirtyCrossingsNear` for the gate's old and new bodies: every wire with cached crossings within
+  `WireCrossings.HopReach` of them is queued. Before, only wires within the body margin (0.25) were touched,
+  through rerouting, so a gate 0.25–0.354 from a wire's edge could block or free a hop without updating it.
+- **Main clock keeps running during a draft.** `WorkspaceController.LateUpdate` also advances the root session's
+  runner when a draft or preview is shown, and clears the root's change log (nothing draws it). Returning
+  rebinds the presenter, which redraws from the live context.
+- **Sequence analysis up to 1 024 steps.** `MaxDisplaySteps` is now `SequenceSpec.DefaultMaxSteps`. The table is
+  a fixed header above a virtualised list: 32 pooled row texts, refilled on scroll with
+  `TMP_Text.SetText(StringBuilder)`. One text block of 1 025 rows would exceed TMP's mesh limit. New
+  `DisplayedRowCount`, `GetVisibleRowText(row)` and `ScrollToRow(row)`; `TableText` returns the header and the
+  rows in view.
+
+### Decisions
+- **Instances, not the variable font.** The variable file's default instance is weight 200 (ExtraLight), and the
+  existing font assets expect one file per weight. Static instances keep those three assets as they are.
+- **Background root clock, no background drawing.** The draft's views are what is on screen; drawing the main
+  circuit's changes would be wasted work, and a full redraw on return is already part of navigation.
+
+### Test results
+- EditMode: **406 / 406 passed** (1 new): a gate moved within hop reach of a wire's edge flips the hop to -x
+  without rerouting either wire, and moving it away flips it back. With the fix disabled the test fails
+  ("V's hop side depends on G").
+- PlayMode: **83 / 83 passed** (3 new):
+  - Inside an inspected NAND, raising both main inputs creates pulses on the inner wires; the NOT output keeps
+    its old value until the pulse arrives, and the simulated output is already correct.
+  - The main clock ticks while a draft is edited, its change log stays empty, and the lamp view shows the live
+    value after returning.
+  - A 1 024-step sequence: 1 025 rows, fewer than 100 text objects in the dialog, the last row appears after
+    scrolling, Copy has every row, and 1 025 steps are refused with the limit message.
+- Manual (play mode screenshot): a ÷1 and a ÷4 clock analysed over 1 024 cycles, scrolled to cycle 1010; the
+  header stays in place and the columns line up.
+
+### Known issues / deferred
+- Decimal displays are still integer only (no fixed-point or BCD mode).
+- No native OS file dialog (Phase 8 decision).
+- `com.coplaydev.unity-mcp` still tracks `#main`; pin or remove it before release builds.
 

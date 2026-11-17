@@ -559,7 +559,9 @@ UI panels (toolbar, library) --> WorkspaceController --> CommandHistory --> Circ
     straight. Each point is `(x, y, side)`: a hop bulges towards +x unless another net's vertical wire or a gate
     body lies within `WireCrossings.HopReach` (0.354) on that side and the -x side is clear.
     - `CircuitGeometry.GetCrossings` caches them per wire. Any route change queues that wire and every wire
-      near its old and new bounds (`DrainCrossingChanges`). The presenter pushes them to the views after
+      near its old and new bounds (`DrainCrossingChanges`). A gate that is added, moved, rotated or removed
+      also queues every wire within hop reach of its old and new bodies, because a hop's side depends on the
+      bodies beside it even when the wire keeps its route. The presenter pushes them to the views after
       reroutes and improvements, but not during a drag.
     - `WireView.SetCrossings(points, style)` draws `WireCrossingStyle.Hop`, `Gap` or `Plain`:
       - Hop: an 8-segment semicircle of radius 0.18 (x1.3 on buses) bulging to the crossing's side. Crossings
@@ -653,6 +655,9 @@ latches, and so on. The engine has no sequential primitive. What makes this well
   - `TickClock()` applies a manual edge, and `Step()` starts the next edge when the circuit is idle.
   - The workspace calls `Advance` for the shown level in `LateUpdate`, before `Sync`. Clock edges therefore
     flow through the normal change log and animation pipeline. The simulation never waits for animation.
+  - While a draft or library preview is shown, the main circuit's runner is advanced too, in the background.
+    Nothing draws it, so its change log is cleared after each advance. Returning to it rebinds the presenter,
+    which redraws every view from the live context.
 - **Feedback is legal.** Validation and the compiler report loops as `FeedbackLoop` warnings, and
   self-connections are allowed. `CompiledCircuit.IsSequential` (cycles or a clock) is what consumers check.
 - **Sequence analysis** (`TruthTable.Generation.SequenceAnalyzer`):
@@ -665,6 +670,9 @@ latches, and so on. The engine has no sequential primitive. What makes this well
     their schedule says.
   - Unstable rows are flagged. Each result describes one stimulus, not the whole circuit: the dialog and
     the docs say so, and the truth table keeps refusing these circuits.
+  - The dialog shows up to the analyzer's limit (1 024 steps). A fixed header sits above a virtualised list:
+    a pool of 32 row texts is refilled from the table as it scrolls, so the row count never reaches TMP's mesh
+    limit. Copy and CSV export always cover every row.
 - **Settings.** `ClockFrequency` (the base rate), `ClockEnabled` and `PowerOnState` are project settings,
   stored in `settings.simulation` (schema v2). A clock's divider is part of its node: `"divider": 4`, written
   only when above 1 (schema v6). The inspector's divider picker changes it through `ChangeComponentCommand`. The main and draft sessions share them through one `SimulationOptions`
@@ -773,7 +781,8 @@ the workspace views (`GateView`, `WireView`, `GridView`).
   - The library opens Gates, Inputs & Outputs and My Gates. Timing, Buses and Displays start collapsed, and
     search expands whatever matches.
   - An `EmptyStateView` explains the first step on an empty canvas and fades out once a part is placed.
-- **Typography.** Nunito (SIL OFL), with Regular, SemiBold and Bold weights linked through the font asset's
+- **Typography.** Nunito (SIL OFL), the full character set (938 glyphs, including
+  ÷ ≈ ≥ ›), with Regular, SemiBold and Bold weights linked through the font asset's
   weight table. `UiFactory.Text` maps `FontStyles.Bold` to SemiBold for softer emphasis. Lucide (ISC) supplies
   icons and is a fallback of the text font, so `UiFactory.Icon` labels keep Nunito as their primary font. This
   avoids TMP warnings, because TMP looks up '_' and '…' only in the primary font. Glyph constants are in

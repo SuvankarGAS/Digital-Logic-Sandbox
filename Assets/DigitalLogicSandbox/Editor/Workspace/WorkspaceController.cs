@@ -380,10 +380,19 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
                 return;
             }
 
-            // The clock ticks in real time for the shown level only; the simulation never waits for animation.
-            if (Session?.Runner.Advance(Time.unscaledDeltaTime) > 0)
+            // The clock ticks in real time; the simulation never waits for animation.
+            CircuitSession shown = Session;
+            if (shown?.Runner.Advance(Time.unscaledDeltaTime) > 0)
             {
                 MarkStatusDirty();
+            }
+
+            // While a draft or preview is shown, the main circuit keeps running in the background. Nothing draws
+            // it, so its change log is dropped; returning to it redraws every view from the live context.
+            CircuitSession root = _navigator?.RootSession;
+            if (root != null && shown != root && root.Runner.Advance(Time.unscaledDeltaTime) > 0)
+            {
+                root.Runner.Context?.Changes.Clear();
             }
 
             Sync();

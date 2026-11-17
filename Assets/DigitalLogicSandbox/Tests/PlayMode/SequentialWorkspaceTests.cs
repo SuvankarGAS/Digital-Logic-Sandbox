@@ -12,6 +12,7 @@ using DigitalLogicSandbox.Core.Signals;
 using DigitalLogicSandbox.Persistence;
 using DigitalLogicSandbox.Rendering.Gates;
 using DigitalLogicSandbox.Simulation.Engine;
+using DigitalLogicSandbox.TruthTable.Generation;
 using DigitalLogicSandbox.UI.Dialogs;
 using DigitalLogicSandbox.UI.Panels;
 using NUnit.Framework;
@@ -198,6 +199,46 @@ namespace DigitalLogicSandbox.Tests.PlayMode
 
             sequence.PatternFields[0].text = "0110";
             SequenceTableCheck(sequence);
+            sequence.Close();
+        }
+
+        [UnityTest]
+        public IEnumerator SequenceAnalysis_ShowsTheFullStepLimit_WithVirtualisedRows()
+        {
+            yield return LoadMain();
+            BuildClocked();
+            yield return null;
+
+            SequenceAnalysisDialog sequence = _app.Shell.SequenceAnalysis;
+            sequence.OpenForCurrentCircuit();
+            yield return null;
+            Assert.That(SequenceAnalysisDialog.MaxDisplaySteps, Is.EqualTo(SequenceSpec.DefaultMaxSteps));
+            sequence.StepsField.text = SequenceSpec.DefaultMaxSteps.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            Assert.That(sequence.Run(), Is.Not.Null, sequence.StatusText);
+            Assert.That(sequence.DisplayedRowCount, Is.EqualTo(SequenceSpec.DefaultMaxSteps + 1));
+            yield return null;
+
+            // Only the rows in view exist: the panel holds a small pool of row texts, not 1 025 lines.
+            int rowObjects = sequence.GetComponentsInChildren<TMPro.TextMeshProUGUI>(true).Length;
+            Assert.That(rowObjects, Is.LessThan(100));
+            Assert.That(sequence.GetVisibleRowText(0), Does.StartWith("Power-on"));
+            Assert.That(sequence.GetVisibleRowText(SequenceSpec.DefaultMaxSteps), Is.Null, "The last row is not built yet.");
+
+            sequence.ScrollToRow(SequenceSpec.DefaultMaxSteps);
+            yield return null;
+            string last = sequence.GetVisibleRowText(SequenceSpec.DefaultMaxSteps);
+            Assert.That(last, Is.Not.Null.And.StartWith("1024"));
+            Assert.That(sequence.GetVisibleRowText(0), Is.Null, "Scrolled out of view.");
+
+            // Copy still covers every row (header + power-on + 1 024 steps).
+            string copied = sequence.CopyToClipboard();
+            Assert.That(copied.TrimEnd('\r', '\n').Split('\n').Length, Is.EqualTo(SequenceSpec.DefaultMaxSteps + 2));
+
+            // One step more than the limit is refused with a clear message.
+            sequence.StepsField.text = (SequenceSpec.DefaultMaxSteps + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            Assert.That(sequence.Run(), Is.Null);
+            Assert.That(sequence.StatusText, Does.Contain("limit"));
+            Assert.That(sequence.DisplayedRowCount, Is.Zero);
             sequence.Close();
         }
 

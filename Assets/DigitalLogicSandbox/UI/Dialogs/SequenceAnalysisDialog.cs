@@ -24,8 +24,11 @@ namespace DigitalLogicSandbox.UI.Dialogs
     /// </summary>
     public sealed class SequenceAnalysisDialog : MonoBehaviour
     {
-        /// <summary>Upper bound on steps shown in the panel (the table is a single text block).</summary>
-        public const int MaxDisplaySteps = 256;
+        /// <summary>Upper bound on steps shown in the panel: the analyzer's own limit (rows are virtualised).</summary>
+        public const int MaxDisplaySteps = SequenceSpec.DefaultMaxSteps;
+
+        /// <summary>Height of one table row; only the rows in view exist as objects.</summary>
+        public const float RowHeight = 24f;
 
         /// <summary>Default pattern length: a binary count over the inputs, capped.</summary>
         public const int MaxDefaultSteps = 16;
@@ -33,6 +36,10 @@ namespace DigitalLogicSandbox.UI.Dialogs
         private const float StepColumnWidth = 84f;
         private const float MinColumnWidth = 34f;
         private const float GroupGap = 18f;
+        private const float HeaderHeight = 30f;
+        private const float TableInset = 12f;
+        private const float CellFontSize = 14f;
+        private const int RowPoolSize = 32;
 
         private readonly StringBuilder _builder = new StringBuilder(2048);
         private readonly List<TMP_InputField> _patternFields = new List<TMP_InputField>();
@@ -46,7 +53,13 @@ namespace DigitalLogicSandbox.UI.Dialogs
         private TMP_InputField _stepsField;
         private Toggle _pulseClock;
         private Toggle _powerOnUnknown;
-        private TextMeshProUGUI _tableText;
+        private TextMeshProUGUI _headerText;
+        private ScrollRect _scroll;
+        private RectTransform _content;
+        private readonly List<TextMeshProUGUI> _rowTexts = new List<TextMeshProUGUI>(RowPoolSize);
+        private readonly List<int> _rowIndices = new List<int>(RowPoolSize);
+        private float[] _centers = Array.Empty<float>();
+        private float _digitHalf;
         private TextMeshProUGUI _status;
         private Button _copyButton;
         private Button _exportButton;
@@ -68,7 +81,27 @@ namespace DigitalLogicSandbox.UI.Dialogs
 
         public string StatusText => _status.text;
 
-        public string TableText => _tableText.text;
+        /// <summary>Header plus the rows currently in view, as plain text (tests / accessibility).</summary>
+        public string TableText
+        {
+            get
+            {
+                var text = new StringBuilder(_headerText.text);
+                for (int i = 0; i < _rowTexts.Count; i++)
+                {
+                    if (_rowIndices[i] >= 0)
+                    {
+                        _rowTexts[i].ForceMeshUpdate();
+                        text.Append('\n').Append(_rowTexts[i].GetParsedText());
+                    }
+                }
+
+                return text.ToString();
+            }
+        }
+
+        /// <summary>Rows in the table (row 0 is the power-on state), or 0 when nothing is shown.</summary>
+        public int DisplayedRowCount => _table?.RowCount ?? 0;
 
         public IReadOnlyList<TMP_InputField> PatternFields => _patternFields;
 
@@ -161,7 +194,8 @@ namespace DigitalLogicSandbox.UI.Dialogs
         public SequenceTable Run()
         {
             _table = null;
-            _tableText.text = string.Empty;
+            _headerText.text = string.Empty;
+            SetRowCount(0);
             if (_target == null)
             {
                 return null;
@@ -272,11 +306,15 @@ namespace DigitalLogicSandbox.UI.Dialogs
         {
             int inputs = table.Inputs.Count;
             int outputs = table.Outputs.Count;
-            var centers = new float[inputs + outputs];
+            if (_centers.Length != inputs + outputs)
+            {
+                _centers = new float[inputs + outputs];
+            }
+
             float x = StepColumnWidth + 8f;
             _builder.Clear();
             _builder.Append("<b>").Append(table.StepHeader);
-            for (int c = 0; c < centers.Length; c++)
+            for (int c = 0; c < _centers.Length; c++)
             {
                 if (c == inputs)
                 {
@@ -284,10 +322,10 @@ namespace DigitalLogicSandbox.UI.Dialogs
                 }
 
                 string name = c < inputs ? table.Inputs[c].Name : table.Outputs[c - inputs].Name;
-                float width = Mathf.Max(MinColumnWidth, _tableText.GetPreferredValues(name).x + 16f);
-                centers[c] = x + width * 0.5f;
-                float left = centers[c] - _tableText.GetPreferredValues(name).x * 0.5f;
-                _builder.Append("<pos=").Append(Mathf.RoundToInt(left)).Append('>');
+                float nameWidth = _headerText.GetPreferredValues(name).x;
+                float width = Mathf.Max(MinColumnWidth, nameWidth + 16f);
+                _centers[c] = x + width * 0.5f;
+                _builder.Append("<pos=").Append(Mathf.RoundToInt(_centers[c] - nameWidth * 0.5f)).Append('>');
                 if (c >= inputs)
                 {
                     _builder.Append("<color=#").Append(ColorUtility.ToHtmlStringRGB(_ui.Theme.Accent)).Append('>')
@@ -301,37 +339,108 @@ namespace DigitalLogicSandbox.UI.Dialogs
                 x += width;
             }
 
-            _builder.Append("</b>\n");
-            float digitHalf = _tableText.GetPreferredValues("0").x * 0.5f;
-            for (int row = 0; row < table.RowCount; row++)
+            _builder.Append("</b>");
+            _headerText.text = _builder.ToString();
+            _digitHalf = _headerText.GetPreferredValues("0").x * 0.5f;
+            SetRowCount(table.RowCount);
+        }
+
+        /// <summary>Plain text of a displayed row (tests / accessibility), or null when the row is not in view.</summary>
+        public string GetVisibleRowText(int row)
+        {
+            for (int i = 0; i < _rowTexts.Count; i++)
             {
-                _builder.Append(table.RowLabel(row));
-                if (!table.IsStable(row))
+                if (_rowIndices[i] == row)
                 {
-                    _builder.Append(" <color=").Append(_hexUnknown).Append(">~</color>");
+                    _rowTexts[i].ForceMeshUpdate();
+                    return _rowTexts[i].GetParsedText();
                 }
-
-                for (int c = 0; c < inputs; c++)
-                {
-                    if (row == 0)
-                    {
-                        AppendCell(centers[c], digitHalf, '-', _hexLow);
-                    }
-                    else
-                    {
-                        AppendValue(centers[c], digitHalf, table.GetInput(row, c));
-                    }
-                }
-
-                for (int o = 0; o < outputs; o++)
-                {
-                    AppendValue(centers[inputs + o], digitHalf, table.GetOutput(row, o));
-                }
-
-                _builder.Append('\n');
             }
 
-            _tableText.text = _builder.ToString();
+            return null;
+        }
+
+        /// <summary>Scrolls so that <paramref name="row"/> is the first visible row (as far as the table allows).</summary>
+        public void ScrollToRow(int row)
+        {
+            Vector2 position = _content.anchoredPosition;
+            position.y = Mathf.Max(0f, row * RowHeight);
+            _content.anchoredPosition = position;
+            RefreshRows();
+        }
+
+        private void SetRowCount(int rows)
+        {
+            _content.sizeDelta = new Vector2(_content.sizeDelta.x, rows * RowHeight + 8f);
+            _content.anchoredPosition = Vector2.zero;
+            for (int i = 0; i < _rowIndices.Count; i++)
+            {
+                _rowIndices[i] = -1; // contents changed: reformat every row in view
+            }
+
+            RefreshRows();
+        }
+
+        private void RefreshRows()
+        {
+            int total = _table?.RowCount ?? 0;
+            int first = Mathf.Max(0, Mathf.FloorToInt(_content.anchoredPosition.y / RowHeight));
+            for (int i = 0; i < _rowTexts.Count; i++)
+            {
+                TextMeshProUGUI text = _rowTexts[i];
+                int row = first + i;
+                bool visible = row < total;
+                if (text.gameObject.activeSelf != visible)
+                {
+                    text.gameObject.SetActive(visible);
+                }
+
+                if (!visible)
+                {
+                    _rowIndices[i] = -1;
+                    continue;
+                }
+
+                if (_rowIndices[i] == row)
+                {
+                    continue; // already showing this row
+                }
+
+                _rowIndices[i] = row;
+                text.rectTransform.anchoredPosition = new Vector2(TableInset, -row * RowHeight);
+                FormatRow(row);
+                text.SetText(_builder);
+            }
+        }
+
+        private void FormatRow(int row)
+        {
+            SequenceTable table = _table;
+            int inputs = table.Inputs.Count;
+            int outputs = table.Outputs.Count;
+            _builder.Clear();
+            _builder.Append(table.RowLabel(row));
+            if (!table.IsStable(row))
+            {
+                _builder.Append(" <color=").Append(_hexUnknown).Append(">~</color>");
+            }
+
+            for (int c = 0; c < inputs; c++)
+            {
+                if (row == 0)
+                {
+                    AppendCell(_centers[c], _digitHalf, '-', _hexLow);
+                }
+                else
+                {
+                    AppendValue(_centers[c], _digitHalf, table.GetInput(row, c));
+                }
+            }
+
+            for (int o = 0; o < outputs; o++)
+            {
+                AppendValue(_centers[inputs + o], _digitHalf, table.GetOutput(row, o));
+            }
         }
 
         private void AppendValue(float center, float digitHalf, Signal value)
@@ -511,13 +620,7 @@ namespace DigitalLogicSandbox.UI.Dialogs
             var tableLayout = tableFrame.gameObject.AddComponent<LayoutElement>();
             tableLayout.flexibleHeight = 1f;
             tableLayout.minHeight = 180f;
-            RectTransform tableContent = _ui.ScrollView("Scroll", tableFrame.rectTransform, out ScrollRect scroll);
-            UiFactory.Stretch((RectTransform)scroll.transform);
-            _tableText = _ui.Text("Rows", tableContent, string.Empty, 14f, _ui.Theme.TextPrimary, TextAlignmentOptions.TopLeft);
-            _tableText.richText = true;
-            _tableText.enableWordWrapping = false;
-            _tableText.overflowMode = TextOverflowModes.Overflow;
-            _tableText.lineSpacing = 8f;
+            BuildTable(tableFrame.rectTransform);
 
             _status = _ui.Text("Status", column, string.Empty, 12f, _ui.Theme.TextSecondary, TextAlignmentOptions.TopLeft);
             _status.enableWordWrapping = true;
@@ -534,6 +637,61 @@ namespace DigitalLogicSandbox.UI.Dialogs
             UiFactory.Flexible(buttons);
             _ui.Button("Done", buttons, "Close", Close, 80f);
             RefreshButtons();
+        }
+
+        /// <summary>A fixed header line above a vertically scrolling, virtualised list of row texts.</summary>
+        private void BuildTable(RectTransform frame)
+        {
+            _headerText = _ui.Text("Header", frame, string.Empty, CellFontSize, _ui.Theme.TextPrimary,
+                TextAlignmentOptions.MidlineLeft);
+            _headerText.richText = true;
+            _headerText.enableWordWrapping = false;
+            _headerText.overflowMode = TextOverflowModes.Overflow;
+            RectTransform header = _headerText.rectTransform;
+            header.anchorMin = new Vector2(0f, 1f);
+            header.anchorMax = new Vector2(1f, 1f);
+            header.pivot = new Vector2(0f, 1f);
+            header.offsetMin = new Vector2(TableInset, -HeaderHeight);
+            header.offsetMax = new Vector2(-TableInset, 0f);
+
+            RectTransform body = UiFactory.CreateRect("Body", frame);
+            UiFactory.Stretch(body, 0f, 0f, HeaderHeight, 0f);
+            _scroll = body.gameObject.AddComponent<ScrollRect>();
+            _scroll.horizontal = false;
+            _scroll.vertical = true;
+            _scroll.movementType = ScrollRect.MovementType.Clamped;
+            _scroll.scrollSensitivity = RowHeight * 1.5f;
+            _scroll.inertia = false;
+            RectTransform viewport = UiFactory.CreateRect("Viewport", body);
+            UiFactory.Stretch(viewport);
+            viewport.gameObject.AddComponent<RectMask2D>();
+            viewport.gameObject.AddComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
+            _content = UiFactory.CreateRect("Rows", viewport);
+            _content.anchorMin = new Vector2(0f, 1f);
+            _content.anchorMax = new Vector2(1f, 1f);
+            _content.pivot = new Vector2(0f, 1f);
+            _content.sizeDelta = Vector2.zero;
+            _scroll.viewport = viewport;
+            _scroll.content = _content;
+            _scroll.onValueChanged.AddListener(_ => RefreshRows());
+
+            for (int i = 0; i < RowPoolSize; i++)
+            {
+                TextMeshProUGUI text = _ui.Text("Row " + i, _content, string.Empty, CellFontSize, _ui.Theme.TextPrimary,
+                    TextAlignmentOptions.MidlineLeft);
+                text.richText = true;
+                text.enableWordWrapping = false;
+                text.overflowMode = TextOverflowModes.Overflow;
+                text.raycastTarget = false;
+                RectTransform rect = text.rectTransform;
+                rect.anchorMin = new Vector2(0f, 1f);
+                rect.anchorMax = new Vector2(1f, 1f);
+                rect.pivot = new Vector2(0f, 1f);
+                rect.sizeDelta = new Vector2(-TableInset * 2f, RowHeight);
+                text.gameObject.SetActive(false);
+                _rowTexts.Add(text);
+                _rowIndices.Add(-1);
+            }
         }
     }
 }

@@ -1005,11 +1005,35 @@ namespace DigitalLogicSandbox.Rendering
                 Rect newBody = GetBounds(node);
                 _nodeIndex.Set(node, newBody);
                 InvalidateWiresTouching(newBody);
+                DirtyCrossingsNear(newBody);
             }
 
             if (hadOld)
             {
                 InvalidateWiresTouching(oldBody);
+                DirtyCrossingsNear(oldBody);
+            }
+        }
+
+        /// <summary>
+        /// Queues a crossing update for every wire within hop reach of a gate body. A hop's side depends on the
+        /// gate bodies next to it, so a gate arriving or leaving can flip a hop on a wire that is not rerouted.
+        /// </summary>
+        private void DirtyCrossingsNear(Rect body)
+        {
+            if (_wireIndex.Count == 0)
+            {
+                return;
+            }
+
+            _scratchCrossWires.Clear();
+            _wireIndex.Query(Inflate(body, WireCrossings.HopReach + QueryPadding), _scratchCrossWires);
+            for (int i = 0; i < _scratchCrossWires.Count; i++)
+            {
+                if (_crossings.ContainsKey(_scratchCrossWires[i]))
+                {
+                    DirtyCrossings(_scratchCrossWires[i]);
+                }
             }
         }
 

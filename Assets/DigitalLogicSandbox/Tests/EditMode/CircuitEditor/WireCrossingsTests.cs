@@ -195,6 +195,67 @@ namespace DigitalLogicSandbox.Tests.EditMode.CircuitEditor
         }
 
         [Test]
+        public void Geometry_AGateMovingWithinHopReach_FlipsTheHop_WithoutReroutingTheWire()
+        {
+            // V doubles back (D is left of C), so its vertical segment is the right edge of its bounds. A gate just
+            // beyond the body margin of that edge does not reroute V, but it is within hop reach.
+            var env = new TestEnvironment();
+            var circuit = new CircuitDefinition(DefinitionId.New(), "Edge");
+            NodeDefinition a = circuit.AddInputBoundary("A", new CircuitPoint(0f, 0f));
+            NodeDefinition y = circuit.AddOutputBoundary("Y", new CircuitPoint(20f, 0f));
+            NodeDefinition c = circuit.AddInputBoundary("C", new CircuitPoint(6f, 4f));
+            NodeDefinition d = circuit.AddOutputBoundary("D", new CircuitPoint(2f, -4f));
+            NodeDefinition g = circuit.AddInputBoundary("G", new CircuitPoint(30f, 10f));
+            PinRef h = BoundaryIn(y);
+            PinRef v = BoundaryIn(d);
+            circuit.Connect(BoundaryOut(a), h);
+            circuit.Connect(BoundaryOut(c), v);
+            var geometry = new CircuitGeometry(env.Catalog);
+            geometry.Bind(circuit);
+            circuit.Changed += geometry.OnChanged;
+            geometry.GetWirePath(h);
+            IReadOnlyList<Vector3> path = geometry.GetWirePath(v);
+
+            IReadOnlyList<Vector3> before = geometry.GetCrossings(v);
+            Assume.That(before.Count, Is.EqualTo(1), "Layout: V crosses H once.");
+            Vector3 crossing = before[0];
+            float xMax = float.MinValue;
+            for (int i = 0; i < path.Count; i++)
+            {
+                xMax = Mathf.Max(xMax, path[i].x);
+            }
+
+            Assume.That(crossing.x, Is.EqualTo(xMax).Within(1e-3f), "Layout: the crossing is on V's right edge.");
+            Assert.That(crossing.z, Is.EqualTo(1f), "Nothing beside the hop: it bulges towards +x.");
+
+            // Put G's body 0.3 right of the crossing and 0.3 above H: outside both wires' body margins (0.25),
+            // inside the hop's reach (≈0.35).
+            Rect body = geometry.GetBounds(g.Id);
+            Vector2 offset = new Vector2(g.Position.X - body.xMin, g.Position.Y - body.yMin);
+            var queued = new List<PinRef>();
+            geometry.DrainCrossingChanges(queued);
+            circuit.MoveNode(g.Id, new CircuitPoint(crossing.x + 0.3f + offset.x, crossing.y + 0.3f + offset.y));
+
+            var invalidated = new List<PinRef>();
+            geometry.DrainInvalidatedWires(invalidated);
+            Assert.That(invalidated, Has.No.Member(v), "V is not rerouted by the move.");
+            Assert.That(invalidated, Has.No.Member(h), "H is not rerouted by the move.");
+            queued.Clear();
+            geometry.DrainCrossingChanges(queued);
+            Assert.That(queued, Does.Contain(v), "V's hop side depends on G.");
+            IReadOnlyList<Vector3> near = geometry.GetCrossings(v);
+            Assert.That(near.Count, Is.EqualTo(1));
+            Assert.That(near[0].z, Is.EqualTo(-1f), "G blocks +x: the hop bulges towards -x.");
+
+            // Moving G away again restores the default side.
+            circuit.MoveNode(g.Id, new CircuitPoint(30f, 10f));
+            queued.Clear();
+            geometry.DrainCrossingChanges(queued);
+            Assert.That(queued, Does.Contain(v));
+            Assert.That(geometry.GetCrossings(v)[0].z, Is.EqualTo(1f));
+        }
+
+        [Test]
         public void Geometry_RemovingAWireQueuesTheWiresItCrossed()
         {
             Cross cross = BuildCross();

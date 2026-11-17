@@ -343,6 +343,76 @@ namespace DigitalLogicSandbox.Tests.PlayMode
             Assert.That(_workspace.Session.GetOutputValue(output), Is.EqualTo(Signal.Low));
             Assert.That(OutputValue(), Is.EqualTo(Signal.High), "The main circuit's inputs are untouched (both 0).");
         }
+
+        [UnityTest]
+        public IEnumerator InsideAnInspectedGate_ChangedSignalsAnimate()
+        {
+            _workspace.AnimationSettings.Enabled = true;
+            _workspace.OpenNode(_gate);
+            yield return null;
+            Assert.That(_workspace.Circuit, Is.SameAs(_nand));
+            Assert.That(_workspace.SignalAnimation.IsAnimating, Is.False);
+
+            // Raise both main inputs: inside NAND the AND output rises and the NOT output falls.
+            CircuitSession root = _workspace.Navigator.RootSession;
+            Assert.That(root.ToggleInput(_a), Is.True);
+            Assert.That(root.ToggleInput(_b), Is.True);
+            _workspace.Sync();
+
+            Assert.That(_workspace.SignalAnimation.PulseCount, Is.GreaterThan(0),
+                "The inspected level's wires carry pulses instead of being recoloured instantly.");
+            Assert.That(_workspace.SignalAnimation.AnimatedWireCount, Is.GreaterThan(0));
+            Assert.That(InternalOutput(BuiltInComponentIds.Not), Is.EqualTo(Signal.High),
+                "The NOT output still shows its old value while the pulse travels.");
+
+            _workspace.SignalAnimation.CompleteAll();
+            Assert.That(InternalOutput(BuiltInComponentIds.And), Is.EqualTo(Signal.High));
+            Assert.That(InternalOutput(BuiltInComponentIds.Not), Is.EqualTo(Signal.Low));
+            Assert.That(OutputValue(), Is.EqualTo(Signal.Low), "Simulation result does not depend on animation.");
+        }
+
+        [UnityTest]
+        public IEnumerator MainClock_KeepsTicking_WhileADraftIsEdited_AndViewsCatchUpOnReturn()
+        {
+            NodeId clock = _workspace.PlaceNode(ComponentRef.Clock, new Vector2(-6, -5));
+            NodeId lamp = _workspace.PlaceNode(ComponentRef.OutputBoundary, new Vector2(6, -5));
+            Assert.That(_workspace.Connect(new PinRef(clock, BoundarySignatures.Pin), new PinRef(lamp, BoundarySignatures.Pin)),
+                Is.EqualTo(ConnectionError.None));
+            _workspace.ClockFrequency = 50f;
+            _workspace.Navigator.ClockEnabled = false;
+            _workspace.Sync();
+            yield return null;
+            CircuitSession root = _workspace.Navigator.RootSession;
+            Signal before = root.GetOutputValue(lamp);
+            Assert.That(_workspace.Presenter.TryGetGateView(lamp, out GateView shownBefore), Is.True);
+            Assert.That(shownBefore.GetInputSignal(0), Is.EqualTo(before));
+
+            _workspace.OpenNode(_gate);
+            Assert.That(_workspace.BeginEdit(), Is.True, string.Join("\n", _notifications));
+            yield return null;
+            Assert.That(_workspace.Session, Is.Not.SameAs(root), "The draft has its own session.");
+
+            // Run until the main circuit's lamp has changed, then hold the clock still.
+            long edges = root.Runner.ClockEdges;
+            _workspace.Navigator.ClockEnabled = true;
+            float timeout = Time.realtimeSinceStartup + 5f;
+            while (root.GetOutputValue(lamp) == before && Time.realtimeSinceStartup < timeout)
+            {
+                yield return null;
+            }
+
+            _workspace.Navigator.ClockEnabled = false;
+            Assert.That(root.Runner.ClockEdges, Is.GreaterThan(edges), "The main clock ticks while the draft is shown.");
+            Signal after = root.GetOutputValue(lamp);
+            Assert.That(after, Is.Not.EqualTo(before));
+            Assert.That(root.Runner.Context.Changes.Count, Is.Zero, "Background changes are not queued for drawing.");
+
+            Assert.That(_workspace.DiscardDraft(), Is.True);
+            Assert.That(_workspace.NavigateTo(0), Is.True);
+            yield return null;
+            Assert.That(_workspace.Presenter.TryGetGateView(lamp, out GateView shownAfter), Is.True);
+            Assert.That(shownAfter.GetInputSignal(0), Is.EqualTo(after), "Returning redraws from the live simulation.");
+        }
     }
 
     /// <summary>The navigation UI in the real Main scene: context menu, breadcrumbs, edit/save flow.</summary>
