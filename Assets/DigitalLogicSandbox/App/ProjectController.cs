@@ -12,10 +12,12 @@ using DigitalLogicSandbox.Core.Ports;
 using DigitalLogicSandbox.Core.Signals;
 using DigitalLogicSandbox.Core.Validation;
 using DigitalLogicSandbox.GateLibrary.Custom;
+using DigitalLogicSandbox.GateLibrary.Examples;
 using DigitalLogicSandbox.Persistence;
 using DigitalLogicSandbox.Persistence.Deserialization;
 using DigitalLogicSandbox.Persistence.Migration;
 using DigitalLogicSandbox.Persistence.Recovery;
+using DigitalLogicSandbox.Rendering;
 using DigitalLogicSandbox.Rendering.Wires;
 using DigitalLogicSandbox.Simulation.Engine;
 using DigitalLogicSandbox.TruthTable.Generation;
@@ -145,6 +147,26 @@ namespace DigitalLogicSandbox.App
             SetDirty(false);
             _workspace.ResetCamera();
             ProjectReplaced?.Invoke();
+        }
+
+        /// <summary>
+        /// Discards the current project (the UI asks first) and opens the CPU demo as a new, unsaved project: the
+        /// example pack plus a main circuit running a program on the CPU 4-bit (see <see cref="CpuDemo"/>).
+        /// </summary>
+        public void OpenCpuDemo()
+        {
+            ProjectFileStore.DeleteIfExists(CurrentAutosavePath); // the user chose to discard this work
+            CpuDemoProject demo = CpuDemo.Build(_workspace.Catalog.Primitives, new GeometryNodeSizer().Measure);
+            ProjectDocument document = CreateEmptyDocument();
+            document.Name = CpuDemo.MainCircuitName;
+            document.RootCircuit = demo.Main;
+            document.Definitions.AddRange(demo.Definitions);
+            document.Settings.Simulation.ClockFrequency = demo.ClockFrequency;
+            Apply(document);
+            SetPath(null);
+            SetDirty(false);
+            ProjectReplaced?.Invoke();
+            _workspace.FrameContent();
         }
 
         public bool Open(string path, out string message)

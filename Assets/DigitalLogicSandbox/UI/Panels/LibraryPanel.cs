@@ -231,7 +231,10 @@ namespace DigitalLogicSandbox.UI.Panels
                 "A switch you can flip between 0 and 1", Icons.Switch, LibraryTileStyle.Icon, false, "switch");
             AddItem(io, io.Body, new PlacementRequest(ComponentRef.OutputBoundary, "Output"), "Output",
                 "A lamp that lights up on 1", Icons.Lamp, LibraryTileStyle.Icon, false, "indicator lamp");
-            io.SetCount(2);
+            AddItem(io, io.Body, new PlacementRequest(ComponentRef.Constant(1, 1), "Constant"), "Constant",
+                "A fixed value of 1 to 8 bits, set in the inspector", Icons.Binary, LibraryTileStyle.Icon, false,
+                "fixed value rom word");
+            io.SetCount(3);
 
             _customSection = AddSection("My Gates", expanded: true);
             _customRoot = _customSection.Body;

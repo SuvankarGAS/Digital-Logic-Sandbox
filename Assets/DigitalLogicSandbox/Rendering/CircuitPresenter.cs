@@ -200,6 +200,7 @@ namespace DigitalLogicSandbox.Rendering
 
                 case CircuitChangeKind.NodeRotated:
                 case CircuitChangeKind.InterfacePortRenamed:
+                case CircuitChangeKind.NodeLabelChanged:
                     if (_gates.TryGetValue(change.Node, out GateView reconfigured) && _circuit.ContainsNode(change.Node))
                     {
                         reconfigured.Configure(change.Node, _geometry.GetGate(change.Node));

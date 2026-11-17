@@ -33,6 +33,9 @@ namespace DigitalLogicSandbox.UI
         /// <summary>Discards the current project (no confirmation; the UI asks first) and starts an empty one.</summary>
         void NewProject();
 
+        /// <summary>Discards the current project (no confirmation; the UI asks first) and opens the CPU demo.</summary>
+        void OpenCpuDemo();
+
         /// <summary>Opens a project. <paramref name="message"/> explains failures or recovery notes.</summary>
         bool Open(string path, out string message);
 

@@ -502,6 +502,8 @@ namespace DigitalLogicSandbox.UI.Inspector
                     return Icons.Lamp;
                 case ComponentKind.Clock:
                     return Icons.Clock;
+                case ComponentKind.Constant:
+                    return Icons.Binary;
                 case ComponentKind.Display:
                     return Icons.Monitor;
                 case ComponentKind.Splitter:
@@ -585,7 +587,105 @@ namespace DigitalLogicSandbox.UI.Inspector
                 {
                     BuildLedColors(id, component.LedColor);
                 }
+
+                BuildLabelField(node);
             }
+
+            if (component.Kind == ComponentKind.Constant)
+            {
+                BuildConstantSection(node);
+            }
+        }
+
+        /// <summary>
+        /// Value of a constant: a text field (decimal, <c>0x</c> hex or <c>0b</c> binary), one toggle per bit (most
+        /// significant on the left) and a free-text label drawn on the node (e.g. an instruction mnemonic).
+        /// </summary>
+        private void BuildConstantSection(NodeDefinition node)
+        {
+            ComponentRef component = node.Component;
+            NodeId id = node.Id;
+            _ui.Caption(_content, "Value");
+            TMP_InputField value = _ui.FieldRow(_content, "Value",
+                component.ConstantValue.ToString(CultureInfo.InvariantCulture), text =>
+                {
+                    if (TryParseConstant(text, out int parsed) && parsed != component.ConstantValue)
+                    {
+                        _workspace.ChangeConstantValue(id, parsed);
+                    }
+
+                    MarkRebuild(); // show the stored value (or restore the old one after a refusal)
+                });
+            value.characterLimit = 10;
+            value.interactable = _workspace.IsEditable;
+
+            RectTransform grid = UiFactory.CreateRect("Bits", _content);
+            var layout = grid.gameObject.AddComponent<GridLayoutGroup>();
+            layout.cellSize = new Vector2(26f, 28f);
+            layout.spacing = new Vector2(4f, 4f);
+            layout.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
+            layout.constraintCount = ComponentRef.MaxConstantWidth;
+            grid.gameObject.AddComponent<LayoutElement>().preferredHeight = 32f;
+            for (int i = component.Width - 1; i >= 0; i--)
+            {
+                int bit = i;
+                bool set = ((component.ConstantValue >> bit) & 1) != 0;
+                Button button = _ui.Button("Bit " + bit, grid, set ? "1" : "0",
+                    () => _workspace.ChangeConstantValue(id, component.ConstantValue ^ (1 << bit)), -1f, 12f);
+                button.interactable = _workspace.IsEditable;
+                if (set)
+                {
+                    _ui.MakePrimary(button);
+                }
+
+                _ui.AddTooltip(button.gameObject, "Bit " + bit + (bit == 0 ? " (least significant)" : string.Empty));
+            }
+
+            BuildLabelField(node);
+        }
+
+        /// <summary>Free-text label drawn on constants (before the value) and displays (as the caption).</summary>
+        private void BuildLabelField(NodeDefinition node)
+        {
+            NodeId id = node.Id;
+            TMP_InputField label = _ui.FieldRow(_content, "Label", node.Label ?? string.Empty,
+                text => _workspace.SetNodeLabel(id, text));
+            label.characterLimit = 24;
+            label.interactable = _workspace.IsEditable;
+        }
+
+        /// <summary>Parses a constant typed as decimal, <c>0x</c> hexadecimal or <c>0b</c> binary.</summary>
+        public static bool TryParseConstant(string text, out int value)
+        {
+            value = 0;
+            text = (text ?? string.Empty).Trim().Replace("_", string.Empty);
+            if (text.StartsWith("0x", System.StringComparison.OrdinalIgnoreCase))
+            {
+                return int.TryParse(text.Substring(2), NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out value);
+            }
+
+            if (text.StartsWith("0b", System.StringComparison.OrdinalIgnoreCase))
+            {
+                string digits = text.Substring(2);
+                if (digits.Length == 0 || digits.Length > 16)
+                {
+                    return false;
+                }
+
+                for (int i = 0; i < digits.Length; i++)
+                {
+                    if (digits[i] != '0' && digits[i] != '1')
+                    {
+                        return false;
+                    }
+
+                    value = (value << 1) | (digits[i] - '0');
+                }
+
+                return true;
+            }
+
+            return int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out value);
         }
 
         /// <summary>One swatch per LED colour; the current one carries a check mark.</summary>

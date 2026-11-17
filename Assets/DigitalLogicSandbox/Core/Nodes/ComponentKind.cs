@@ -45,5 +45,12 @@ namespace DigitalLogicSandbox.Core.Nodes
         /// <see cref="DisplayStyle"/> is carried by <see cref="ComponentRef.Display"/>.
         /// </summary>
         Display = 9,
+
+        /// <summary>
+        /// Source utility (Phase E+): drives a fixed value of 1 to 8 bits, set in the inspector (e.g. a program
+        /// word for a ROM). Not a logic gate and not part of the interface. The compiler builds each bit from the
+        /// two primitives: NOT of the floating LOW net for a 1, AND of it for a 0.
+        /// </summary>
+        Constant = 10,
     }
 }

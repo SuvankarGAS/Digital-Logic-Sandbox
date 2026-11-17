@@ -24,6 +24,9 @@ namespace DigitalLogicSandbox.Core.Nodes
         /// <summary>Largest clock divider exponent (÷2^6 = ÷64).</summary>
         public const int MaxClockExponent = 6;
 
+        /// <summary>Widest constant (its value is stored in one byte).</summary>
+        public const int MaxConstantWidth = 8;
+
         // Stored as "value - 1" so default(ComponentRef) means width 1 / arity 0.
         private readonly byte _widthMinusOne;
         private readonly byte _arity;
@@ -65,6 +68,41 @@ namespace DigitalLogicSandbox.Core.Nodes
 
         /// <summary>How much slower than the base clock frequency a clock runs (1, 2, 4 … 64); 1 for other kinds.</summary>
         public int ClockDivider => 1 << ClockExponent;
+
+        /// <summary>Fixed value of a <see cref="ComponentKind.Constant"/> (bit 0 = least significant); 0 for other kinds.</summary>
+        public int ConstantValue => Kind == ComponentKind.Constant ? _arity : 0;
+
+        /// <summary>
+        /// A source with a fixed <paramref name="value"/> of <paramref name="width"/> bits (1 to
+        /// <see cref="MaxConstantWidth"/>). Bits above the width are dropped.
+        /// </summary>
+        public static ComponentRef Constant(int width, int value)
+        {
+            if (width < 1 || width > MaxConstantWidth)
+            {
+                throw new ArgumentOutOfRangeException(nameof(width), width,
+                    "Constant width must be between 1 and " + MaxConstantWidth + ".");
+            }
+
+            return new ComponentRef(ComponentKind.Constant, null, default, width, value & ConstantMask(width));
+        }
+
+        /// <summary>The same constant with another value (masked to its width).</summary>
+        public ComponentRef WithConstantValue(int value)
+        {
+            if (Kind != ComponentKind.Constant)
+            {
+                throw new InvalidOperationException("Only constants have a value.");
+            }
+
+            return Constant(Width, value);
+        }
+
+        /// <summary>All bits set for a constant of <paramref name="width"/> bits.</summary>
+        public static int ConstantMask(int width)
+        {
+            return (1 << Math.Max(1, Math.Min(MaxConstantWidth, width))) - 1;
+        }
 
         /// <summary>True for a power of two between 1 and 2^<see cref="MaxClockExponent"/>.</summary>
         public static bool IsValidClockDivider(int divider)
@@ -133,7 +171,7 @@ namespace DigitalLogicSandbox.Core.Nodes
         /// library, no internal circuit to inspect, no truth table entry.
         /// </summary>
         public bool IsUtility => IsBoundary || Kind == ComponentKind.Clock || IsWiring || Kind == ComponentKind.TriState ||
-            Kind == ComponentKind.Display;
+            Kind == ComponentKind.Display || Kind == ComponentKind.Constant;
 
         public static ComponentRef Primitive(string primitiveId)
         {
@@ -252,6 +290,11 @@ namespace DigitalLogicSandbox.Core.Nodes
                     return new ComponentRef(kind, null, default, clamped, (int)style,
                         style == DisplayStyle.Led ? color : 0);
                 }
+                case ComponentKind.Constant:
+                {
+                    int clamped = Math.Max(1, Math.Min(MaxConstantWidth, width));
+                    return new ComponentRef(kind, null, default, clamped, arity & ConstantMask(clamped));
+                }
                 default:
                     throw new ArgumentException("Not a utility kind: " + kind + ".", nameof(kind));
             }
@@ -307,6 +350,8 @@ namespace DigitalLogicSandbox.Core.Nodes
                     return "BusJoin[" + Width + "x" + Arity + "]";
                 case ComponentKind.Clock:
                     return ClockDivider > 1 ? "Clock/" + ClockDivider : "Clock";
+                case ComponentKind.Constant:
+                    return "Constant[" + Width + "]=" + ConstantValue;
                 case ComponentKind.Display:
                     return "Display:" + DisplayStyles.ToId(DisplayStyle) + (Width > 1 ? "[" + Width + "]" : string.Empty) +
                         (LedColor != 0 ? ":" + LedColors.ToId(LedColor) : string.Empty);

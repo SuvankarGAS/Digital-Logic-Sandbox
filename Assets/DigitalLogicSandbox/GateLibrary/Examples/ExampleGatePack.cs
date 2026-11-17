@@ -29,6 +29,7 @@ namespace DigitalLogicSandbox.GateLibrary.Examples
         public const string RoutingCategory = "Examples · Routing";
         public const string ArithmeticCategory = "Examples · Arithmetic";
         public const string MemoryCategory = "Examples · Memory";
+        public const string ComputerCategory = "Examples · Computer";
 
         /// <summary>Suffix added to a pack gate's name when the library already has a gate of that name.</summary>
         public const string ClashSuffix = " (example)";
@@ -333,8 +334,11 @@ namespace DigitalLogicSandbox.GateLibrary.Examples
             {
                 PinRef d = b.In("D");
                 PinRef e = b.In("E");
-                PinRef setBar = b.Gate("nand", d, e)[0];
+                // The reset side is built first. Power-on (resolved mode) forces the first unknown net of each loop
+                // LOW, in the order the cycle search reaches the loop's gates; entering through the reset side, that
+                // net is inside QN's gate, so every latch, flip-flop, register and counter powers on storing 0.
                 PinRef resetBar = b.Gate("nand", b.Not(d), e)[0];
+                PinRef setBar = b.Gate("nand", d, e)[0];
                 NodeDefinition qGate = b.Instance("nand");
                 NodeDefinition qnGate = b.Instance("nand");
                 PinRef q = b.OutputOf(qGate, 0);
@@ -372,21 +376,18 @@ namespace DigitalLogicSandbox.GateLibrary.Examples
 
                 b.Out("Q", b.Merge(q), 4);
             });
-            Add("counter4", "Counter 4-bit", ExampleGatePack.MemoryCategory, "Counts up by one on each rising CLK edge and wraps from 15 to 0. Ripple of toggling flip-flops.", b =>
+            Add("counter4", "Counter 4-bit", ExampleGatePack.MemoryCategory,
+                "Counts up by one on each rising CLK edge and wraps from 15 to 0. Synchronous: a register that loads " +
+                "its own value plus one, so all bits change together.", b =>
             {
                 PinRef clock = b.In("CLK");
-                var q = new PinRef[4];
-                for (int i = 0; i < 4; i++)
-                {
-                    NodeDefinition flipFlop = b.Instance("dff");
-                    PinRef qn = b.OutputOf(flipFlop, 1);
-                    b.Wire(qn, b.InputOf(flipFlop, 0)); // toggle: D = QN
-                    b.Wire(clock, b.InputOf(flipFlop, 1));
-                    q[i] = b.OutputOf(flipFlop, 0);
-                    clock = qn; // the next bit toggles when this one falls
-                }
-
-                b.Out("Q", b.Merge(q), 4);
+                NodeDefinition register = b.Instance("register4");
+                PinRef q = b.OutputOf(register, 0);
+                PinRef next = b.Gate("adder4", q, b.Const(4, 0), b.Const(1, 1))[0];
+                b.Wire(next, b.InputOf(register, 0));
+                b.Wire(b.Const(1, 1), b.InputOf(register, 1));
+                b.Wire(clock, b.InputOf(register, 2));
+                b.Out("Q", q, 4);
             });
             Add("ram16x4", "RAM 16×4", ExampleGatePack.MemoryCategory,
                 "16 words of 4 bits. DOUT always shows the word at ADDR. While WE and CLK are both HIGH, DIN is written " +
@@ -427,6 +428,126 @@ namespace DigitalLogicSandbox.GateLibrary.Examples
 
                 b.Out("DOUT", b.Merge(dout), 4);
             });
+
+            // Computer
+            Add("rom16x8", "ROM 16×8", ExampleGatePack.ComputerCategory,
+                "DATA is word W(ADDR). Wire a Constant to each W input to hold a program: the words survive Reset " +
+                "and saving. Each data bit is a tree of five MUX 4:1.", b =>
+            {
+                var words = new PinRef[16][];
+                for (int w = 0; w < 16; w++)
+                {
+                    words[w] = b.Split(b.In("W" + w, 8), 8);
+                }
+
+                PinRef[] a = b.Split(b.In("ADDR", 4), 4);
+                PinRef low = b.Merge(a[0], a[1]);
+                PinRef high = b.Merge(a[2], a[3]);
+                var data = new PinRef[8];
+                for (int bit = 0; bit < 8; bit++)
+                {
+                    var groups = new PinRef[4];
+                    for (int g = 0; g < 4; g++)
+                    {
+                        groups[g] = b.Gate("mux4", low, words[g * 4][bit], words[g * 4 + 1][bit], words[g * 4 + 2][bit],
+                            words[g * 4 + 3][bit])[0];
+                    }
+
+                    data[bit] = b.Gate("mux4", high, groups[0], groups[1], groups[2], groups[3])[0];
+                }
+
+                b.Out("DATA", b.Merge(data), 8);
+            });
+            Add("cpu4", "CPU 4-bit", ExampleGatePack.ComputerCategory, CpuDescription, BuildCpu);
+        }
+
+        /// <summary>Instruction set of the CPU (opcode = INSTR bits 7–4, operand n = bits 3–0).</summary>
+        public const string CpuDescription =
+            "Single-cycle 4-bit accumulator CPU: one instruction per rising CLK edge, fetched from INSTR (wire PC to a " +
+            "ROM's ADDR and its DATA to INSTR). Opcode = INSTR bits 7-4, n = bits 3-0. 0 NOP, 1 LDI n (A = n), " +
+            "2 LDA n (A = RAM[n]), 3 STA n (RAM[n] = A), 4 ADD n, 5 SUB n (A = A ± RAM[n]), 6 ADDI n, 7 SUBI n " +
+            "(A = A ± n), 8 JMP n, 9 JZ n, A JC n (jump if the last ADD/SUB gave zero / a carry), B OUT (OUT = A), " +
+            "F HLT. Powers on with PC = 0 and A = 0.";
+
+        /// <summary>
+        /// Datapath of the CPU, all from earlier pack gates: a 4→16 decoder on the opcode, registers for PC, A and
+        /// OUT, two flag flip-flops, the ALU, and a RAM 16×4 for data. Every register loads on the rising CLK edge;
+        /// the RAM writes during the LOW half (its CLK is NOT CLK), while its address and data are stable.
+        /// </summary>
+        private void BuildCpu(Builder b)
+        {
+            PinRef[] instr = b.Split(b.In("INSTR", 8), 8);
+            PinRef clk = b.In("CLK");
+            PinRef n = b.Merge(instr[0], instr[1], instr[2], instr[3]);
+            PinRef[] nBits = { instr[0], instr[1], instr[2], instr[3] };
+            PinRef[] op = b.Gate("dec4", b.Merge(instr[4], instr[5], instr[6], instr[7]));
+
+            PinRef Or(PinRef x, PinRef y) => b.Gate("or", x, y)[0];
+            PinRef immediate = Or(op[1], Or(op[6], op[7])); // LDI, ADDI, SUBI use n itself
+            PinRef arithmetic = Or(Or(op[4], op[5]), Or(op[6], op[7]));
+            PinRef subtract = Or(op[5], op[7]);
+            PinRef loadA = Or(arithmetic, Or(op[1], op[2]));
+
+            // Registers are placed first so their outputs can feed the logic that computes their inputs.
+            NodeDefinition pcRegister = b.Instance("register4");
+            NodeDefinition aRegister = b.Instance("register4");
+            NodeDefinition outRegister = b.Instance("register4");
+            NodeDefinition zeroFlag = b.Instance("dff");
+            NodeDefinition carryFlag = b.Instance("dff");
+            PinRef pc = b.OutputOf(pcRegister, 0);
+            PinRef a = b.OutputOf(aRegister, 0);
+            PinRef zero = b.OutputOf(zeroFlag, 0);
+            PinRef carry = b.OutputOf(carryFlag, 0);
+
+            // Operand: n for immediates, otherwise the RAM word at n. The RAM writes A during the LOW half of STA.
+            PinRef[] ram = b.Split(b.Gate("ram16x4", n, a, op[3], b.Not(clk))[0], 4);
+            var operandBits = new PinRef[4];
+            for (int i = 0; i < 4; i++)
+            {
+                operandBits[i] = b.Gate("mux2", immediate, ram[i], nBits[i])[0];
+            }
+
+            PinRef operand = b.Merge(operandBits);
+            PinRef[] alu = b.Gate("alu4", a, operand, b.Merge(subtract, b.Const(1, 0)));
+            PinRef[] y = b.Split(alu[0], 4);
+            var nextA = new PinRef[4];
+            for (int i = 0; i < 4; i++)
+            {
+                nextA[i] = b.Gate("mux2", arithmetic, operandBits[i], y[i])[0];
+            }
+
+            b.Wire(b.Merge(nextA), b.InputOf(aRegister, 0));
+            b.Wire(loadA, b.InputOf(aRegister, 1));
+            b.Wire(clk, b.InputOf(aRegister, 2));
+
+            // Flags change only on arithmetic instructions.
+            b.Wire(b.Gate("mux2", arithmetic, zero, alu[2])[0], b.InputOf(zeroFlag, 0));
+            b.Wire(clk, b.InputOf(zeroFlag, 1));
+            b.Wire(b.Gate("mux2", arithmetic, carry, alu[1])[0], b.InputOf(carryFlag, 0));
+            b.Wire(clk, b.InputOf(carryFlag, 1));
+
+            // PC: n when a jump is taken, otherwise PC + 1 (PC + 0 while halted).
+            PinRef halt = op[15];
+            PinRef taken = Or(op[8], Or(b.And(op[9], zero), b.And(op[10], carry)));
+            PinRef[] next = b.Split(b.Gate("adder4", pc, b.Const(4, 0), b.Not(halt))[0], 4);
+            var nextPc = new PinRef[4];
+            for (int i = 0; i < 4; i++)
+            {
+                nextPc[i] = b.Gate("mux2", taken, next[i], nBits[i])[0];
+            }
+
+            b.Wire(b.Merge(nextPc), b.InputOf(pcRegister, 0));
+            b.Wire(b.Const(1, 1), b.InputOf(pcRegister, 1));
+            b.Wire(clk, b.InputOf(pcRegister, 2));
+
+            b.Wire(a, b.InputOf(outRegister, 0));
+            b.Wire(op[11], b.InputOf(outRegister, 1));
+            b.Wire(clk, b.InputOf(outRegister, 2));
+
+            b.Out("PC", pc, 4);
+            b.Out("A", a, 4);
+            b.Out("OUT", b.OutputOf(outRegister, 0), 4);
+            b.Out("HALT", halt);
         }
 
         private void Add(string key, string name, string category, string description, Action<Builder> build)
@@ -479,6 +600,13 @@ namespace DigitalLogicSandbox.GateLibrary.Examples
                 NodeDefinition not = _circuit.AddNode(NotRef, CircuitPoint.Zero);
                 Wire(input, new PinRef(not.Id, NotGate.Input));
                 return new PinRef(not.Id, NotGate.Output);
+            }
+
+            /// <summary>A fixed value (a Constant utility, itself compiled to AND/NOT gates).</summary>
+            public PinRef Const(int width, int value)
+            {
+                NodeDefinition constant = _circuit.AddNode(ComponentRef.Constant(width, value), CircuitPoint.Zero);
+                return new PinRef(constant.Id, BoundarySignatures.Pin);
             }
 
             public PinRef And(PinRef a, PinRef b)

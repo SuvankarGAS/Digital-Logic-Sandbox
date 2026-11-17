@@ -220,6 +220,7 @@ namespace DigitalLogicSandbox.Rendering
                     break;
                 case CircuitChangeKind.NodeRotated:
                 case CircuitChangeKind.InterfacePortRenamed:
+                case CircuitChangeKind.NodeLabelChanged:
                     _gates.Remove(change.Node);
                     InvalidateWiresOf(change.Node);
                     UpdateNodeIndex(change.Node, removed: false);
@@ -1120,7 +1121,39 @@ namespace DigitalLogicSandbox.Rendering
                 return Circuit.TryGetInterfacePort(node.InterfacePort, out InterfacePort port) ? port.Name : "?";
             }
 
+            if (node.Component.Kind == ComponentKind.Constant && !string.IsNullOrWhiteSpace(node.Label))
+            {
+                return node.Label.Trim() + "  " + ConstantText(node.Component);
+            }
+
+            if (node.Component.Kind == ComponentKind.Display && !string.IsNullOrWhiteSpace(node.Label))
+            {
+                return node.Label.Trim(); // replaces the BIN/HEX/DEC caption, e.g. "OUT" or "PC"
+            }
+
             return TitleOf(node.Component);
+        }
+
+        /// <summary>
+        /// A constant's value as drawn on its body: a 1-bit constant as 0/1, up to 4 bits in binary, wider ones in
+        /// hexadecimal (e.g. <c>0x1F</c>).
+        /// </summary>
+        public static string ConstantText(ComponentRef component)
+        {
+            int width = component.Width;
+            int value = component.ConstantValue;
+            if (width <= 4)
+            {
+                var bits = new char[width];
+                for (int i = 0; i < width; i++)
+                {
+                    bits[i] = ((value >> (width - 1 - i)) & 1) != 0 ? '1' : '0';
+                }
+
+                return new string(bits);
+            }
+
+            return "0x" + value.ToString("X" + ((width + 3) / 4));
         }
 
         public string TitleOf(ComponentRef component)
@@ -1152,6 +1185,8 @@ namespace DigitalLogicSandbox.Rendering
                     return "TRI";
                 case ComponentKind.Display:
                     return DisplayCaption(component.DisplayStyle);
+                case ComponentKind.Constant:
+                    return ConstantText(component);
                 default:
                     return "Output";
             }

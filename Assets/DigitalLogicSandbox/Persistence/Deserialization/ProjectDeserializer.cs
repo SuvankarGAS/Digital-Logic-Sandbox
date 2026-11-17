@@ -330,6 +330,11 @@ namespace DigitalLogicSandbox.Persistence.Deserialization
                         position, rotation, node.Label);
                     break;
                 }
+                case NodeDto.KindConstant:
+                    // Lenient: the width is clamped to 1..8 and the value masked to it.
+                    circuit.RestoreNode(id, ComponentRef.Utility(ComponentKind.Constant,
+                        Math.Min(ComponentRef.MaxConstantWidth, WidthOf(node)), node.Value ?? 0), position, rotation, node.Label);
+                    break;
                 case NodeDto.KindInput:
                 case NodeDto.KindOutput:
                 {

@@ -764,6 +764,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
                 case ComponentKind.BusJoin:
                 case ComponentKind.TriState:
                 case ComponentKind.Display:
+                case ComponentKind.Constant:
                     return true;
                 default:
                     return false;
@@ -801,6 +802,10 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
                         return true;
                     case ComponentKind.TriState:
                         variant = ComponentRef.TriState(width);
+                        return true;
+                    case ComponentKind.Constant:
+                        // Narrowing drops the high bits of the value.
+                        variant = ComponentRef.Constant(width, current.ConstantValue);
                         return true;
                     case ComponentKind.Display:
                     {
@@ -949,10 +954,57 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             return ChangeComponent(node, existing.Component.WithClockDivider(divider));
         }
 
+        /// <summary>
+        /// Sets a constant's fixed value (masked to its width) as one undoable step. Values outside the width are
+        /// refused with a notification rather than silently truncated.
+        /// </summary>
+        public bool ChangeConstantValue(NodeId node, int value)
+        {
+            if (Circuit == null || !Circuit.TryGetNode(node, out NodeDefinition existing))
+            {
+                return false;
+            }
+
+            if (existing.Component.Kind != ComponentKind.Constant)
+            {
+                Notify("Only constants have a fixed value.");
+                return false;
+            }
+
+            int max = ComponentRef.ConstantMask(existing.Component.Width);
+            if (value < 0 || value > max)
+            {
+                Notify("A " + existing.Component.Width + "-bit constant holds 0 to " + max + ".");
+                return false;
+            }
+
+            return ChangeComponent(node, existing.Component.WithConstantValue(value));
+        }
+
+        /// <summary>Sets a node's free-text label (shown on constants, e.g. a mnemonic) as one undoable step.</summary>
+        public bool SetNodeLabel(NodeId node, string label)
+        {
+            if (Circuit == null || !CheckEditable() || !Circuit.TryGetNode(node, out NodeDefinition existing))
+            {
+                return false;
+            }
+
+            label = (label ?? string.Empty).Trim();
+            if (string.Equals(existing.Label, label, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            History.Execute(new SetNodeLabelCommand(Circuit, node, label));
+            return true;
+        }
+
         private static string DescribeComponent(ComponentRef component)
         {
             switch (component.Kind)
             {
+                case ComponentKind.Constant:
+                    return "constant";
                 case ComponentKind.Clock:
                     return "clock divider";
                 case ComponentKind.Display:

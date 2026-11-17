@@ -93,9 +93,9 @@ namespace DigitalLogicSandbox.Tests.EditMode.GateLibrary
         // ------------------------------------------------------------------------------------------------
 
         [Test]
-        public void Pack_HasSeventeenValidGates_BuiltOnlyFromAndNotWiringAndEarlierPackGates()
+        public void Pack_HasNineteenValidGates_BuiltOnlyFromAndNotWiringAndEarlierPackGates()
         {
-            Assert.That(_plan.Definitions.Count, Is.EqualTo(17));
+            Assert.That(_plan.Definitions.Count, Is.EqualTo(19));
             var packager = new CircuitPackager(_env.Catalog, _env.Library);
             var earlier = new HashSet<DefinitionId>();
             foreach (CircuitDefinition gate in _plan.Definitions)
@@ -120,6 +120,7 @@ namespace DigitalLogicSandbox.Tests.EditMode.GateLibrary
                         case ComponentKind.OutputBoundary:
                         case ComponentKind.Splitter:
                         case ComponentKind.Merger:
+                        case ComponentKind.Constant: // itself compiled to AND/NOT gates
                             break;
                         default:
                             Assert.Fail(gate.Name + " contains a " + node.Component.Kind + ".");
@@ -362,7 +363,8 @@ namespace DigitalLogicSandbox.Tests.EditMode.GateLibrary
             Set(ff, gate, "CLK", 0);
             Set(ff, gate, "D", 1);
             Settle(ff);
-            Get(ff, gate, "Q"); // power-on state is binary (resolved), whichever value it settles to
+            Assert.That(Get(ff, gate, "Q"), Is.Zero, "Powers on storing 0.");
+            Assert.That(Get(ff, gate, "QN"), Is.EqualTo(1UL));
 
             Set(ff, gate, "CLK", 1);
             Settle(ff);
@@ -392,6 +394,7 @@ namespace DigitalLogicSandbox.Tests.EditMode.GateLibrary
         public void Register_LoadsOnTheEdgeWhenLoadIsHigh_AndHoldsOtherwise()
         {
             SimulationContext register = Context("register4", out CircuitDefinition gate);
+            Assert.That(Get(register, gate, "Q"), Is.Zero, "Powers on at 0.");
             Set(register, gate, "CLK", 0);
             Set(register, gate, "LOAD", 1);
             Set(register, gate, "D", 0b1011);
@@ -418,11 +421,11 @@ namespace DigitalLogicSandbox.Tests.EditMode.GateLibrary
             SimulationContext counter = Context("counter4", out CircuitDefinition gate);
             Set(counter, gate, "CLK", 0);
             Settle(counter);
-            ulong start = Get(counter, gate, "Q"); // resolved power-on: binary and repeatable
+            Assert.That(Get(counter, gate, "Q"), Is.Zero, "Powers on at 0.");
             for (int edge = 1; edge <= 20; edge++)
             {
                 Pulse(counter, gate);
-                Assert.That(Get(counter, gate, "Q"), Is.EqualTo((start + (ulong)edge) & 15), "after edge " + edge);
+                Assert.That(Get(counter, gate, "Q"), Is.EqualTo((ulong)edge & 15), "after edge " + edge);
             }
         }
 
@@ -536,11 +539,11 @@ namespace DigitalLogicSandbox.Tests.EditMode.GateLibrary
 
             var history = new CommandHistory();
             history.Execute(new CompositeCommand("Add example gates", commands));
-            Assert.That(fresh.Library.DefinitionCount, Is.EqualTo(17));
+            Assert.That(fresh.Library.DefinitionCount, Is.EqualTo(19));
             history.Undo();
             Assert.That(fresh.Library.DefinitionCount, Is.Zero);
             history.Redo();
-            Assert.That(fresh.Library.DefinitionCount, Is.EqualTo(17));
+            Assert.That(fresh.Library.DefinitionCount, Is.EqualTo(19));
         }
 
         [Test]
@@ -557,7 +560,7 @@ namespace DigitalLogicSandbox.Tests.EditMode.GateLibrary
             Assert.That(result.Document, Is.Not.Null);
             Assert.That(result.Report.HasErrors, Is.False);
             ProjectDocument loaded = result.Document;
-            Assert.That(loaded.Definitions.Count, Is.EqualTo(17));
+            Assert.That(loaded.Definitions.Count, Is.EqualTo(19));
             var reloaded = new TestEnvironment();
             foreach (CircuitDefinition definition in loaded.Definitions)
             {

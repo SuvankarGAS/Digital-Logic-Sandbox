@@ -142,6 +142,15 @@ namespace DigitalLogicSandbox.UI
             }
         }
 
+        /// <summary>Opens the CPU demo as a new project, asking to save unsaved changes first.</summary>
+        public void RequestCpuDemo()
+        {
+            if (Projects != null)
+            {
+                ConfirmDiscard("opening the CPU demo", Projects.OpenCpuDemo);
+            }
+        }
+
         /// <summary>Open dialog, asking to save unsaved changes first.</summary>
         public void RequestOpen()
         {
@@ -188,6 +197,7 @@ namespace DigitalLogicSandbox.UI
             ProjectFiles = ProjectFileDialog.Create(transform, Factory, _workspace, projects);
             Toolbar.NewRequested += RequestNew;
             Toolbar.OpenRequested += RequestOpen;
+            Toolbar.CpuDemoRequested += RequestCpuDemo;
             Toolbar.SaveRequested += RequestSave;
             Toolbar.SaveAsRequested += RequestSaveAs;
             projects.Changed += RefreshProjectTitle;

@@ -89,10 +89,11 @@ namespace DigitalLogicSandbox.Rendering.Gates
             bool isInput = geometry.Kind == ComponentKind.InputBoundary;
             bool isOutput = geometry.Kind == ComponentKind.OutputBoundary;
             bool isClock = geometry.Kind == ComponentKind.Clock;
+            bool isConstant = geometry.Kind == ComponentKind.Constant;
             bool isBus = geometry.IsBusBoundary;
             bool isBoundary = (isInput || isOutput || isClock) && !isBus; // utility box with a state indicator
 
-            _fill.color = isBoundary || isBus || geometry.IsDisplay ? _theme.BoundaryFill : isCustom ? _theme.CustomGateFill : _theme.GateFill;
+            _fill.color = isBoundary || isBus || isConstant || geometry.IsDisplay ? _theme.BoundaryFill : isCustom ? _theme.CustomGateFill : _theme.GateFill;
 
             // Boundary state indicator sits at the end away from the pin.
             _state.gameObject.SetActive(isBoundary);
@@ -130,6 +131,12 @@ namespace DigitalLogicSandbox.Rendering.Gates
                 _title.transform.localPosition = new Vector3(0.1f, size.y * 0.5f - 0.3f, 0f);
                 _title.rectTransform.sizeDelta = new Vector2(size.x, 0.5f);
                 _title.fontSize = 2.2f;
+            }
+            else if (isConstant)
+            {
+                // Constant: its label (if any) and fixed value, centred in a compact utility box.
+                _title.transform.localPosition = Vector3.zero;
+                _title.fontSize = 2.8f;
             }
             else if (isBus)
             {
@@ -679,7 +686,8 @@ namespace DigitalLogicSandbox.Rendering.Gates
             }
 
             Color fill = _geometry.Kind == ComponentKind.InputBoundary || _geometry.Kind == ComponentKind.OutputBoundary ||
-                _geometry.Kind == ComponentKind.Clock || _geometry.Kind == ComponentKind.Display
+                _geometry.Kind == ComponentKind.Clock || _geometry.Kind == ComponentKind.Display ||
+                _geometry.Kind == ComponentKind.Constant
                 ? _theme.BoundaryFill
                 : _geometry.Kind == ComponentKind.Custom ? _theme.CustomGateFill : _theme.GateFill;
             _fill.color = Tint(fill);

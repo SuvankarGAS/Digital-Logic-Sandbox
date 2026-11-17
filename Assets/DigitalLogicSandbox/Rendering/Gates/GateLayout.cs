@@ -85,7 +85,7 @@ namespace DigitalLogicSandbox.Rendering.Gates
                 size = DisplaySize(display, busWidth, out displayArea);
                 PlacePins(inputPins, -size.x * 0.5f);
             }
-            else if (boundary || kind == ComponentKind.Clock)
+            else if (boundary || kind == ComponentKind.Clock || kind == ComponentKind.Constant)
             {
                 // Boundaries and the clock are compact utility boxes with a state indicator; long names widen them
                 // (in half-unit steps) so the name stays readable next to the indicator.

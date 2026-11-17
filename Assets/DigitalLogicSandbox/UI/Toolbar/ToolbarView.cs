@@ -46,6 +46,8 @@ namespace DigitalLogicSandbox.UI.Toolbar
         /// <summary>File menu: add the example gate pack to the library.</summary>
         public event System.Action ExampleGatesRequested;
 
+        public event System.Action CpuDemoRequested;
+
         public event System.Action OpenRequested;
 
         public event System.Action SaveRequested;
@@ -75,6 +77,8 @@ namespace DigitalLogicSandbox.UI.Toolbar
         public Button SaveAsButton { get; private set; }
 
         public Button ExampleGatesButton { get; private set; }
+
+        public Button CpuDemoButton { get; private set; }
 
         /// <summary>Opens the file menu.</summary>
         public Button MenuButton => _menu;
@@ -129,6 +133,8 @@ namespace DigitalLogicSandbox.UI.Toolbar
             view._fileMenu.AddSeparator();
             view.ExampleGatesButton = view._fileMenu.AddItem(Icons.PackagePlus, "Add example gates", string.Empty,
                 () => view.ExampleGatesRequested?.Invoke());
+            view.CpuDemoButton = view._fileMenu.AddItem(Icons.Cpu, "Open CPU demo", string.Empty,
+                () => view.CpuDemoRequested?.Invoke());
 
             workspace.StatusChanged += view.Refresh;
             view.Refresh();
@@ -257,6 +263,7 @@ namespace DigitalLogicSandbox.UI.Toolbar
             OpenButton.gameObject.SetActive(available);
             SaveButton.gameObject.SetActive(available);
             SaveAsButton.gameObject.SetActive(available);
+            CpuDemoButton.gameObject.SetActive(available);
         }
 
         /// <summary>Highlights the properties button while the properties panel is pinned open.</summary>

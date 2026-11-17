@@ -76,6 +76,8 @@ namespace DigitalLogicSandbox.Persistence.Serialization
         public const string KindTriState = "tristate";
         public const string KindDisplay = "display";
 
+        public const string KindConstant = "constant";
+
         public int Id;
         public string Kind;
 
@@ -111,6 +113,10 @@ namespace DigitalLogicSandbox.Persistence.Serialization
         /// <summary>Divider of a clock node (2, 4 … 64); omitted for ÷1.</summary>
         [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
         public int? Divider;
+
+        /// <summary>Fixed value of a constant node (bit 0 = least significant).</summary>
+        [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+        public int? Value;
 
         public float X;
         public float Y;

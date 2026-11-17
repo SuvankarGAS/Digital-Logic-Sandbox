@@ -424,7 +424,8 @@ TruthTableExporter`.
   See section 16. v4 (Phase D) adds the `display` node kind with a `style`
   (`AddDisplaysMigration`, no-op); see section 17. v5 adds an optional LED `color` on display nodes
   (`AddLedColorsMigration`, no-op: files without it use the default colour). v6 adds an optional clock
-  `divider` (`AddClockDividersMigration`, no-op: files without it run every clock at the base rate).
+  `divider` (`AddClockDividersMigration`, no-op: files without it run every clock at the base rate). v7 adds the
+  `constant` node kind with a `value` (`AddConstantsMigration`, no-op); see section 20.
 - Each `(id, version)` is written once, regardless of instance count. Instances reference definitions by id
   and version, so old versions stay pinned exactly as in memory.
 - **Loading:**
@@ -601,6 +602,7 @@ UI panels (toolbar, library) --> WorkspaceController --> CommandHistory --> Circ
 | Tri-state, contention | Done (Phase C): tri-state utility, bus join, shared-net resolver (section 16) |
 | Multi-bit primitives | Signatures with wide pins are bit-sliced by the compiler automatically |
 | Displays (LED, 7-seg, hex, decimal) | Done (Phase D): `Display` utility kind + `DisplayStyle`, presenter-driven views (section 17) |
+| Fixed values (ROM words, masks) | Done (Phase E+): `Constant` utility, compiled to AND/NOT gates (section 20) |
 | New display styles | Add a `DisplayStyle`, its decoding in `DisplayEncoding`, a size in `GateLayout.DisplaySize` and a library entry |
 | New file schema | Add an `IMigration` |
 
@@ -819,9 +821,9 @@ the workspace views (`GateView`, `WireView`, `GridView`).
 
 ## 19. Example gate pack *(implemented – Phase E)*
 
-- **What it is.** `GateLibrary.Examples.ExampleGatePack` builds 17 ordinary custom gates: NAND, OR, NOR, XOR;
+- **What it is.** `GateLibrary.Examples.ExampleGatePack` builds 19 ordinary custom gates: NAND, OR, NOR, XOR;
   MUX 2:1, MUX 4:1, Decoder 2→4, Decoder 4→16; Half Adder, Full Adder, Adder 4-bit, ALU 4-bit; D Latch,
-  D Flip-Flop, Register 4-bit, Counter 4-bit and RAM 16×4. A new project never contains them; File → "Add example
+  D Flip-Flop, Register 4-bit, Counter 4-bit and RAM 16×4; ROM 16×8 and CPU 4-bit (section 20). A new project never contains them; File → "Add example
   gates" adds them.
 - **Built from AND and NOT only.** Each gate contains AND/NOT primitives, boundaries, splitters/mergers and
   instances of *earlier* pack gates, referenced by ID (the Full Adder holds two Half Adder instances, not copies).
@@ -845,3 +847,36 @@ the workspace views (`GateView`, `WireView`, `GridView`).
   level-sensitive while CLK is HIGH, so the address must only change while CLK is LOW.
 - **Extension point.** More packs follow the same shape: a builder that returns definitions in dependency order with
   fixed IDs, then `Prepare` and one composite publish command.
+
+## 20. Constant utility and the CPU demo *(implemented – Phase E+)*
+
+- **Constant** (`ComponentKind.Constant`). A source utility with a fixed value of 1 to 8 bits. Like a clock divider
+  or LED colour, the value lives in the reference (`ComponentRef.Constant(width, value)`, stored in the arity
+  byte), so the signature (one output `Pin` of the width) is still a pure function of the reference.
+  - The compiler builds each bit from the two primitives: a 1 is NOT of the floating (LOW) net, a 0 is AND of it.
+    The engine is unchanged, `Reset()` settles constants with the rest of the logic in every context (live,
+    truth table, sequence analysis), and each bit is a real driver for contention checks.
+  - Editing: `WorkspaceController.ChangeConstantValue` and width changes go through `ChangeComponentCommand`
+    (undoable). The inspector offers a value field (decimal, `0x`, `0b`), one toggle per bit and a label.
+  - Node labels: `SetNodeLabelCommand` makes them undoable. A label is drawn before a constant's value and replaces
+    a display's BIN/HEX/DEC caption; other kinds still ignore it.
+  - Persistence: `"kind": "constant"` with `width` and `value` (schema v7).
+- **Power-on at 0.** The resolved power-on rule forces the first unknown net of each loop LOW, in the order the
+  cycle search reaches the loop's gates. The pack's D latch builds its reset-side NAND first, so the search enters
+  the loop through QN's gate, and every latch, flip-flop, register and counter (now synchronous: a register loading
+  Q + 1) powers on storing 0. Tests pin this.
+- **ROM 16×8 and CPU 4-bit** (`Examples · Computer`). The ROM selects word W(ADDR) through 40 MUX 4:1; programs are
+  Constants wired to its W inputs. The CPU is a single-cycle accumulator machine:
+  - opcode = INSTR[7:4], operand n = INSTR[3:0]: NOP, LDI, LDA, STA, ADD, SUB, ADDI, SUBI, JMP, JZ, JC, OUT, HLT
+    (C–E execute as NOP);
+  - datapath from pack gates: Decoder 4→16, registers for PC, A and OUT, two flag flip-flops, ALU 4-bit, Adder 4-bit
+    for PC + 1 (CIN = NOT HLT), MUX 2:1 rows, and a RAM 16×4 for data;
+  - all registers load on the rising CLK edge; the RAM gets NOT CLK, so STA writes during the LOW half while its
+    address and data are stable (under unit delay the PC → ROM → decode path is far deeper than the inversion).
+  - Flattened with a program ROM: 2 842 gates. A clock edge costs up to about one pass over them, because a new
+    instruction ripples through most of a single-cycle datapath; edges allocate nothing.
+- **CPU demo** (`GateLibrary.Examples.CpuDemo`). `AddComputer` places the ROM, the CPU and one labelled Constant per
+  program word (two staggered columns, each word level with its ROM pin), `Build` adds a clock and displays and
+  returns definitions + main circuit + a 4 Hz clock rate, and `Assemble`/`Disassemble` encode the instruction set.
+  `ProjectController.OpenCpuDemo` turns it into a new unsaved project; the File menu reaches it through the same
+  unsaved-changes prompt as New. The program is Fibonacci (1, 1, 2, 3, 5, 8, then HLT on carry).

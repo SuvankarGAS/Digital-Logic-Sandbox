@@ -68,6 +68,7 @@ namespace DigitalLogicSandbox.Persistence.Migration
                 new AddDisplaysMigration(),
                 new AddLedColorsMigration(),
                 new AddClockDividersMigration(),
+                new AddConstantsMigration(),
             });
         }
 

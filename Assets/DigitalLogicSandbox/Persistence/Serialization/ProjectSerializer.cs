@@ -165,6 +165,10 @@ namespace DigitalLogicSandbox.Persistence.Serialization
                             nodeDto.Color = LedColors.ToId(node.Component.LedColor);
                         }
                         break;
+                    case ComponentKind.Constant:
+                        nodeDto.Kind = NodeDto.KindConstant;
+                        nodeDto.Value = node.Component.ConstantValue;
+                        break;
                     default:
                         throw new InvalidOperationException("Unknown component kind " + node.Component.Kind + ".");
                 }

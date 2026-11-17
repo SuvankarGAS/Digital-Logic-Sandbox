@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using DigitalLogicSandbox.Components.Abstractions;
+using DigitalLogicSandbox.Components.BuiltIn;
 using DigitalLogicSandbox.Core.Circuit;
 using DigitalLogicSandbox.Core.Connections;
 using DigitalLogicSandbox.Core.Nodes;
@@ -255,7 +256,36 @@ namespace DigitalLogicSandbox.Simulation.Engine
                     case ComponentKind.Custom:
                         ExpandCustom(scope, node, signature);
                         break;
+
+                    case ComponentKind.Constant:
+                        AddConstant(scope, node);
+                        break;
                 }
+            }
+        }
+
+        /// <summary>
+        /// A constant is built from the two primitives, one gate per bit: a 1 is NOT of the floating (LOW) net and
+        /// a 0 is AND of it. Each bit is therefore a real driver (contention and floating ties behave as for any
+        /// gate), and power-on settles it like the rest of the logic, in every context.
+        /// </summary>
+        private void AddConstant(CompiledInstance scope, NodeDefinition node)
+        {
+            if (!_catalog.TryGetPrimitive(ComponentRef.Primitive(BuiltInComponentIds.Not), out IPrimitiveComponent not) ||
+                !_catalog.TryGetPrimitive(ComponentRef.Primitive(BuiltInComponentIds.And), out IPrimitiveComponent and))
+            {
+                Error(DiagnosticCode.MissingComponent, scope,
+                    "Constant in '" + scope.Path + "' needs the built-in AND and NOT gates.", node.Id, default);
+                return;
+            }
+
+            int[] bits = scope.GetRawOutputPinNets(new PinRef(node.Id, BoundarySignatures.Pin));
+            int value = node.Component.ConstantValue;
+            for (int b = 0; b < bits.Length; b++)
+            {
+                bool high = ((value >> b) & 1) != 0;
+                int[] inputs = high ? new[] { RawFloating } : new[] { RawFloating, RawFloating };
+                _gates.Add(new GateBuild(high ? not : and, inputs, new[] { bits[b] }, scope, node.Id));
             }
         }
 

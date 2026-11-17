@@ -147,6 +147,8 @@ namespace DigitalLogicSandbox.Core.Ports
                     return OutputOf(component.Width);
                 case ComponentKind.Clock:
                     return Clock;
+                case ComponentKind.Constant:
+                    return InputOf(component.Width);
                 case ComponentKind.Splitter:
                     return Splitter(component.Width);
                 case ComponentKind.Merger:

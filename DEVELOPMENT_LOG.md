@@ -18,6 +18,7 @@
 | C | Multi-bit logic: buses, tri-state, contention (future-expansion phase C) | ✅ Complete (2026-11-14) |
 | D | Visual components: LED, seven-segment, binary, hex, decimal displays (future-expansion phase D) | ✅ Complete (2026-11-14) |
 | E | Computer components: example gate pack up to a 4-bit ALU and 16×4 RAM (future-expansion phase E) | ✅ Complete (2026-11-17) |
+| E+ | Simple 4-bit CPU: Constant utility, ROM 16×8, CPU 4-bit and a CPU demo project | ✅ Complete (2026-11-18) |
 
 ---
 
@@ -1559,7 +1560,7 @@ as an optional pack that File → "Add example gates" puts into My Gates. A new 
   | Examples · Logic | NAND, OR, NOR, XOR |
   | Examples · Routing | MUX 2:1, MUX 4:1 (S is a 2-bit bus), Decoder 2→4, Decoder 4→16 |
   | Examples · Arithmetic | Half Adder, Full Adder, Adder 4-bit (A, B, S are 4-bit buses), ALU 4-bit |
-  | Examples · Memory | D Latch, D Flip-Flop (rising edge, master-slave), Register 4-bit (LOAD), Counter 4-bit (ripple), RAM 16×4 |
+  | Examples · Memory | D Latch, D Flip-Flop (rising edge, master-slave), Register 4-bit (LOAD), Counter 4-bit (ripple; synchronous since Phase E+), RAM 16×4 |
 
   - ALU: OP 0 add, 1 subtract (B XOR OP0, carry in OP0), 2 AND, 3 OR; flags COUT (no borrow when subtracting, 0
     for logic) and ZERO.
@@ -1608,8 +1609,80 @@ as an optional pack that File → "Add example gates" puts into My Gates. A new 
 ### Known issues / deferred
 - Flip-flops power on with Q = 1 under the resolved power-on rule (loop nets are forced LOW one at a time, which
   leaves this master-slave pair HIGH), so the counter starts at 15 and reads 0 after the first edge. It is
-  deterministic; a reset input would make the start state explicit.
+  deterministic; a reset input would make the start state explicit. (Resolved in Phase E+: everything powers on
+  at 0.)
 - The RAM's DOUT can glitch through the read multiplexers while several address bits change at once (up to 17
   waves). It settles correctly; it only matters for animation.
 - Generated layouts are tidy but not hand-tuned; the RAM (112 nodes) is large to browse.
-- No CPU yet (out of scope for this phase).
+- No CPU yet (out of scope for this phase). (Done in Phase E+.)
+
+## Phase E+ – A simple 4-bit CPU (2026-11-18)
+
+Closes CLAUDE.md §16 Phase E ("larger computer architectures") with a small, complete computer built from AND and
+NOT. The user chose program storage in *Constant* words (they survive Reset and saving) and delivery as a demo
+project (File → "Open CPU demo").
+
+### Implemented
+- **Constant utility** (`ComponentKind.Constant`, `ComponentRef.Constant(width 1–8, value)`):
+  - Compiled to one AND/NOT gate per bit (1 = NOT of the floating LOW net, 0 = AND of it): no engine change, and
+    it behaves the same in live simulation, truth tables and sequence analysis.
+  - Drawn as a compact box with its value (binary up to 4 bits, else `0x..`) after its label; library item under
+    Inputs & Outputs; inspector width, value field (decimal / `0x` / `0b`), bit toggles and label; undoable
+    (`ChangeConstantValue`, new `SetNodeLabelCommand`). Display nodes show their label as the caption.
+  - Saved as `"kind": "constant"` with `value`; schema **v7** (`AddConstantsMigration`, no-op).
+- **Power-on at 0.** The D latch now builds its reset side first, so the loop resolver enters through QN's gate and
+  latches, flip-flops and registers power on storing 0 (was Q = 1). The counter is now synchronous (a register
+  loading Q + 1): the ripple version's chained clocks stayed unknown after power-on under the new order, and the
+  synchronous one changes all bits on one edge.
+- **ROM 16×8** and **CPU 4-bit** in a new "Examples · Computer" category (pack: 19 gates). The CPU is a
+  single-cycle accumulator machine; opcode = INSTR[7:4], n = INSTR[3:0]:
+
+  | Op | Instruction | Effect |
+  |---|---|---|
+  | 0 | NOP | — |
+  | 1 / 2 / 3 | LDI n / LDA n / STA n | A = n / A = RAM[n] / RAM[n] = A |
+  | 4 / 5 | ADD n / SUB n | A = A ± RAM[n]; sets Z and C (no borrow) |
+  | 6 / 7 | ADDI n / SUBI n | A = A ± n; sets Z and C |
+  | 8 / 9 / A | JMP n / JZ n / JC n | PC = n (always / if Z / if C) |
+  | B | OUT | OUT = A |
+  | F | HLT | PC holds, HALT is HIGH |
+
+  Registers load on the rising edge; the data RAM writes during the LOW half (its CLK is NOT CLK).
+- **CPU demo** (`CpuDemo`): 16 labelled program Constants → ROM → CPU, a clock (4 Hz) and displays for PC, A, OUT
+  and HALT, running Fibonacci (OUT shows 1, 1, 2, 3, 5, 8, then HLT when the next sum carries). A tiny assembler
+  (`Assemble`/`Disassemble`) writes the program and the labels. `ProjectController.OpenCpuDemo` opens it as a new
+  unsaved project after the usual unsaved-changes prompt.
+
+### Decisions
+- **Constant as a utility, compiled to gates.** A program has to survive Reset (which zeroes switches and memory)
+  and be editable without rewiring. A Constant is a source like the clock, not a logic gate, and the compiler
+  still expresses it with AND and NOT, so the AND/NOT-only principle holds.
+- **Single-cycle CPU.** One instruction per clock is the simplest machine to follow on screen and needs no
+  microcode or state machine. A separate program ROM (Harvard style) keeps programs in Constants and data in RAM.
+- **RAM written on the LOW half.** It satisfies the RAM's "change ADDR only while CLK is LOW" rule without extra
+  gates: when the clock rises, the RAM's write closes one wave later, long before the PC change reaches the ROM.
+- **Power-on by construction order** rather than a RESET input: the Reset button already means "power on", and
+  the resolver's order is deterministic and now pinned by tests.
+
+### Test results
+- EditMode: **449 / 449 passed** (22 new):
+  - `ConstantTests`: masking and clamping, value text, one AND/NOT gate per bit that survive `Reset`, constants in
+    a truth table (no input column), contention between two constants, JSON round trip with label, v6 → v7
+    migration, inspector value parsing (decimal, hex, binary, rejects).
+  - `CpuTests`: assembler, ROM returns every word, power-on PC = A = 0, a traced program covering every
+    instruction and both outcomes of JZ/JC, STA/LDA/ADD/SUB through RAM, STA/LDA round trip at all 16 addresses,
+    Fibonacci prints 1, 1, 2, 3, 5, 8 and halts at PC = 13, clock edges allocation-free and bounded (measured up to
+    2 703 evaluations for 2 842 gates).
+  - `ExamplePackTests` updated: 19 gates, Constants allowed, DFF/register/counter power on at 0.
+- PlayMode: **88 / 88 passed** (3 new, `CpuDemoWorkspaceTests`): File menu asks about unsaved work, then opens the
+  demo, which runs to HALT with OUT = 8; changing word 0 to LDI 2 gives OUT = 6, undo restores the program and
+  OUT = 8; CPU → RAM navigation and breadcrumbs.
+- Manual (play mode screenshots): program words line up with the ROM pins in two columns with straight wires;
+  displays are labelled and ordered like the CPU pins.
+
+### Known issues / deferred
+- A program word's label is plain text: changing the value does not update its mnemonic.
+- A clock edge re-evaluates most of the CPU (single-cycle datapath, see above); fine at demo speeds.
+- The flip-flop power-on value depends on the resolver's cycle order; tests guard it, but a different cycle search
+  would need the latch revisited.
+- No assembler UI; programs are entered one Constant at a time (the label helps).

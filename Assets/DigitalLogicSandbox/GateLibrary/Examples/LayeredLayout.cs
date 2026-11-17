@@ -191,7 +191,8 @@ namespace DigitalLogicSandbox.GateLibrary.Examples
 
         private static bool IsSource(NodeDefinition node, int index, List<int>[] successors)
         {
-            return node.Component.Kind == ComponentKind.InputBoundary || node.Component.Kind == ComponentKind.Clock;
+            return node.Component.Kind == ComponentKind.InputBoundary || node.Component.Kind == ComponentKind.Clock ||
+                node.Component.Kind == ComponentKind.Constant;
         }
 
         /// <summary>Longest-path layering over the forward edges; outputs share one final column.</summary>
