@@ -18,7 +18,11 @@ namespace DigitalLogicSandbox.UI.Panels
     {
         private static readonly float[] SpeedSteps = { 0.25f, 0.5f, 1f, 2f, 4f };
 
+        /// <summary>Gap between the breadcrumb bar and the popup when both are shown.</summary>
+        private const float NavigationGap = 8f;
+
         private WorkspaceController _workspace;
+        private NavigationBar _navigationBar;
         private SignalAnimationSettings _settings;
         private Toggle _enabled;
         private Toggle _particles;
@@ -45,7 +49,12 @@ namespace DigitalLogicSandbox.UI.Panels
 
         public string SpeedText => _speedLabel.text;
 
-        public static SignalSettingsPanel Create(Transform parent, UiFactory ui, WorkspaceController workspace)
+        /// <summary>
+        /// Creates the popup. When <paramref name="navigationBar"/> is given, the popup opens below it while it is
+        /// shown (both sit at the top centre), so the breadcrumbs stay readable.
+        /// </summary>
+        public static SignalSettingsPanel Create(Transform parent, UiFactory ui, WorkspaceController workspace,
+            NavigationBar navigationBar = null)
         {
             Image window = ui.Card("Signal Settings", parent, ui.Theme.PanelHeader, radius: 12f);
             RectTransform rect = window.rectTransform;
@@ -57,6 +66,7 @@ namespace DigitalLogicSandbox.UI.Panels
             var panel = window.gameObject.AddComponent<SignalSettingsPanel>();
             panel._workspace = workspace;
             panel._settings = workspace.AnimationSettings;
+            panel._navigationBar = navigationBar;
 
             RectTransform column = UiFactory.Column("Content", rect, 6f, new RectOffset(16, 16, 6, 14));
             UiFactory.Stretch(column);
@@ -99,6 +109,8 @@ namespace DigitalLogicSandbox.UI.Panels
             ui.Button("Reset", column, "Reset visual state", workspace.ResetVisualState);
 
             panel._settings.Changed += panel.Refresh;
+            workspace.NavigationChanged += panel.UpdatePosition;
+            workspace.StatusChanged += panel.UpdatePosition;
             panel.Refresh();
             window.gameObject.SetActive(false);
             return panel;
@@ -116,6 +128,7 @@ namespace DigitalLogicSandbox.UI.Panels
             else
             {
                 Refresh();
+                UpdatePosition();
                 gameObject.SetActive(true);
                 transform.SetAsLastSibling();
                 OpenChanged?.Invoke(true);
@@ -175,6 +188,27 @@ namespace DigitalLogicSandbox.UI.Panels
             }
         }
 
+        /// <summary>Top offset of the popup: under the toolbar, and under the breadcrumb bar while that is shown.</summary>
+        public float TopOffset
+        {
+            get
+            {
+                float y = -UiFactory.TopInset + 4f;
+                if (_navigationBar != null && _navigationBar.gameObject.activeSelf)
+                {
+                    y -= NavigationBar.Height + NavigationGap;
+                }
+
+                return y;
+            }
+        }
+
+        private void UpdatePosition()
+        {
+            var rect = (RectTransform)transform;
+            rect.anchoredPosition = new Vector2(0f, TopOffset);
+        }
+
         private void Update()
         {
             Keyboard keyboard = Keyboard.current;
@@ -189,6 +223,12 @@ namespace DigitalLogicSandbox.UI.Panels
             if (_settings != null)
             {
                 _settings.Changed -= Refresh;
+            }
+
+            if (_workspace != null)
+            {
+                _workspace.NavigationChanged -= UpdatePosition;
+                _workspace.StatusChanged -= UpdatePosition;
             }
         }
     }

@@ -93,7 +93,8 @@ namespace DigitalLogicSandbox.UI
             shell.StatusBar = StatusBarView.Create(go.transform, shell.Factory, workspace);
             shell.Inspector = InspectorPanel.Create(go.transform, shell.Factory, workspace);
             shell.NavigationBar = NavigationBar.Create(go.transform, shell.Factory, workspace);
-            shell.SignalSettings = SignalSettingsPanel.Create(go.transform, shell.Factory, workspace);
+            shell.SignalSettings = SignalSettingsPanel.Create(go.transform, shell.Factory, workspace,
+                shell.NavigationBar);
             shell.ContextMenu = ContextMenuView.Create(go.transform, shell.Factory, workspace);
             shell.PackagingDialog = PackagingDialog.Create(go.transform, shell.Factory, workspace);
             shell.VersionSaveDialog = VersionSaveDialog.Create(go.transform, shell.Factory, workspace);

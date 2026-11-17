@@ -63,13 +63,16 @@ namespace DigitalLogicSandbox.Simulation.Engine
 
         public bool HasPendingWork => Context != null && Context.HasPendingWork;
 
-        /// <summary>Raised after each clock edge with the new clock value.</summary>
+        /// <summary>Raised after each base clock edge with the new value of the fastest clock domain.</summary>
         public event Action<Signal> ClockTicked;
 
         /// <summary>True when the loaded circuit contains a clock node.</summary>
         public bool HasClock => Context != null && Context.Circuit.HasClock;
 
-        /// <summary>Full clock cycles per second while running (clamped to the supported range).</summary>
+        /// <summary>
+        /// Full cycles per second of the base clock (divider ÷1) while running, clamped to the supported range. A
+        /// clock with divider d runs at <c>ClockFrequency / d</c>.
+        /// </summary>
         public float ClockFrequency
         {
             get => _clockFrequency;
@@ -230,9 +233,9 @@ namespace DigitalLogicSandbox.Simulation.Engine
 
         private void ApplyClockEdge(bool settle)
         {
-            Signal next = Context.Clock == Signal.High ? Signal.Low : Signal.High;
-            Context.SetClock(next);
             ClockEdges++;
+            Context.ApplyClockEdge(ClockEdges);
+            Signal next = Context.Clock;
             if (settle)
             {
                 Context.Settle();

@@ -193,7 +193,8 @@ namespace DigitalLogicSandbox.UI.Panels
                       (runner.ClockEnabled && runner.State == SimulationState.Running
                           ? runner.ClockFrequency.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + " Hz"
                           : "manual") +
-                      "  ·  cycle " + runner.ClockCycles
+                      "  ·  cycle " + runner.ClockCycles +
+                      (runner.Circuit.ClockDomainCount > 1 ? "  ·  " + runner.Circuit.ClockDomainCount + " clocks" : string.Empty)
                     : string.Empty;
 
                 _evaluations.text = "Evaluations  <color=#" + ColorUtility.ToHtmlStringRGB(_ui.Theme.TextPrimary) + ">" +

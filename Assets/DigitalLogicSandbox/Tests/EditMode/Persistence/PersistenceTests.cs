@@ -400,6 +400,51 @@ namespace DigitalLogicSandbox.Tests.EditMode.PersistenceTests
         }
 
         [Test]
+        public void SaveAndLoad_RestoresClockDividers_AndVersion5FilesLoadAsBaseClocks()
+        {
+            var root = new CircuitDefinition(DefinitionId.New(), "Clocks");
+            root.AddInputBoundary("EN", new CircuitPoint(-4, 4));
+            NodeDefinition fast = root.AddNode(ComponentRef.Clock, new CircuitPoint(-4, 0));
+            NodeDefinition slow = root.AddNode(ComponentRef.ClockDivided(16), new CircuitPoint(-4, 2));
+            NodeDefinition lamp = root.AddOutputBoundary("Y", new CircuitPoint(4, 0));
+            root.Connect(new PinRef(slow.Id, BoundarySignatures.Pin), BoundaryIn(lamp));
+
+            string json = ProjectSerializer.ToJson(BuildDocument(root));
+            Assert.That(json, Does.Contain("\"divider\": 16"));
+            ProjectLoadResult result = new ProjectDeserializer(null, PrimitiveRegistry.CreateDefault()).Read(json);
+            Assert.That(result.Report.HasErrors, Is.False, result.Report.ToString());
+            CircuitDefinition loaded = result.Document.RootCircuit;
+            Assert.That(loaded.GetNode(slow.Id).Component, Is.EqualTo(ComponentRef.ClockDivided(16)));
+            Assert.That(loaded.GetNode(fast.Id).Component, Is.EqualTo(ComponentRef.Clock));
+
+            // A version 5 file has no dividers: every clock runs at the base frequency.
+            JObject old = JObject.Parse(ProjectSerializer.ToJson(BuildDocument(root)));
+            old["schemaVersion"] = 5;
+            foreach (JToken node in old.SelectTokens("$..nodes[*]"))
+            {
+                ((JObject)node).Remove("divider");
+            }
+
+            ProjectLoadResult migrated = new ProjectDeserializer(null, PrimitiveRegistry.CreateDefault()).Read(old.ToString());
+            Assert.That(migrated.Report.HasErrors, Is.False, migrated.Report.ToString());
+            Assert.That(migrated.AppliedMigrations[0], Does.Contain("v5 -> v6"));
+            Assert.That(migrated.Document.RootCircuit.GetNode(slow.Id).Component, Is.EqualTo(ComponentRef.Clock));
+
+            // A damaged divider falls back to ÷1 instead of failing the load.
+            JObject damaged = JObject.Parse(json);
+            foreach (JToken node in damaged.SelectTokens("$..nodes[*]"))
+            {
+                if (node["divider"] != null)
+                {
+                    node["divider"] = 3;
+                }
+            }
+
+            ProjectLoadResult lenient = new ProjectDeserializer(null, PrimitiveRegistry.CreateDefault()).Read(damaged.ToString());
+            Assert.That(lenient.Document.RootCircuit.GetNode(slow.Id).Component, Is.EqualTo(ComponentRef.Clock));
+        }
+
+        [Test]
         public void Version1Files_AreMigrated_WithSimulationDefaults()
         {
             JObject json = JObject.Parse(ProjectSerializer.ToJson(BuildDocument(BuildRoot())));

@@ -290,7 +290,11 @@ namespace DigitalLogicSandbox.Persistence.Deserialization
                     circuit.RestoreNode(id, ComponentRef.Custom(reference), position, rotation, node.Label);
                     break;
                 case NodeDto.KindClock:
-                    circuit.RestoreNode(id, ComponentRef.Clock, position, rotation, node.Label);
+                    // An invalid divider (damaged file) falls back to ÷1.
+                    ComponentRef clock = node.Divider.HasValue && ComponentRef.IsValidClockDivider(node.Divider.Value)
+                        ? ComponentRef.ClockDivided(node.Divider.Value)
+                        : ComponentRef.Clock;
+                    circuit.RestoreNode(id, clock, position, rotation, node.Label);
                     break;
                 case NodeDto.KindSplitter:
                     circuit.RestoreNode(id, ComponentRef.Utility(ComponentKind.Splitter, WidthOf(node)), position,

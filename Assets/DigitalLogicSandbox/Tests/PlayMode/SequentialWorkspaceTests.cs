@@ -236,5 +236,69 @@ namespace DigitalLogicSandbox.Tests.PlayMode
             Assert.That(_workspace.PowerOnState, Is.EqualTo(PowerOnState.Unknown));
             Assert.That(_workspace.Runner.PowerOnState, Is.EqualTo(PowerOnState.Unknown));
         }
+        [UnityTest]
+        public IEnumerator InspectorDividerPicker_SlowsOneClock_AndSurvivesSaveAndOpen()
+        {
+            yield return LoadMain();
+            NodeId fast = _workspace.PlaceNode(ComponentRef.Clock, new Vector2(-5, 2));
+            NodeId slow = _workspace.PlaceNode(ComponentRef.Clock, new Vector2(-5, -2));
+            NodeId fastLamp = _workspace.PlaceNode(ComponentRef.OutputBoundary, new Vector2(5, 2));
+            NodeId slowLamp = _workspace.PlaceNode(ComponentRef.OutputBoundary, new Vector2(5, -2));
+            _workspace.Connect(Pin(fast), Pin(fastLamp));
+            _workspace.Connect(Pin(slow), Pin(slowLamp));
+            yield return null;
+
+            _workspace.Selection.Select(slow);
+            _app.Shell.Inspector.Rebuild();
+            UnityEngine.UI.Button divideBy4 = null;
+            foreach (UnityEngine.UI.Button button in _app.Shell.Inspector.GetComponentsInChildren<UnityEngine.UI.Button>(true))
+            {
+                if (button.name == "Divider 4")
+                {
+                    divideBy4 = button;
+                }
+            }
+
+            Assert.That(divideBy4, Is.Not.Null, "The inspector offers clock dividers.");
+            divideBy4.onClick.Invoke();
+            _workspace.Sync();
+            yield return null;
+            Assert.That(_workspace.Circuit.GetNode(slow).Component.ClockDivider, Is.EqualTo(4));
+            Assert.That(_workspace.Presenter.TryGetGateView(slow, out GateView view), Is.True);
+            Assert.That(view.Geometry.Title, Is.EqualTo("CLK ÷4"));
+            Assert.That(_workspace.Circuit.IsDriven(Pin(slowLamp)), Is.True, "Changing the divider keeps the wire.");
+            Assert.That(_workspace.Runner.Circuit.ClockDomainCount, Is.EqualTo(2));
+            Assert.That(_app.Shell.StatusBar.ClockText, Does.Contain("2 clocks"));
+
+            SimulationRunner runner = _workspace.Runner;
+            runner.Pause();
+            runner.Play();
+            runner.ClockEnabled = false;
+            runner.Reset();
+            string fastTrace = string.Empty, slowTrace = string.Empty;
+            for (int edge = 0; edge < 8; edge++)
+            {
+                Assert.That(_workspace.TickClock(), Is.True);
+                fastTrace += _workspace.Session.GetOutputValue(fastLamp).ToDisplayChar();
+                slowTrace += _workspace.Session.GetOutputValue(slowLamp).ToDisplayChar();
+            }
+
+            Assert.That(fastTrace, Is.EqualTo("10101010"));
+            Assert.That(slowTrace, Is.EqualTo("11110000"));
+            runner.ClockEnabled = true;
+
+            string path = Path.Combine(_root, "dividers" + ProjectFormat.FileExtension);
+            Assert.That(_app.Projects.SaveAs(path, out string message), Is.True, message);
+            _app.Projects.NewProject();
+            yield return null;
+            Assert.That(_app.Projects.Open(path, out message), Is.True, message);
+            yield return null;
+            Assert.That(_workspace.Circuit.GetNode(slow).Component.ClockDivider, Is.EqualTo(4));
+            Assert.That(_workspace.Circuit.GetNode(fast).Component.ClockDivider, Is.EqualTo(1));
+
+            Assert.That(_workspace.ChangeClockDivider(slow, 64), Is.True);
+            Assert.That(_workspace.Undo(), Is.True);
+            Assert.That(_workspace.Circuit.GetNode(slow).Component.ClockDivider, Is.EqualTo(4));
+        }
     }
 }

@@ -355,6 +355,7 @@ namespace DigitalLogicSandbox.TruthTable.Generation
             table.Add(new Signal[circuit.InputCount], ReadOutputs(context, outputColumns), context.LastResult.IsStable);
 
             int oscillations = context.LastResult.IsStable ? 0 : 1; // the power-on settle counts too
+            long clockEdge = 0;
             for (int step = 0; step < spec.StepCount; step++)
             {
                 Signal[] inputs = spec.Steps[step];
@@ -366,9 +367,10 @@ namespace DigitalLogicSandbox.TruthTable.Generation
                 bool stable = context.Settle().IsStable;
                 if (clocked)
                 {
-                    context.SetClock(Signal.High);
+                    // One base clock cycle (two edges); slower domains follow their own schedule.
+                    context.ApplyClockEdge(++clockEdge);
                     stable &= context.Settle().IsStable;
-                    context.SetClock(Signal.Low);
+                    context.ApplyClockEdge(++clockEdge);
                     stable &= context.Settle().IsStable;
                 }
 

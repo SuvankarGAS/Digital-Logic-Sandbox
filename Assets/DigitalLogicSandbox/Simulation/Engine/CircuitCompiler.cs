@@ -42,7 +42,7 @@ namespace DigitalLogicSandbox.Simulation.Engine
         private ValidationReport _report;
         private int _maxDepth;
         private bool _depthReported;
-        private int _rawClock;
+        private readonly int[] _rawClocks = new int[ClockSchedule.DomainCount];
 
         public CircuitCompiler(ComponentCatalog catalog, SimulationOptions options = null)
         {
@@ -67,7 +67,11 @@ namespace DigitalLogicSandbox.Simulation.Engine
             _rootOutputs.Clear();
             _maxDepth = 0;
             _depthReported = false;
-            _rawClock = -1;
+            for (int k = 0; k < _rawClocks.Length; k++)
+            {
+                _rawClocks[k] = -1;
+            }
+
             _parent.Add(RawFloating);
 
             var rootInstance = new CompiledInstance(root, null, NodeId.None);
@@ -148,15 +152,17 @@ namespace DigitalLogicSandbox.Simulation.Engine
 
                     case ComponentKind.Clock:
                     {
-                        // Every clock node, in every scope, carries the one global clock: union them into one net.
+                        // Every clock node with the same divider, in every scope, carries one clock domain: union
+                        // them into one net per divider.
                         int raw = scope.GetRawOutputPinNets(new PinRef(node.Id, BoundarySignatures.Pin))[0];
-                        if (_rawClock < 0)
+                        int domain = node.Component.ClockExponent;
+                        if (_rawClocks[domain] < 0)
                         {
-                            _rawClock = raw;
+                            _rawClocks[domain] = raw;
                         }
                         else
                         {
-                            Union(raw, _rawClock);
+                            Union(raw, _rawClocks[domain]);
                         }
 
                         break;
@@ -521,8 +527,13 @@ namespace DigitalLogicSandbox.Simulation.Engine
                 }
             }
 
-            int clockNet = _rawClock >= 0 ? rawToDense[_rawClock] : CompiledCircuit.FloatingNet;
-            ClaimExternal(externalSource, driverCount, clockNet, "the clock", report);
+            var clockNets = new int[ClockSchedule.DomainCount];
+            for (int k = 0; k < clockNets.Length; k++)
+            {
+                clockNets[k] = _rawClocks[k] >= 0 ? rawToDense[_rawClocks[k]] : CompiledCircuit.FloatingNet;
+                ClaimExternal(externalSource, driverCount, clockNets[k],
+                    k == 0 ? "the clock" : "the clock /" + (1 << k), report);
+            }
 
             rootPorts = rootDefinition.Outputs;
             var rootOutputNets = new List<int>();
@@ -592,7 +603,7 @@ namespace DigitalLogicSandbox.Simulation.Engine
             var circuit = new CompiledCircuit(rootDefinition, rootInstance, netCount, components, inputOffsets, inputNets,
                 outputOffsets, outputNets, readerOffsets, readers, driver, gateInstances, gateNodes,
                 rootInputNets.ToArray(), rootInputPorts.ToArray(), rootInputBits.ToArray(), rootOutputNets.ToArray(),
-                rootOutputPorts.ToArray(), rootOutputBits.ToArray(), _maxDepth, cycles, clockNet, sharedOffsets,
+                rootOutputPorts.ToArray(), rootOutputBits.ToArray(), _maxDepth, cycles, clockNets, sharedOffsets,
                 sharedSlots);
 
             for (int c = 0; c < cycles.Count; c++)
@@ -757,9 +768,12 @@ namespace DigitalLogicSandbox.Simulation.Engine
                 }
             }
 
-            if (_rawClock >= 0)
+            for (int k = 0; k < _rawClocks.Length; k++)
             {
-                driven[Find(_rawClock)] = true;
+                if (_rawClocks[k] >= 0)
+                {
+                    driven[Find(_rawClocks[k])] = true;
+                }
             }
 
             for (int i = 0; i < _floatingTies.Count; i++)

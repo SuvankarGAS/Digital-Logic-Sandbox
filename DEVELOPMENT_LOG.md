@@ -879,7 +879,8 @@ like the input and output boundaries.
   the sequence analysis dialog.
 
 ### Known issues / deferred
-- Only one clock domain: all clock nodes share one frequency.
+- Only one clock domain: all clock nodes share one frequency. (Resolved: clock dividers, see "Known-issue
+  cleanup".)
 - The sequence analysis panel shows up to 256 steps (`MaxDisplaySteps`). The analyzer's own limit is 1 024.
 - While a draft is being edited only the draft's clock ticks. The main circuit's clock waits until you
   return to it.
@@ -1111,7 +1112,8 @@ Goal: a minimal, calm, satisfying interface that does not overwhelm a newcomer.
 
 ### Known issues / deferred
 - The breadcrumb pill and the signal settings popover share the top-centre position. When both are open
-  inside a custom gate, the popover covers the crumbs until it is closed.
+  inside a custom gate, the popover covers the crumbs until it is closed. (Resolved: the popover opens below
+  the breadcrumbs, see "Known-issue cleanup".)
 - The fonts use the Latin subset. Missing glyphs (such as →) fall back to LiberationSans.
 
 ## Wire rendering and routing (2026-11-15)
@@ -1397,4 +1399,88 @@ up, and crossings of unrelated nets that can't be mistaken for connections.
 - Improvement is local: a better layout that needs several wires to move together at a temporary cost is not
   found.
 - Hops always bulge towards +x. Crossings closer than a hop's diameter on one segment are drawn as one hop
-  (the second is skipped).
+  (the second is skipped). (Resolved: hop sides and bridges, see "Known-issue cleanup".)
+
+## Known-issue cleanup (2026-11-17)
+
+Three of the four small known issues are fixed. The fourth, the font fallback, is still open (see below).
+
+### Implemented
+- **Signal settings popover vs breadcrumbs.** `SignalSettingsPanel` now takes the `NavigationBar`. While the bar
+  is shown, the popover opens below it (`TopOffset`), and it moves again on `NavigationChanged` and
+  `StatusChanged`, so it follows navigation while open.
+- **Clock dividers** (schema v6):
+  - Each clock node has a divider, ÷1 … ÷64 (`ComponentRef.ClockDivider`/`ClockExponent`, `ClockDivided`,
+    `WithClockDivider`). It is stored in the reference's arity byte, so equality and hashing already cover it.
+  - The compiler gives each divider its own net (`CompiledCircuit.GetClockNet(k)`, `ClockDomainCount`).
+    Clocks with the same divider share that net in every scope, custom gates included. `ClockNet` is the
+    fastest domain present.
+  - `ClockSchedule.Level(k, edge)`: the project frequency is the base rate. After base edge E, domain k is
+    HIGH when `(E + 2^k - 1) >> k` is odd, so every domain rises with the base clock on edge 1.
+  - `SimulationContext.ApplyClockEdge(edge)` (allocation-free) drives all present domains. `SetClock` drives all of
+    them at once. `SimulationRunner` and `SequenceAnalyzer` both go through `ApplyClockEdge`, so a sequence
+    step is still one base cycle.
+  - UI:
+    - The inspector has a divider picker (÷1 … ÷64), shows the resulting rate (e.g. "0.5 Hz (base ÷ 4)"),
+      and labels the type "Clock ÷4".
+    - The frequency field is now "Base rate (Hz)".
+    - The clock box reads "CLK ÷4".
+    - The status bar adds "· N clocks" when more than one domain is present.
+    - `WorkspaceController.ChangeClockDivider` makes the change undoable through `ChangeComponentCommand`.
+  - Persistence: an optional node `divider`, written only when above 1. `AddClockDividersMigration`
+    (5→6) is a no-op. An invalid divider loads as ÷1.
+- **Hop sides and bridges:**
+  - `WireCrossings.Find` returns `(x, y, side)`. A hop bulges towards -x when another net's vertical wire or a
+    gate body lies within `HopReach` (0.354) on the +x side and -x is free. Otherwise it bulges towards +x.
+    Wires on the usual half-unit lanes never block a hop.
+  - `CircuitGeometry` gathers the gate bodies near a wire for this.
+  - `WireView.AddHops` merges crossings closer than `2r + MergeSpacing` into one bridge (a quarter arc up, a
+    straight run, a quarter arc down). A single crossing is still a semicircle. Gap style merges
+    overlapping gaps the same way.
+  - `WireView.DrawnPoints` exposes the drawn path for tests.
+
+### Decisions
+- **Dividers, not free frequencies.** Power-of-two dividers of one base clock keep every edge on one timeline:
+  domains stay in phase, timing is deterministic, and a sequence-analysis step keeps its meaning. Unrelated
+  frequencies would need an event-time scheduler. Nothing in the reference material needs one yet.
+- **Divider is part of the component reference**, like the LED colour. Changing it is a `ChangeComponentCommand`
+  and needs no new command type.
+- **Default hop side stays +x**, so existing drawings don't change unless something is in the way.
+
+### Test results
+- EditMode: **405 / 405 passed** (10 new):
+  - `ClockDividerTests` (7):
+    - the ÷1/÷2/÷4/÷64 schedule;
+    - divider on `ComponentRef` (validation, clamping, equality);
+    - same-divider nets shared across the hierarchy;
+    - runner ticking per domain and reset;
+    - a single base clock behaves as before;
+    - ticking several domains allocates nothing;
+    - sequence analysis steps of one base cycle.
+  - `PersistenceTests` (+1): divider round trip, a v5 file loading as ÷1 through the v5→v6 migration, and a
+    damaged divider falling back to ÷1.
+  - `ChangeComponentCommandTests` (+1): changing a divider keeps the wire, and undo/redo work.
+  - `WireCrossingsTests` (+1): the hop side defaults to +x and flips away from a wire or gate. Both sides
+    blocked keeps +x; half-unit lanes and distant wires don't block.
+- PlayMode: **80 / 80 passed** (3 new):
+  - The popover opens below the breadcrumbs and moves back at the top level.
+  - The inspector divider picker: box title, status bar, per-domain tick traces, Save/Open, undo.
+  - Close crossings share one bridge on their side; far-apart crossings each get a hop; gap style merges.
+- Manual (play mode, screenshots):
+  - ÷1 and ÷4 clocks driving LEDs: inspector picker, "Runs at 0.5 Hz (base ÷ 4)", status bar "2 clocks".
+  - A vertical wire hopping two horizontal wires.
+  - The play-mode check found that the type row still said "Clock (global)" and that the frequency label was
+    cut off. Both are fixed.
+
+### Known issues / deferred
+- **Missing glyphs (not fixed).**
+  - The bundled Nunito TTFs are Latin subsets. Today → comes from TMP's dynamic LiberationSans fallback
+    and ÷ from the static LiberationSans asset, so these characters render, but in a different typeface.
+  - The planned fix, building a fallback from an OS font at runtime, does not work with TMP 3.0.9:
+    `TMP_FontAsset.CreateFontAsset(Font)` returns null for `Font.CreateDynamicFontFromOSFont`, and the
+    family-name overload only exists in TMP 3.2+.
+  - The remaining option is to bundle a wider OFL font, such as full Nunito or a Noto symbols font, as an extra
+    fallback. That adds a third-party asset, so it waits for a decision.
+- A gate that moves next to a wire without rerouting it keeps the wire's old hop side until that wire's
+  crossings are recomputed.
+

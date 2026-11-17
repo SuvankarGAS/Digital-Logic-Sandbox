@@ -418,5 +418,49 @@ namespace DigitalLogicSandbox.Tests.PlayMode
             app.Shell.SignalSettings.Toggle();
             Assert.That(app.Shell.SignalSettings.IsOpen, Is.False);
         }
+
+        [UnityTest]
+        public IEnumerator SignalsPanel_OpensBelowTheBreadcrumbs()
+        {
+            yield return SceneManager.LoadSceneAsync("Main", LoadSceneMode.Single);
+            yield return null;
+            AppBootstrap app = AppBootstrap.Instance;
+            WorkspaceController workspace = app.Workspace;
+            workspace.WorkspaceCamera.Animate = false;
+            var panel = (RectTransform)app.Shell.SignalSettings.transform;
+
+            // Top level: no breadcrumbs, the popup keeps its place under the toolbar.
+            app.Shell.SignalSettings.Toggle();
+            yield return null;
+            Assert.That(app.Shell.NavigationBar.gameObject.activeSelf, Is.False);
+            float topLevelY = panel.anchoredPosition.y;
+            app.Shell.SignalSettings.Toggle();
+
+            CircuitDefinition nand = HierarchyFixtures.PublishNand(app.Library);
+            NodeId gate = workspace.PlaceNode(ComponentRef.Custom(nand.Reference), Vector2.zero);
+            Assert.That(workspace.OpenNode(gate), Is.True);
+            yield return null;
+            Assert.That(app.Shell.NavigationBar.gameObject.activeSelf, Is.True);
+
+            app.Shell.SignalSettings.Toggle();
+            yield return null;
+            Rect bar = WorldRect((RectTransform)app.Shell.NavigationBar.transform);
+            Rect popup = WorldRect(panel);
+            Assert.That(popup.Overlaps(bar), Is.False, "The popup must not cover the breadcrumbs.");
+            Assert.That(panel.anchoredPosition.y, Is.LessThan(topLevelY));
+
+            // Going back up while open moves it back.
+            workspace.NavigateUp();
+            yield return null;
+            Assert.That(panel.anchoredPosition.y, Is.EqualTo(topLevelY).Within(0.01f));
+            app.Shell.SignalSettings.Close();
+        }
+
+        private static Rect WorldRect(RectTransform rect)
+        {
+            var corners = new Vector3[4];
+            rect.GetWorldCorners(corners);
+            return Rect.MinMaxRect(corners[0].x, corners[0].y, corners[2].x, corners[2].y);
+        }
     }
 }

@@ -13,6 +13,7 @@ using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
+using Object = UnityEngine.Object;
 
 namespace DigitalLogicSandbox.Tests.PlayMode
 {
@@ -106,6 +107,72 @@ namespace DigitalLogicSandbox.Tests.PlayMode
             Assert.That(v.Length, Is.GreaterThan(RoutedLength(_v) + 0.1f), "The arc is longer than the straight run.");
             Assert.That(h.CrossingCount, Is.Zero);
             Assert.That(h.PointCount, Is.EqualTo(2), "The horizontal wire stays straight.");
+        }
+
+        [UnityTest]
+        public IEnumerator CloseCrossings_ShareOneBridge_OnTheirSide()
+        {
+            yield return LoadCrossing();
+            var parent = new GameObject("Bridge Test");
+            try
+            {
+                WireView wire = WireView.Create(parent.transform, _app.Theme);
+                wire.SetPath(new List<Vector3> { new Vector3(0f, -4f, 0f), new Vector3(0f, 4f, 0f) });
+
+                // Two crossings 0.25 apart (closer than a hop's diameter) on the +x side.
+                var crossings = new List<Vector3> { new Vector3(0f, 0f, 1f), new Vector3(0f, 0.25f, 1f) };
+                wire.SetCrossings(crossings, WireCrossingStyle.Hop);
+                Assert.That(wire.PointCount, Is.EqualTo(2 + 10), "One bridge (two quarter arcs), not two hops.");
+                AssertBridgeClears(wire, 1f, 0f, 0.25f);
+
+                // The same crossings flagged for -x bulge the other way.
+                crossings[0] = new Vector3(0f, 0f, -1f);
+                crossings[1] = new Vector3(0f, 0.25f, -1f);
+                wire.SetCrossings(crossings, WireCrossingStyle.Hop);
+                AssertBridgeClears(wire, -1f, 0f, 0.25f);
+
+                // Far-apart crossings still get a hop each.
+                crossings[1] = new Vector3(0f, 2f, 1f);
+                wire.SetCrossings(crossings, WireCrossingStyle.Hop);
+                Assert.That(wire.PointCount, Is.EqualTo(2 + 20));
+
+                // Gap style: close crossings make one longer gap (the segment is drawn in two pieces).
+                crossings[1] = new Vector3(0f, 0.25f, 1f);
+                wire.SetCrossings(crossings, WireCrossingStyle.Gap);
+                Assert.That(wire.QuadCount, Is.EqualTo(2));
+            }
+            finally
+            {
+                Object.Destroy(parent);
+            }
+        }
+
+        /// <summary>Every drawn point level with a crossed wire lies beside the wire, on <paramref name="side"/>.</summary>
+        private static void AssertBridgeClears(WireView wire, float side, params float[] crossedY)
+        {
+            foreach (Vector3 point in wire.DrawnPoints)
+            {
+                Assert.That(point.x * side, Is.GreaterThanOrEqualTo(-1e-4f), "The bridge stays on its side.");
+            }
+
+            foreach (float y in crossedY)
+            {
+                bool covered = false;
+                IReadOnlyList<Vector3> points = wire.DrawnPoints;
+                for (int i = 1; i < points.Count; i++)
+                {
+                    Vector3 a = points[i - 1];
+                    Vector3 b = points[i];
+                    if ((a.y - y) * (b.y - y) <= 0f && a.y != b.y)
+                    {
+                        float x = Mathf.Lerp(a.x, b.x, (y - a.y) / (b.y - a.y));
+                        Assert.That(Mathf.Abs(x), Is.GreaterThan(0.1f), "No drawn point touches the wire crossed at y = " + y);
+                        covered = true;
+                    }
+                }
+
+                Assert.That(covered, Is.True);
+            }
         }
 
         [UnityTest]

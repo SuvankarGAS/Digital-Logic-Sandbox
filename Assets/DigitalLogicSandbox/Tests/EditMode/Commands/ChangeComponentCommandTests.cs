@@ -36,6 +36,25 @@ namespace DigitalLogicSandbox.Tests.EditMode.Commands
         }
 
         [Test]
+        public void ChangingAClockDivider_KeepsConnections_AndUndoes()
+        {
+            NodeDefinition clock = _circuit.AddNode(ComponentRef.Clock, new CircuitPoint(0f, 0f));
+            NodeDefinition lamp = _circuit.AddOutputBoundary("Y", new CircuitPoint(4f, 0f));
+            _circuit.Connect(BusPin(clock), BusPin(lamp));
+
+            var command = new ChangeComponentCommand(_circuit, _env.Catalog, clock.Id, ComponentRef.ClockDivided(4));
+            _history.Execute(command);
+            Assert.That(_circuit.GetNode(clock.Id).Component.ClockDivider, Is.EqualTo(4));
+            Assert.That(command.DroppedConnections, Is.Zero);
+            Assert.That(_circuit.IsDriven(BusPin(lamp)), Is.True);
+
+            _history.Undo();
+            Assert.That(_circuit.GetNode(clock.Id).Component, Is.EqualTo(ComponentRef.Clock));
+            _history.Redo();
+            Assert.That(_circuit.GetNode(clock.Id).Component, Is.EqualTo(ComponentRef.ClockDivided(4)));
+        }
+
+        [Test]
         public void NarrowingASplitter_DropsDanglingConnections_UndoRestoresThem()
         {
             NodeDefinition bus = _circuit.AddInputBoundary("A", new CircuitPoint(0f, 0f), 4);

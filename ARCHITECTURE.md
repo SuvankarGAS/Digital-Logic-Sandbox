@@ -423,7 +423,8 @@ TruthTableExporter`.
   node `width`/`arity`, the bus node kinds and decimal bus input values (`AddBusSupportMigration`, no-op).
   See section 16. v4 (Phase D) adds the `display` node kind with a `style`
   (`AddDisplaysMigration`, no-op); see section 17. v5 adds an optional LED `color` on display nodes
-  (`AddLedColorsMigration`, no-op: files without it use the default colour).
+  (`AddLedColorsMigration`, no-op: files without it use the default colour). v6 adds an optional clock
+  `divider` (`AddClockDividersMigration`, no-op: files without it run every clock at the base rate).
 - Each `(id, version)` is written once, regardless of instance count. Instances reference definitions by id
   and version, so old versions stay pinned exactly as in memory.
 - **Loading:**
@@ -555,15 +556,19 @@ UI panels (toolbar, library) --> WorkspaceController --> CommandHistory --> Circ
   - **Crossings.** `WireCrossings.Find` lists the points where a wire's *vertical* segments strictly cross
     another net's horizontal segments. Points closer than 0.3 to a bend, pin or T-touch are skipped, and so
     are fan-out wires of the same source. Only the vertical wire is decorated, so the horizontal one stays
-    straight.
+    straight. Each point is `(x, y, side)`: a hop bulges towards +x unless another net's vertical wire or a gate
+    body lies within `WireCrossings.HopReach` (0.354) on that side and the -x side is clear.
     - `CircuitGeometry.GetCrossings` caches them per wire. Any route change queues that wire and every wire
       near its old and new bounds (`DrainCrossingChanges`). The presenter pushes them to the views after
       reroutes and improvements, but not during a drag.
     - `WireView.SetCrossings(points, style)` draws `WireCrossingStyle.Hop`, `Gap` or `Plain`:
-      - Hop: an 8-segment semicircle of radius 0.18 (x1.3 on buses) bulging towards +x. It is inserted into
-        the drawn polyline, so the travelling front and particles follow the arc.
-      - Gap: the crossed segment's quad is split around the crossing (+/-0.2). The pieces keep the full
-        segment's path distances, so a transition jumps the gap.
+      - Hop: an 8-segment semicircle of radius 0.18 (x1.3 on buses) bulging to the crossing's side. Crossings
+        closer than a hop's diameter plus `WireView.MergeSpacing` (0.12) share one bridge: a quarter arc up, a
+        straight run beside the wire and a quarter arc down, on the side of its first crossing. It is inserted
+        into the drawn polyline, so the travelling front and particles follow the arc.
+      - Gap: the crossed segment's quad is split around the crossing (+/-0.2). Gaps that overlap or nearly
+        touch merge into one. The pieces keep the full segment's path distances, so a transition jumps the
+        gap.
       - Plain: the wire is drawn unchanged.
     - Routing, hit-testing and junction dots always use the plain geometry path.
     - The style is a project setting (`settings.wireCrossings`, optional, default `"Hop"`; no schema bump),
@@ -588,7 +593,8 @@ UI panels (toolbar, library) --> WorkspaceController --> CommandHistory --> Circ
 |---|---|
 | New primitives (only if ever needed) | Implement `IPrimitiveComponent`, register it |
 | Sequential logic / clocks | Done (Phase B): gate-level feedback, unit delay, global clock net (section 15) |
-| Multiple clock domains | Named clocks: one compiled net per clock name instead of the single `ClockNet` |
+| Multiple clock domains | Done: divider domains (÷1 … ÷64) derived from one base clock (section 15) |
+| Unrelated clock frequencies | Would need an event-time scheduler in `SimulationRunner` and sequence analysis |
 | Buses / multi-bit | Done (Phase C): pin widths, splitter/merger, buses flattened to bit nets (section 16) |
 | Tri-state, contention | Done (Phase C): tri-state utility, bus join, shared-net resolver (section 16) |
 | Multi-bit primitives | Signatures with wide pins are bit-sliced by the compiler automatically |
@@ -633,9 +639,15 @@ latches, and so on. The engine has no sequential primitive. What makes this well
   switching to `Unknown`. Since NOT X = X and AND with X is X unless another input is 0, the circuit settles.
   The status is `Oscillating`, and `SimulationDiagnostics` reports an `Oscillation` warning.
 - **Clock.** `ComponentKind.Clock` is a utility node (`ComponentRef.IsUtility`) with no inputs and one output.
-  The compiler unions every clock node in the whole hierarchy into one net (`CompiledCircuit.ClockNet`), so
-  a packaged counter and the circuit around it share one clock. `SimulationContext.SetClock` drives that
-  net like an input.
+  - **Divider domains.** Each clock node carries a divider ÷2^k, k = 0…6 (`ComponentRef.ClockDivider`, stored
+    in the reference's arity byte). The compiler unions every clock node with the same divider, in the whole
+    hierarchy, into one net (`CompiledCircuit.GetClockNet(k)`), so a packaged counter and the circuit around
+    it share a domain. `ClockNet` is the fastest domain present; `ClockDomainCount` counts them.
+  - **Schedule** (`ClockSchedule.Level`). The project frequency is the base rate. Edges are counted on the base
+    clock: after base edge E (from 1) domain k is HIGH when `(E + 2^k - 1) >> k` is odd. Every domain is LOW
+    at power-on and all rise together on edge 1, so the domains stay in phase and timing is deterministic.
+  - `SimulationContext.ApplyClockEdge(edge)` sets each present domain to its scheduled level (allocation-free)
+    and schedules the readers of the ones that changed. `SetClock(value)` drives every domain at once.
   - `SimulationRunner` owns time: `Advance(dt)` applies one edge per half period while it is running and the
     clock is enabled. It is capped at 8 edges per call and drops any backlog.
   - `TickClock()` applies a manual edge, and `Step()` starts the next edge when the circuit is idle.
@@ -648,12 +660,14 @@ latches, and so on. The engine has no sequential primitive. What makes this well
     (an input holds its last value), the step count, `PowerOnState`, and `PulseClock`.
   - It compiles into a fresh, non-recording context; the live context is never touched. Row 0 is the
     power-on state.
-  - Each step sets the inputs and settles. If the circuit is clocked, the step then drives the clock HIGH,
-    settles, drives it LOW and settles.
+  - Each step sets the inputs and settles. If the circuit is clocked, the step then applies one base clock
+    cycle (two `ApplyClockEdge` calls, each followed by a settle). Slower domains change only on the steps
+    their schedule says.
   - Unstable rows are flagged. Each result describes one stimulus, not the whole circuit: the dialog and
     the docs say so, and the truth table keeps refusing these circuits.
-- **Settings.** `ClockFrequency`, `ClockEnabled` and `PowerOnState` are project settings, stored in
-  `settings.simulation` (schema v2). The main and draft sessions share them through one `SimulationOptions`
+- **Settings.** `ClockFrequency` (the base rate), `ClockEnabled` and `PowerOnState` are project settings,
+  stored in `settings.simulation` (schema v2). A clock's divider is part of its node: `"divider": 4`, written
+  only when above 1 (schema v6). The inspector's divider picker changes it through `ChangeComponentCommand`. The main and draft sessions share them through one `SimulationOptions`
   instance and the navigator.
 
 ## 16. Multi-bit logic *(implemented – Phase C)*

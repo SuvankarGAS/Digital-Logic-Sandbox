@@ -12,13 +12,17 @@ namespace DigitalLogicSandbox.Core.Nodes
     /// Parameterised utilities carry their parameters here, so a component's signature is a pure function of its
     /// reference: <see cref="Width"/> (bits of a bus boundary, splitter, merger or bus join) and
     /// <see cref="Arity"/> (number of drivers a bus join accepts). LED displays also carry a presentational
-    /// <see cref="LedColor"/>, which never affects simulation.
+    /// <see cref="LedColor"/>, which never affects simulation. Clocks carry a <see cref="ClockDivider"/> (stored as
+    /// its base-2 exponent): clocks with the same divider share one clock domain.
     /// </para>
     /// </summary>
     public readonly struct ComponentRef : IEquatable<ComponentRef>
     {
         /// <summary>Most drivers a bus join accepts.</summary>
         public const int MaxBusJoinInputs = 8;
+
+        /// <summary>Largest clock divider exponent (÷2^6 = ÷64).</summary>
+        public const int MaxClockExponent = 6;
 
         // Stored as "value - 1" so default(ComponentRef) means width 1 / arity 0.
         private readonly byte _widthMinusOne;
@@ -55,6 +59,52 @@ namespace DigitalLogicSandbox.Core.Nodes
 
         /// <summary>Colour of an LED display (see <see cref="LedColors"/>); 0 for everything else.</summary>
         public int LedColor => Kind == ComponentKind.Display && DisplayStyle == DisplayStyle.Led ? _color : 0;
+
+        /// <summary>Base-2 exponent of a clock's divider (0 = ÷1); 0 for every other kind.</summary>
+        public int ClockExponent => Kind == ComponentKind.Clock ? _arity : 0;
+
+        /// <summary>How much slower than the base clock frequency a clock runs (1, 2, 4 … 64); 1 for other kinds.</summary>
+        public int ClockDivider => 1 << ClockExponent;
+
+        /// <summary>True for a power of two between 1 and 2^<see cref="MaxClockExponent"/>.</summary>
+        public static bool IsValidClockDivider(int divider)
+        {
+            return divider >= 1 && divider <= 1 << MaxClockExponent && (divider & (divider - 1)) == 0;
+        }
+
+        /// <summary>A clock running at the base frequency divided by <paramref name="divider"/>.</summary>
+        public static ComponentRef ClockDivided(int divider)
+        {
+            return new ComponentRef(ComponentKind.Clock, null, default, 1, ExponentOf(divider));
+        }
+
+        /// <summary>The same clock with another divider.</summary>
+        public ComponentRef WithClockDivider(int divider)
+        {
+            if (Kind != ComponentKind.Clock)
+            {
+                throw new InvalidOperationException("Only clocks have a divider.");
+            }
+
+            return ClockDivided(divider);
+        }
+
+        private static int ExponentOf(int divider)
+        {
+            if (!IsValidClockDivider(divider))
+            {
+                throw new ArgumentOutOfRangeException(nameof(divider), divider,
+                    "Clock divider must be a power of two between 1 and " + (1 << MaxClockExponent) + ".");
+            }
+
+            int exponent = 0;
+            while (1 << exponent < divider)
+            {
+                exponent++;
+            }
+
+            return exponent;
+        }
 
         /// <summary>The same LED display lit in another colour.</summary>
         public ComponentRef WithLedColor(int color)
@@ -185,9 +235,11 @@ namespace DigitalLogicSandbox.Core.Nodes
             {
                 case ComponentKind.InputBoundary:
                 case ComponentKind.OutputBoundary:
-                case ComponentKind.Clock:
                 case ComponentKind.TriState:
-                    return new ComponentRef(kind, null, default, kind == ComponentKind.Clock ? 1 : width);
+                    return new ComponentRef(kind, null, default, width);
+                case ComponentKind.Clock:
+                    // Arity carries the divider exponent.
+                    return new ComponentRef(kind, null, default, 1, Math.Max(0, Math.Min(MaxClockExponent, arity)));
                 case ComponentKind.Splitter:
                 case ComponentKind.Merger:
                     return new ComponentRef(kind, null, default, Math.Max(2, width));
@@ -253,6 +305,8 @@ namespace DigitalLogicSandbox.Core.Nodes
                     return "custom:" + Definition;
                 case ComponentKind.BusJoin:
                     return "BusJoin[" + Width + "x" + Arity + "]";
+                case ComponentKind.Clock:
+                    return ClockDivider > 1 ? "Clock/" + ClockDivider : "Clock";
                 case ComponentKind.Display:
                     return "Display:" + DisplayStyles.ToId(DisplayStyle) + (Width > 1 ? "[" + Width + "]" : string.Empty) +
                         (LedColor != 0 ? ":" + LedColors.ToId(LedColor) : string.Empty);

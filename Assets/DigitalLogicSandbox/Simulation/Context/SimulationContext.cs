@@ -29,8 +29,8 @@ namespace DigitalLogicSandbox.Simulation.Context
     /// <see cref="SettleStatus.Oscillating"/>.
     /// </para>
     /// <para>
-    /// <b>Clock.</b> The global clock is a source net like a root input (<see cref="SetClock"/>). Clock edges are
-    /// sequential steps driven from outside (<see cref="SimulationRunner"/>, sequence analysis); propagation of each
+    /// <b>Clock.</b> Each clock domain (one per divider, see <see cref="ClockSchedule"/>) is a source net like a root
+    /// input (<see cref="ApplyClockEdge"/>, <see cref="SetClock"/>). Clock edges are sequential steps driven from outside (<see cref="SimulationRunner"/>, sequence analysis); propagation of each
     /// edge is ordinary settling.
     /// </para>
     /// <para>
@@ -204,8 +204,14 @@ namespace DigitalLogicSandbox.Simulation.Context
             return true;
         }
 
-        /// <summary>Current value of the global clock (LOW when the circuit has no clock).</summary>
+        /// <summary>Current value of the fastest clock domain present (LOW when the circuit has no clock).</summary>
         public Signal Clock => _nets[_circuit.ClockNet];
+
+        /// <summary>Current value of the clock domain with divider 2^<paramref name="exponent"/> (LOW when absent).</summary>
+        public Signal GetClock(int exponent)
+        {
+            return _nets[_circuit.GetClockNet(exponent)];
+        }
 
         /// <summary>Copies all net values into <paramref name="destination"/> (length ≥ NetCount).</summary>
         public void CopyNets(Signal[] destination)
@@ -299,12 +305,39 @@ namespace DigitalLogicSandbox.Simulation.Context
         }
 
         /// <summary>
-        /// Drives the global clock and schedules its readers (a clock edge). Does not propagate. Returns false when
-        /// the value is unchanged or the circuit has no clock.
+        /// Drives every clock domain to <paramref name="value"/> and schedules their readers. Does not propagate.
+        /// Returns false when nothing changed or the circuit has no clock. Prefer <see cref="ApplyClockEdge"/>, which
+        /// keeps slower domains on their schedule.
         /// </summary>
         public bool SetClock(Signal value)
         {
-            return SetSourceNet(_circuit.ClockNet, value);
+            bool changed = false;
+            for (int k = 0; k < ClockSchedule.DomainCount; k++)
+            {
+                changed |= SetSourceNet(_circuit.GetClockNet(k), value);
+            }
+
+            return changed;
+        }
+
+        /// <summary>
+        /// Sets every clock domain to its level after base edge <paramref name="edge"/> (see
+        /// <see cref="ClockSchedule"/>) and schedules the readers of the domains that changed. Does not propagate.
+        /// Returns true if any domain changed. Allocation-free.
+        /// </summary>
+        public bool ApplyClockEdge(long edge)
+        {
+            bool changed = false;
+            for (int k = 0; k < ClockSchedule.DomainCount; k++)
+            {
+                int net = _circuit.GetClockNet(k);
+                if (net != CompiledCircuit.FloatingNet)
+                {
+                    changed |= SetSourceNet(net, ClockSchedule.Level(k, edge));
+                }
+            }
+
+            return changed;
         }
 
         /// <summary>Propagates until stable or until the evaluation budget is exhausted (oscillation).</summary>

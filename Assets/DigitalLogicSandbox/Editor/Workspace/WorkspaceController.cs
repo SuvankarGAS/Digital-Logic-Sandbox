@@ -835,7 +835,8 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
                 return false;
             }
 
-            if (!IsResizable(existing.Component) || existing.Component.Kind != component.Kind)
+            bool changeable = IsResizable(existing.Component) || existing.Component.Kind == ComponentKind.Clock;
+            if (!changeable || existing.Component.Kind != component.Kind)
             {
                 Notify("This component's size or style cannot be changed.");
                 return false;
@@ -912,10 +913,38 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             return ChangeComponent(node, existing.Component.WithLedColor(color));
         }
 
+        /// <summary>
+        /// Runs a clock at the base frequency divided by <paramref name="divider"/> (1, 2, 4 … 64) as one undoable
+        /// step. Clocks with the same divider share a clock domain.
+        /// </summary>
+        public bool ChangeClockDivider(NodeId node, int divider)
+        {
+            if (Circuit == null || !Circuit.TryGetNode(node, out NodeDefinition existing))
+            {
+                return false;
+            }
+
+            if (existing.Component.Kind != ComponentKind.Clock)
+            {
+                Notify("Only clocks have a divider.");
+                return false;
+            }
+
+            if (!ComponentRef.IsValidClockDivider(divider))
+            {
+                Notify("A clock divider must be a power of two from 1 to " + (1 << ComponentRef.MaxClockExponent) + ".");
+                return false;
+            }
+
+            return ChangeComponent(node, existing.Component.WithClockDivider(divider));
+        }
+
         private static string DescribeComponent(ComponentRef component)
         {
             switch (component.Kind)
             {
+                case ComponentKind.Clock:
+                    return "clock divider";
                 case ComponentKind.Display:
                     return "display";
                 case ComponentKind.BusJoin:

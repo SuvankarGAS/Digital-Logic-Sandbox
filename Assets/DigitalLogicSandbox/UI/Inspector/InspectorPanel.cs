@@ -468,7 +468,7 @@ namespace DigitalLogicSandbox.UI.Inspector
 
             if (node.Component.Kind == ComponentKind.Clock)
             {
-                BuildClockSection();
+                BuildClockSection(node);
             }
 
             _ui.Caption(_content, "Actions");
@@ -644,10 +644,15 @@ namespace DigitalLogicSandbox.UI.Inspector
             }
         }
 
-        private void BuildClockSection()
+        private void BuildClockSection(NodeDefinition clockNode = null)
         {
             _ui.Caption(_content, "Clock & power-on");
-            TMP_InputField frequency = _ui.FieldRow(_content, "Frequency (Hz)",
+            if (clockNode != null)
+            {
+                BuildClockDivider(clockNode);
+            }
+
+            TMP_InputField frequency = _ui.FieldRow(_content, "Base rate (Hz)",
                 _workspace.ClockFrequency.ToString("0.##", CultureInfo.InvariantCulture), value =>
                 {
                     if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out float hz))
@@ -668,6 +673,43 @@ namespace DigitalLogicSandbox.UI.Inspector
                 "Click a clock node (or Step while paused) for a single edge. Power-on mode applies at the next Reset.",
                 11.5f, _ui.Theme.TextSecondary, TextAlignmentOptions.TopLeft);
             note.enableWordWrapping = true;
+        }
+
+        /// <summary>
+        /// Divider picker of a clock node: one button per divider (÷1 … ÷64), the current one highlighted, plus the
+        /// resulting frequency. Clocks with the same divider share one clock domain.
+        /// </summary>
+        private void BuildClockDivider(NodeDefinition clockNode)
+        {
+            NodeId id = clockNode.Id;
+            int current = clockNode.Component.ClockDivider;
+            RectTransform grid = UiFactory.CreateRect("Dividers", _content);
+            var layout = grid.gameObject.AddComponent<GridLayoutGroup>();
+            layout.cellSize = new Vector2(50f, 28f);
+            layout.spacing = new Vector2(4f, 4f);
+            layout.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
+            layout.constraintCount = 4;
+            int count = ComponentRef.MaxClockExponent + 1;
+            grid.gameObject.AddComponent<LayoutElement>().preferredHeight = Mathf.Ceil(count / 4f) * 32f;
+            for (int k = 0; k < count; k++)
+            {
+                int divider = 1 << k;
+                Button button = _ui.Button("Divider " + divider, grid, "÷" + divider,
+                    () => _workspace.ChangeClockDivider(id, divider), -1f, 12f);
+                button.interactable = _workspace.IsEditable;
+                if (divider == current)
+                {
+                    _ui.MakePrimary(button);
+                }
+
+                _ui.AddTooltip(button.gameObject, divider == 1
+                    ? "Run at the base frequency"
+                    : "Run " + divider + " times slower than the base frequency");
+            }
+
+            float hz = _workspace.ClockFrequency / current;
+            _ui.Property(_content, "Runs at", hz.ToString("0.###", CultureInfo.InvariantCulture) + " Hz" +
+                (current > 1 ? "  (base ÷ " + current + ")" : string.Empty));
         }
 
         private void RefreshClockStatus()
@@ -912,7 +954,7 @@ namespace DigitalLogicSandbox.UI.Inspector
                 case ComponentKind.InputBoundary:
                     return "Circuit input";
                 case ComponentKind.Clock:
-                    return "Clock (global)";
+                    return component.ClockDivider > 1 ? "Clock ÷" + component.ClockDivider : "Clock";
                 case ComponentKind.Splitter:
                     return "Bus splitter";
                 case ComponentKind.Merger:

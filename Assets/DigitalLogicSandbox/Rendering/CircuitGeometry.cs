@@ -76,13 +76,14 @@ namespace DigitalLogicSandbox.Rendering
         private Rect _interactiveFreed;
 
         // Crossings of other nets (drawn as hops or gaps): see GetCrossings.
-        private readonly Dictionary<PinRef, List<Vector2>> _crossings = new Dictionary<PinRef, List<Vector2>>();
-        private readonly Stack<List<Vector2>> _crossingPool = new Stack<List<Vector2>>();
+        private readonly Dictionary<PinRef, List<Vector3>> _crossings = new Dictionary<PinRef, List<Vector3>>();
+        private readonly Stack<List<Vector3>> _crossingPool = new Stack<List<Vector3>>();
         private readonly HashSet<PinRef> _crossingDirty = new HashSet<PinRef>();
         private readonly List<PinRef> _crossingDirtyOrder = new List<PinRef>();
         private readonly List<PinRef> _scratchCrossWires = new List<PinRef>();
         private readonly List<Vector4> _crossSegments = new List<Vector4>(64);
-        private static readonly List<Vector2> NoCrossings = new List<Vector2>();
+        private readonly List<Rect> _crossBodies = new List<Rect>(16);
+        private static readonly List<Vector3> NoCrossings = new List<Vector3>();
 
         /// <summary>
         /// Padding for wire-bounds queries: a straight wire has zero-height (or zero-width) bounds, which a strict
@@ -134,7 +135,7 @@ namespace DigitalLogicSandbox.Rendering
             _freedAreas.Clear();
             _recentRoutes.Clear();
             _hasInteractiveFreed = false;
-            foreach (List<Vector2> list in _crossings.Values)
+            foreach (List<Vector3> list in _crossings.Values)
             {
                 ReleaseCrossingList(list);
             }
@@ -474,6 +475,22 @@ namespace DigitalLogicSandbox.Rendering
             }
         }
 
+        /// <summary>Gate bodies overlapping <paramref name="area"/> (they decide which side a hop bulges to).</summary>
+        private void GatherBodies(Rect area, List<Rect> bodies)
+        {
+            bodies.Clear();
+            EnsureNodeIndex();
+            _scratchNodes.Clear();
+            _nodeIndex.Query(area, _scratchNodes);
+            for (int i = 0; i < _scratchNodes.Count; i++)
+            {
+                if (_nodeIndex.TryGetRect(_scratchNodes[i], out Rect body))
+                {
+                    bodies.Add(body);
+                }
+            }
+        }
+
         /// <summary>Number of wires <see cref="ImproveRoutes"/> tried to reroute (for tests and profiling).</summary>
         public int ImprovementAttempts { get; private set; }
 
@@ -778,12 +795,12 @@ namespace DigitalLogicSandbox.Rendering
 
         /// <summary>
         /// Points where <paramref name="destination"/>'s wire crosses another net's wire, on its own vertical segments
-        /// (see <see cref="WireCrossings"/>). Cached until this wire or a wire near it is rerouted; those wires are
-        /// queued for <see cref="DrainCrossingChanges"/>.
+        /// (see <see cref="WireCrossings"/>) as (x, y, hop side). Cached until this wire or a wire near it is rerouted;
+        /// those wires are queued for <see cref="DrainCrossingChanges"/>.
         /// </summary>
-        public IReadOnlyList<Vector2> GetCrossings(PinRef destination)
+        public IReadOnlyList<Vector3> GetCrossings(PinRef destination)
         {
-            if (_crossings.TryGetValue(destination, out List<Vector2> crossings))
+            if (_crossings.TryGetValue(destination, out List<Vector3> crossings))
             {
                 return crossings;
             }
@@ -794,14 +811,15 @@ namespace DigitalLogicSandbox.Rendering
             }
 
             GetWirePath(destination);
-            crossings = _crossingPool.Count > 0 ? _crossingPool.Pop() : new List<Vector2>(4);
+            crossings = _crossingPool.Count > 0 ? _crossingPool.Pop() : new List<Vector3>(4);
             crossings.Clear();
             List<Vector3> path = _wires[destination];
             if (path.Count >= 2)
             {
-                GatherSegments(connection, Inflate(PathBounds(path), QueryPadding), _crossSegments,
-                    _scratchCrossWires);
-                WireCrossings.Find(path, _crossSegments, crossings);
+                Rect area = Inflate(PathBounds(path), WireCrossings.HopReach + QueryPadding);
+                GatherSegments(connection, area, _crossSegments, _scratchCrossWires);
+                GatherBodies(area, _crossBodies);
+                WireCrossings.Find(path, _crossSegments, crossings, _crossBodies);
             }
 
             _crossings[destination] = crossings;
@@ -839,7 +857,7 @@ namespace DigitalLogicSandbox.Rendering
 
         private void DirtyCrossings(PinRef destination)
         {
-            if (_crossings.TryGetValue(destination, out List<Vector2> list))
+            if (_crossings.TryGetValue(destination, out List<Vector3> list))
             {
                 _crossings.Remove(destination);
                 ReleaseCrossingList(list);
@@ -851,7 +869,7 @@ namespace DigitalLogicSandbox.Rendering
             }
         }
 
-        private void ReleaseCrossingList(List<Vector2> list)
+        private void ReleaseCrossingList(List<Vector3> list)
         {
             list.Clear();
             _crossingPool.Push(list);
@@ -1100,7 +1118,7 @@ namespace DigitalLogicSandbox.Rendering
                 case ComponentKind.InputBoundary:
                     return "Input";
                 case ComponentKind.Clock:
-                    return ClockTitle;
+                    return component.ClockDivider > 1 ? ClockTitle + " ÷" + component.ClockDivider : ClockTitle;
                 case ComponentKind.Splitter:
                 case ComponentKind.Merger:
                     return string.Empty; // the shape and bit labels say it all

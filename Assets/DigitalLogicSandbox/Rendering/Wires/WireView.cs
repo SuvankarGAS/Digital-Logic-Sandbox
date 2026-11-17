@@ -47,8 +47,14 @@ namespace DigitalLogicSandbox.Rendering.Wires
         /// <summary>Half length of a crossing gap (world units; single-bit wires).</summary>
         public const float GapHalf = 0.2f;
 
-        /// <summary>Straight segments approximating one hop's semicircle.</summary>
+        /// <summary>Straight segments approximating one hop's semicircle (even: the halves split at the top).</summary>
         private const int HopSegments = 8;
+
+        /// <summary>
+        /// Crossings closer than a hop's diameter plus this (world units) share one bridge, or one longer gap, instead
+        /// of overlapping hops.
+        /// </summary>
+        public const float MergeSpacing = 0.12f;
 
         private static readonly int ColorAId = Shader.PropertyToID("_ColorA");
         private static readonly int ColorBId = Shader.PropertyToID("_ColorB");
@@ -58,7 +64,7 @@ namespace DigitalLogicSandbox.Rendering.Wires
         private static readonly int JunctionId = Shader.PropertyToID("_Junction");
 
         private readonly List<Vector3> _path = new List<Vector3>(8);
-        private readonly List<Vector2> _crossings = new List<Vector2>(4);
+        private readonly List<Vector3> _crossings = new List<Vector3>(4);
         private readonly List<Vector2> _gaps = new List<Vector2>(4); // per segment: (from, to) distances along it
         private WireCrossingStyle _crossingStyle = WireCrossingStyle.Plain;
         private readonly List<Vector3> _points = new List<Vector3>(8);
@@ -124,6 +130,9 @@ namespace DigitalLogicSandbox.Rendering.Wires
 
         /// <summary>Number of points of the drawn path (including the points of crossing hops).</summary>
         public int PointCount => _points.Count;
+
+        /// <summary>The drawn path (routed points plus the points of crossing hops), in world space.</summary>
+        public IReadOnlyList<Vector3> DrawnPoints => _points;
 
         /// <summary>Number of crossings drawn with the current style (0 for <see cref="WireCrossingStyle.Plain"/>).</summary>
         public int CrossingCount => _crossingStyle == WireCrossingStyle.Plain ? 0 : _crossings.Count;
@@ -213,7 +222,7 @@ namespace DigitalLogicSandbox.Rendering.Wires
         /// Sets the points where this wire crosses other nets (on its vertical segments) and how to draw them. Rebuilds
         /// the mesh only when something changed. Purely visual: hit-testing and routing use the plain path.
         /// </summary>
-        public void SetCrossings(IReadOnlyList<Vector2> points, WireCrossingStyle style)
+        public void SetCrossings(IReadOnlyList<Vector3> points, WireCrossingStyle style)
         {
             bool same = style == _crossingStyle && points.Count == _crossings.Count;
             for (int i = 0; same && i < points.Count; i++)
@@ -246,8 +255,9 @@ namespace DigitalLogicSandbox.Rendering.Wires
         private float HopSize => _isBus ? BusHopFactor : 1f;
 
         /// <summary>
-        /// Builds the drawn polyline from the routed path: hops become semicircles bulging towards +x. Cumulative
-        /// distances follow the drawn line, so the travelling front and particles follow the hops.
+        /// Builds the drawn polyline from the routed path: hops become semicircles bulging to each crossing's side,
+        /// and close crossings share one bridge. Cumulative distances follow the drawn line, so the travelling front
+        /// and particles follow the hops.
         /// </summary>
         private void BuildDrawnPath()
         {
@@ -274,7 +284,12 @@ namespace DigitalLogicSandbox.Rendering.Wires
             _cumulative.Add(total);
         }
 
-        /// <summary>Adds the hop arcs of one vertical segment, in travel order.</summary>
+        /// <summary>
+        /// Adds the hop arcs of one vertical segment, in travel order. Crossings closer than
+        /// <c>2 * radius + MergeSpacing</c> form one cluster, drawn as a bridge: a quarter arc up, a straight run beside
+        /// the wire and a quarter arc down (a single crossing is a plain semicircle). A cluster bulges to the side of
+        /// its first crossing.
+        /// </summary>
         private void AddHops(Vector3 a, Vector3 b, float radius)
         {
             if (Mathf.Abs(b.x - a.x) > 0.02f)
@@ -284,34 +299,69 @@ namespace DigitalLogicSandbox.Rendering.Wires
 
             float direction = Mathf.Sign(b.y - a.y);
             float length = Mathf.Abs(b.y - a.y);
-            float last = -radius; // end of the previous hop along the segment
+            float reach = 2f * radius + MergeSpacing;
+            float last = float.MinValue; // last crossing of the previous cluster along the segment
             while (true)
             {
-                // Next crossing along the travel direction (crossings are few: a selection pass is fine).
-                float best = float.MaxValue;
-                for (int k = 0; k < _crossings.Count; k++)
-                {
-                    float t = CrossingDistance(a, direction, length, _crossings[k], radius);
-                    if (t >= 0f && t >= last + radius && t < best)
-                    {
-                        best = t;
-                    }
-                }
-
-                if (best == float.MaxValue)
+                int first = NextCrossing(a, direction, length, radius, last, out float start);
+                if (first < 0)
                 {
                     return;
                 }
 
+                // Grow the cluster while the next crossing is too close for a hop of its own.
+                float end = start;
+                while (true)
+                {
+                    int next = NextCrossing(a, direction, length, radius, end, out float t);
+                    if (next < 0 || t - end >= reach)
+                    {
+                        break;
+                    }
+
+                    end = t;
+                }
+
+                float side = _crossings[first].z < 0f ? -1f : 1f;
+                const int half = HopSegments / 2;
                 for (int s = 0; s <= HopSegments; s++)
                 {
                     float angle = Mathf.PI * s / HopSegments;
-                    float along = best - radius * Mathf.Cos(angle);
-                    AddDrawnPoint(new Vector3(a.x + radius * Mathf.Sin(angle), a.y + direction * along, a.z));
+                    float offset = side * radius * Mathf.Sin(angle);
+                    if (s <= half)
+                    {
+                        AddDrawnPoint(new Vector3(a.x + offset, a.y + direction * (start - radius * Mathf.Cos(angle)), a.z));
+                    }
+
+                    if (s >= half)
+                    {
+                        AddDrawnPoint(new Vector3(a.x + offset, a.y + direction * (end - radius * Mathf.Cos(angle)), a.z));
+                    }
                 }
 
-                last = best + radius;
+                last = end;
             }
+        }
+
+        /// <summary>
+        /// The crossing on segment a-b nearest after <paramref name="after"/> along the travel direction (index, or -1),
+        /// with its distance from <paramref name="a"/>. Crossings are few, so a selection pass is fine.
+        /// </summary>
+        private int NextCrossing(Vector3 a, float direction, float length, float halfSize, float after, out float distance)
+        {
+            int best = -1;
+            distance = float.MaxValue;
+            for (int k = 0; k < _crossings.Count; k++)
+            {
+                float t = CrossingDistance(a, direction, length, _crossings[k], halfSize);
+                if (t >= 0f && t > after + 0.01f && t < distance)
+                {
+                    best = k;
+                    distance = t;
+                }
+            }
+
+            return best;
         }
 
         /// <summary>
@@ -561,6 +611,25 @@ namespace DigitalLogicSandbox.Rendering.Wires
                     _gaps[index] = swap;
                     index--;
                 }
+            }
+
+            // Gaps that overlap or nearly touch become one longer gap (no sliver of wire between two crossings).
+            int write = 0;
+            for (int i = 1; i < _gaps.Count; i++)
+            {
+                if (_gaps[i].x - _gaps[write].y < MergeSpacing)
+                {
+                    _gaps[write] = new Vector2(_gaps[write].x, Mathf.Max(_gaps[write].y, _gaps[i].y));
+                }
+                else
+                {
+                    _gaps[++write] = _gaps[i];
+                }
+            }
+
+            if (_gaps.Count > 0)
+            {
+                _gaps.RemoveRange(write + 1, _gaps.Count - write - 1);
             }
         }
 

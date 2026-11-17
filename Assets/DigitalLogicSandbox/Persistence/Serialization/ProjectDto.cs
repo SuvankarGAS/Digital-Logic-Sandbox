@@ -108,6 +108,10 @@ namespace DigitalLogicSandbox.Persistence.Serialization
         [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
         public string Color;
 
+        /// <summary>Divider of a clock node (2, 4 … 64); omitted for ÷1.</summary>
+        [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+        public int? Divider;
+
         public float X;
         public float Y;
         public string Rotation;

@@ -39,7 +39,7 @@ namespace DigitalLogicSandbox.Simulation.Engine
             int[] outputBits,
             int hierarchyDepth,
             List<int[]> combinationalCycles,
-            int clockNet,
+            int[] clockNets,
             int[] netSharedOffsets,
             int[] netSharedSlots)
         {
@@ -67,7 +67,20 @@ namespace DigitalLogicSandbox.Simulation.Engine
             HasSharedNets = netSharedSlots.Length > 0;
             HierarchyDepth = hierarchyDepth;
             CombinationalCycles = combinationalCycles;
-            ClockNet = clockNet;
+            _clockNets = clockNets;
+            ClockNet = FloatingNet;
+            for (int k = 0; k < clockNets.Length; k++)
+            {
+                if (clockNets[k] != FloatingNet)
+                {
+                    if (ClockNet == FloatingNet)
+                    {
+                        ClockNet = clockNets[k]; // the fastest domain present
+                    }
+
+                    ClockDomainCount++;
+                }
+            }
 
             for (int g = 0; g < gateComponents.Length; g++)
             {
@@ -111,8 +124,29 @@ namespace DigitalLogicSandbox.Simulation.Engine
 
         public bool HasCombinationalCycles => CombinationalCycles.Count > 0;
 
-        /// <summary>Net carrying the global clock, or <see cref="FloatingNet"/> when the circuit has no clock node.</summary>
+        private readonly int[] _clockNets;
+
+        /// <summary>
+        /// Net of the fastest clock domain present, or <see cref="FloatingNet"/> when the circuit has no clock node.
+        /// </summary>
         public int ClockNet { get; }
+
+        /// <summary>Number of clock domains (distinct dividers) present.</summary>
+        public int ClockDomainCount { get; }
+
+        /// <summary>
+        /// Net of the clock domain with divider 2^<paramref name="exponent"/>, or <see cref="FloatingNet"/> when no
+        /// clock uses that divider.
+        /// </summary>
+        public int GetClockNet(int exponent)
+        {
+            return exponent >= 0 && exponent < _clockNets.Length ? _clockNets[exponent] : FloatingNet;
+        }
+
+        public bool HasClockDomain(int exponent)
+        {
+            return GetClockNet(exponent) != FloatingNet;
+        }
 
         public bool HasClock => ClockNet != FloatingNet;
 

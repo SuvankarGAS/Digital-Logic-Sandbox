@@ -139,6 +139,10 @@ namespace DigitalLogicSandbox.Persistence.Serialization
                         break;
                     case ComponentKind.Clock:
                         nodeDto.Kind = NodeDto.KindClock;
+                        if (node.Component.ClockDivider > 1)
+                        {
+                            nodeDto.Divider = node.Component.ClockDivider;
+                        }
                         break;
                     case ComponentKind.Splitter:
                         nodeDto.Kind = NodeDto.KindSplitter;

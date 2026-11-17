@@ -29,11 +29,11 @@ namespace DigitalLogicSandbox.Tests.EditMode.CircuitEditor
         {
             List<Vector3> vertical = Path(0f, -4f, 5f, -4f, 5f, 4f, 10f, 4f);
             var horizontal = new List<Vector4> { new Vector4(-2f, 0f, 12f, 0f) };
-            var results = new List<Vector2>();
+            var results = new List<Vector3>();
 
             WireCrossings.Find(vertical, horizontal, results);
 
-            Assert.That(results, Is.EqualTo(new List<Vector2> { new Vector2(5f, 0f) }));
+            Assert.That(results, Is.EqualTo(new List<Vector3> { new Vector3(5f, 0f, 1f) }));
 
             // The horizontal wire is never decorated: its own segments are not vertical.
             results.Clear();
@@ -51,7 +51,7 @@ namespace DigitalLogicSandbox.Tests.EditMode.CircuitEditor
                 new Vector4(0f, 3.9f, 9f, 3.9f), // too close to the segment's end
                 new Vector4(4.9f, -1f, 0f, -1f), // ends just short of the wire
             };
-            var results = new List<Vector2>();
+            var results = new List<Vector3>();
 
             WireCrossings.Find(vertical, others, results);
 
@@ -63,11 +63,50 @@ namespace DigitalLogicSandbox.Tests.EditMode.CircuitEditor
         {
             List<Vector3> vertical = Path(5f, -4f, 5f, 4f);
             var others = new List<Vector4> { new Vector4(0f, 0f, 9f, 0f), new Vector4(9f, 0f, 0f, 0f) };
-            var results = new List<Vector2>();
+            var results = new List<Vector3>();
 
             WireCrossings.Find(vertical, others, results);
 
             Assert.That(results.Count, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void HopSide_DefaultsToPlusX_AndFlipsAwayFromANeighbour()
+        {
+            List<Vector3> vertical = Path(5f, -4f, 5f, 4f);
+            var crossing = new Vector4(0f, 0f, 9f, 0f);
+            var results = new List<Vector3>();
+
+            WireCrossings.Find(vertical, new List<Vector4> { crossing }, results);
+            Assert.That(results[0].z, Is.EqualTo(1f), "Nothing beside the wire: bulge towards +x.");
+
+            // Another net's vertical wire runs just right of the crossing: the hop goes left.
+            results.Clear();
+            var rightNeighbour = new Vector4(5.25f, -2f, 5.25f, 2f);
+            WireCrossings.Find(vertical, new List<Vector4> { crossing, rightNeighbour }, results);
+            Assert.That(results[0].z, Is.EqualTo(-1f));
+
+            // A gate body on the right does the same.
+            results.Clear();
+            WireCrossings.Find(vertical, new List<Vector4> { crossing }, results,
+                new List<Rect> { Rect.MinMaxRect(5.2f, -1f, 7f, 1f) });
+            Assert.That(results[0].z, Is.EqualTo(-1f));
+
+            // Both sides blocked: keep the default.
+            results.Clear();
+            var leftNeighbour = new Vector4(4.75f, -2f, 4.75f, 2f);
+            WireCrossings.Find(vertical, new List<Vector4> { crossing, rightNeighbour, leftNeighbour }, results);
+            Assert.That(results[0].z, Is.EqualTo(1f));
+
+            // Neighbours on the usual half-unit lane leave room for a hop.
+            results.Clear();
+            WireCrossings.Find(vertical, new List<Vector4> { crossing, new Vector4(5.5f, -2f, 5.5f, 2f) }, results);
+            Assert.That(results[0].z, Is.EqualTo(1f));
+
+            // A neighbour that ends well before the crossing does not block it.
+            results.Clear();
+            WireCrossings.Find(vertical, new List<Vector4> { crossing, new Vector4(5.25f, 2f, 5.25f, 4f) }, results);
+            Assert.That(results[0].z, Is.EqualTo(1f));
         }
 
         private sealed class Cross
@@ -104,7 +143,7 @@ namespace DigitalLogicSandbox.Tests.EditMode.CircuitEditor
         {
             Cross cross = BuildCross();
 
-            IReadOnlyList<Vector2> onV = cross.Geometry.GetCrossings(cross.V);
+            IReadOnlyList<Vector3> onV = cross.Geometry.GetCrossings(cross.V);
             Assert.That(onV.Count, Is.EqualTo(1));
             Assert.That(onV[0].y, Is.EqualTo(0f).Within(1e-4f));
             Assert.That(cross.Geometry.GetCrossings(cross.H), Is.Empty);
@@ -149,7 +188,7 @@ namespace DigitalLogicSandbox.Tests.EditMode.CircuitEditor
             cross.Geometry.DrainCrossingChanges(queued);
             Assert.That(queued, Does.Contain(cross.V), "V's crossings depend on H's route.");
             Assert.That(queued, Does.Contain(cross.H));
-            foreach (Vector2 point in cross.Geometry.GetCrossings(cross.V))
+            foreach (Vector3 point in cross.Geometry.GetCrossings(cross.V))
             {
                 Assert.That(point.y, Is.Not.EqualTo(0f).Within(1e-3f), "The old crossing is gone.");
             }
