@@ -17,6 +17,7 @@
 | B | Sequential logic (future-expansion phase B) | ✅ Complete (2026-11-14) |
 | C | Multi-bit logic: buses, tri-state, contention (future-expansion phase C) | ✅ Complete (2026-11-14) |
 | D | Visual components: LED, seven-segment, binary, hex, decimal displays (future-expansion phase D) | ✅ Complete (2026-11-14) |
+| E | Computer components: example gate pack up to a 4-bit ALU and 16×4 RAM (future-expansion phase E) | ✅ Complete (2026-11-17) |
 
 ---
 
@@ -1543,3 +1544,72 @@ a test and a note; four are fixed here.
 - No native OS file dialog (Phase 8 decision).
 - `com.coplaydev.unity-mcp` still tracks `#main`; pin or remove it before release builds.
 
+## Phase E – Computer components: example gate pack (2026-11-17)
+
+As in Phase B, no primitive was added. The computer parts are ordinary custom gates built from AND and NOT, shipped
+as an optional pack that File → "Add example gates" puts into My Gates. A new project still offers only AND and NOT
+(acceptance step 3).
+
+### Implemented
+- **`GateLibrary/Examples/ExampleGatePack.cs`.** 17 gates, each from AND/NOT, splitters/mergers and earlier pack
+  gates (referenced, never copied):
+
+  | Category | Gates |
+  |---|---|
+  | Examples · Logic | NAND, OR, NOR, XOR |
+  | Examples · Routing | MUX 2:1, MUX 4:1 (S is a 2-bit bus), Decoder 2→4, Decoder 4→16 |
+  | Examples · Arithmetic | Half Adder, Full Adder, Adder 4-bit (A, B, S are 4-bit buses), ALU 4-bit |
+  | Examples · Memory | D Latch, D Flip-Flop (rising edge, master-slave), Register 4-bit (LOAD), Counter 4-bit (ripple), RAM 16×4 |
+
+  - ALU: OP 0 add, 1 subtract (B XOR OP0, carry in OP0), 2 AND, 3 OR; flags COUT (no borrow when subtracting, 0
+    for logic) and ZERO.
+  - RAM: ADDR[4], DIN[4], WE, CLK → DOUT[4]; 64 D-latch cells, a 4→16 decoder for write enables, 20 MUX 4:1 for
+    reads; 1 041 gates flattened. Change ADDR only while CLK is LOW.
+  - Sequential parts take a CLK input, so they work with any clock and divider.
+  - Fixed IDs (`example.*`): loading twice is refused; a taken name gets an "(example)" suffix.
+- **`LayeredLayout`.** Column per logic depth (feedback ignored), inputs left, outputs right, barycentre placement
+  with a top-down overlap sweep, snapped to the 0.5 grid.
+- **`Rendering/GeometryNodeSizer`.** Measures node bodies with `CircuitGeometry` for the layout.
+- **`WorkspaceController.LoadExampleGates()`.** Main circuit only; validates the staged pack with the packaging
+  rules, then publishes it as one `CompositeCommand` (one undo removes it). Notification: "Added 17 example gates
+  to My Gates." plus any renames.
+- **UI.** File menu item "Add example gates" (`ToolbarView.ExampleGatesButton`, `ExampleGatesRequested`), wired
+  in `AppShell`. The library already groups by category, so the pack appears under its four headers.
+
+### Decisions
+- **A pack, not built-in gates.** CLAUDE.md requires a new project to start with only AND and NOT, and every other
+  gate to be constructible. An optional pack of ordinary custom gates keeps both, and doubles as a worked example
+  users can open.
+- **RAM from gates.** A RAM primitive would be faster and larger, but could not be opened and would break the
+  AND/NOT principle. At 16×4 the gate version is about a thousand gates and simulates comfortably.
+- **Level-sensitive RAM writes.** Edge-triggered cells would need 64 flip-flops (twice the gates). Latches plus the
+  "change ADDR while CLK is LOW" rule match how simple SRAM is taught.
+
+### Test results
+- EditMode: **427 / 427 passed** (21 new, `ExamplePackTests`):
+  - All 17 gates validate and contain only AND/NOT, boundaries, wiring and earlier pack gates. The Full Adder
+    shares the Half Adder definition.
+  - Exhaustive tables against C# references: NAND/OR/NOR/XOR, both multiplexers (64 rows for 4:1), both decoders,
+    half/full adder, Adder 4-bit (512 rows), ALU (1 024 rows with COUT and ZERO).
+  - D latch transparency and hold; DFF captures on rising edges only; register LOAD/hold; counter counts 20 edges
+    with wrap; RAM writes and reads all 16 words, WE = 0 leaves data intact, overwrites keep neighbours.
+  - RAM: one-bit address changes allocate nothing and cost fewer evaluations than one pass over the gates
+    (measured 239–583 of 1 041); raising WE while CLK is LOW evaluates at most 2 gates.
+  - Layout: no overlapping bodies, inputs left of outputs, in every gate.
+  - Second load refused; a user NAND makes the pack's "NAND (example)"; undo/redo of the whole pack; JSON round
+    trip, then 9 - 5 = 4 on the reloaded ALU.
+- PlayMode: **85 / 85 passed** (2 new):
+  - The File-menu item adds 17 items under the Examples headers; a second load is refused; undo/redo.
+  - A placed ALU computes 12 - 5 = 7 and 12 + 5 = 1 (wrapped); opening ALU → Adder 4-bit shows three breadcrumbs,
+    and the first one returns with the result unchanged.
+- Manual (play mode screenshot): the ALU's internal layout reads left to right with no overlaps; its first gate
+  column (12 gates) is tall but clear.
+
+### Known issues / deferred
+- Flip-flops power on with Q = 1 under the resolved power-on rule (loop nets are forced LOW one at a time, which
+  leaves this master-slave pair HIGH), so the counter starts at 15 and reads 0 after the first edge. It is
+  deterministic; a reset input would make the start state explicit.
+- The RAM's DOUT can glitch through the read multiplexers while several address bits change at once (up to 17
+  waves). It settles correctly; it only matters for animation.
+- Generated layouts are tidy but not hand-tuned; the RAM (112 nodes) is large to browse.
+- No CPU yet (out of scope for this phase).

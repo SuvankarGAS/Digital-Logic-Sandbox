@@ -18,6 +18,7 @@ using DigitalLogicSandbox.Core.Ports;
 using DigitalLogicSandbox.Core.Signals;
 using DigitalLogicSandbox.Core.Validation;
 using DigitalLogicSandbox.GateLibrary.Custom;
+using DigitalLogicSandbox.GateLibrary.Examples;
 using DigitalLogicSandbox.GateLibrary.Packaging;
 using DigitalLogicSandbox.Rendering;
 using DigitalLogicSandbox.Rendering.Gates;
@@ -1172,6 +1173,55 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             }));
             _selection.Prune(Circuit);
             return result;
+        }
+
+        /// <summary>
+        /// Adds the example gate pack (Phase E: logic, routing, arithmetic and memory parts built from AND and NOT) to
+        /// the library as one undoable step. Refused away from the main circuit or when the pack is already loaded;
+        /// gates whose name is taken get an "(example)" suffix. Returns the plan (its error when refused).
+        /// </summary>
+        public ExamplePackPlan LoadExampleGates()
+        {
+            EnsureCircuit();
+            if (!CanPackage)
+            {
+                return ReportExampleResult(ExamplePackPlan.Refused(
+                    "Return to the main circuit to add the example gates."));
+            }
+
+            var sizer = new GeometryNodeSizer();
+            ExamplePackPlan plan = ExampleGatePack.Prepare(_catalog.Primitives, _library, sizer.Measure);
+            if (!plan.Succeeded)
+            {
+                return ReportExampleResult(plan);
+            }
+
+            var commands = new ICommand[plan.Definitions.Count];
+            for (int i = 0; i < commands.Length; i++)
+            {
+                commands[i] = new PublishDefinitionCommand(_library, plan.Definitions[i]);
+            }
+
+            History.Execute(new CompositeCommand("Add example gates", commands));
+            return ReportExampleResult(plan);
+        }
+
+        private ExamplePackPlan ReportExampleResult(ExamplePackPlan plan)
+        {
+            if (!plan.Succeeded)
+            {
+                PostNotification(plan.Error);
+                return plan;
+            }
+
+            string message = "Added " + plan.Definitions.Count + " example gates to My Gates.";
+            if (plan.Renamed.Count > 0)
+            {
+                message += " Renamed to avoid clashes: " + string.Join(", ", plan.Renamed) + ".";
+            }
+
+            PostNotification(message);
+            return plan;
         }
 
         // ------------------------------------------------------------------------------------------------

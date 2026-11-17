@@ -816,3 +816,32 @@ the workspace views (`GateView`, `WireView`, `GridView`).
       `GlowStrength` 0 disables it.
 - **Colour space.** The project renders in linear space, so low-alpha white overlays look much brighter than
   their numbers suggest. Keep stripes and tints at around 2% alpha.
+
+## 19. Example gate pack *(implemented – Phase E)*
+
+- **What it is.** `GateLibrary.Examples.ExampleGatePack` builds 17 ordinary custom gates: NAND, OR, NOR, XOR;
+  MUX 2:1, MUX 4:1, Decoder 2→4, Decoder 4→16; Half Adder, Full Adder, Adder 4-bit, ALU 4-bit; D Latch,
+  D Flip-Flop, Register 4-bit, Counter 4-bit and RAM 16×4. A new project never contains them; File → "Add example
+  gates" adds them.
+- **Built from AND and NOT only.** Each gate contains AND/NOT primitives, boundaries, splitters/mergers and
+  instances of *earlier* pack gates, referenced by ID (the Full Adder holds two Half Adder instances, not copies).
+  No primitive, simulator path or UI code knows any pack gate by name: once published they are indistinguishable
+  from gates the user packaged.
+- **Stable IDs.** IDs are fixed (`example.alu4`, …) so a second load is detected and refused, and saved projects
+  keep their references. A name already taken in the library gets an "(example)" suffix; names are settled before a
+  gate is built because staged definitions are read-only.
+- **Loading.** `ExampleGatePack.Prepare(primitives, library, sizer)` builds the pack into a private staging
+  library (so gates resolve each other), then validates every gate with `CircuitPackager.ValidateDefinition`.
+  `WorkspaceController.LoadExampleGates` publishes the result as one `CompositeCommand` of
+  `PublishDefinitionCommand`s, so a single undo removes the whole pack. Like packaging, it is only offered on the
+  main circuit.
+- **Layout.** Generated gates get positions from `LayeredLayout.Arrange`. Feedback edges (DFS back edges) are
+  ignored, each node goes one column right of its furthest predecessor, inputs come first and outputs last, and
+  nodes aim for the average height of their predecessors before a top-down sweep removes overlaps. Sizes come from
+  a `NodeSizer` delegate: the workspace passes `Rendering.GeometryNodeSizer` (the renderer's real gate sizes), so
+  the GateLibrary assembly needs no reference to Rendering.
+- **Memory without a primitive.** The RAM is 64 D-latch cells (cross-coupled NANDs), a 4→16 decoder for the write
+  enables (`WE · CLK · select`) and twenty MUX 4:1 for reading: 1 041 AND/NOT gates once flattened. Writes are
+  level-sensitive while CLK is HIGH, so the address must only change while CLK is LOW.
+- **Extension point.** More packs follow the same shape: a builder that returns definitions in dependency order with
+  fixed IDs, then `Prepare` and one composite publish command.

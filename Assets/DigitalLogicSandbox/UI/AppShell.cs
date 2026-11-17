@@ -117,6 +117,7 @@ namespace DigitalLogicSandbox.UI
             shell.Inspector.SaveDraftRequested += shell.VersionSaveDialog.Open;
             shell.NavigationBar.SaveRequested += shell.VersionSaveDialog.Open;
             shell.Toolbar.TruthTableRequested += shell.TruthTable.OpenForCurrentCircuit;
+            shell.Toolbar.ExampleGatesRequested += () => workspace.LoadExampleGates();
             shell.Inspector.CircuitTruthTableRequested += shell.TruthTable.OpenForCurrentCircuit;
             shell.ContextMenu.CircuitTruthTableRequested += shell.TruthTable.OpenForCurrentCircuit;
             shell.Inspector.NodeTruthTableRequested += node => shell.TruthTable.OpenForNode(node);

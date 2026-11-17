@@ -43,6 +43,9 @@ namespace DigitalLogicSandbox.UI.Toolbar
         /// <summary>Project buttons: New, Open, Save, Save As (items of the file menu).</summary>
         public event System.Action NewRequested;
 
+        /// <summary>File menu: add the example gate pack to the library.</summary>
+        public event System.Action ExampleGatesRequested;
+
         public event System.Action OpenRequested;
 
         public event System.Action SaveRequested;
@@ -70,6 +73,8 @@ namespace DigitalLogicSandbox.UI.Toolbar
         public Button SaveButton { get; private set; }
 
         public Button SaveAsButton { get; private set; }
+
+        public Button ExampleGatesButton { get; private set; }
 
         /// <summary>Opens the file menu.</summary>
         public Button MenuButton => _menu;
@@ -121,6 +126,9 @@ namespace DigitalLogicSandbox.UI.Toolbar
             view.SaveButton = view._fileMenu.AddItem(Icons.Save, "Save", "Ctrl+S", () => view.SaveRequested?.Invoke());
             view.SaveAsButton = view._fileMenu.AddItem(Icons.SaveAll, "Save as…", "Ctrl+Shift+S",
                 () => view.SaveAsRequested?.Invoke());
+            view._fileMenu.AddSeparator();
+            view.ExampleGatesButton = view._fileMenu.AddItem(Icons.PackagePlus, "Add example gates", string.Empty,
+                () => view.ExampleGatesRequested?.Invoke());
 
             workspace.StatusChanged += view.Refresh;
             view.Refresh();
