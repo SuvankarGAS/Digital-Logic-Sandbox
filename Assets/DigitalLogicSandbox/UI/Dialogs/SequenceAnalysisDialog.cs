@@ -584,7 +584,7 @@ namespace DigitalLogicSandbox.UI.Dialogs
 
         private void Build(RectTransform blocker)
         {
-            Image window = _ui.Card("Window", blocker, _ui.Theme.PanelBackground);
+            Image window = _ui.Card("Window", blocker, _ui.Theme.DialogBackground);
             RectTransform rect = window.rectTransform;
             rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
             rect.pivot = new Vector2(0.5f, 0.5f);

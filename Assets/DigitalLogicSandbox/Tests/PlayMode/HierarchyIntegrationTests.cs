@@ -434,9 +434,9 @@ namespace DigitalLogicSandbox.Tests.PlayMode
             Vector2 screen = workspace.WorkspaceCamera.WorldToScreen(Vector2.zero);
             workspace.RequestContextMenu(screen, Vector2.zero);
             Assert.That(app.Shell.ContextMenu.IsOpen, Is.True);
-            Assert.That(app.Shell.ContextMenu.Labels, Does.Contain("Open Internal Circuit"));
+            Assert.That(app.Shell.ContextMenu.Labels, Does.Contain("Open internal circuit"));
             Assert.That(workspace.Selection.Contains(gate), Is.True, "Right-click selects the gate.");
-            Assert.That(app.Shell.ContextMenu.Invoke("Open Internal Circuit"), Is.True);
+            Assert.That(app.Shell.ContextMenu.Invoke("Open internal circuit"), Is.True);
             yield return null;
 
             Assert.That(app.Shell.ContextMenu.IsOpen, Is.False);

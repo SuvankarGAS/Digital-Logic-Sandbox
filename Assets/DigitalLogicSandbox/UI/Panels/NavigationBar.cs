@@ -91,6 +91,9 @@ namespace DigitalLogicSandbox.UI.Panels
             }
 
             IReadOnlyList<NavigationLevel> levels = _workspace.Navigator.Levels;
+            // Show the bar before measuring: text created under an inactive bar (it is hidden at the top level)
+            // measures too narrow, which squeezed the first crumbs to "…" when opening a gate.
+            gameObject.SetActive(levels.Count > 1 || _workspace.Navigator.Draft != null);
             for (int i = 0; i < levels.Count; i++)
             {
                 if (i > 0)

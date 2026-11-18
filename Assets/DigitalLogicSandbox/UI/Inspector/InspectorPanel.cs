@@ -77,7 +77,7 @@ namespace DigitalLogicSandbox.UI.Inspector
         /// <summary>Requested by the "Create Custom Gate" buttons; argument = package selection only.</summary>
         public event Action<bool> PackageRequested;
 
-        /// <summary>Raised by "Save as new version..." while a gate is being edited.</summary>
+        /// <summary>Raised by "Save as new version…" while a gate is being edited.</summary>
         public event Action SaveDraftRequested;
 
         /// <summary>"Generate Truth Table" for the shown circuit.</summary>
@@ -339,7 +339,7 @@ namespace DigitalLogicSandbox.UI.Inspector
             note.gameObject.AddComponent<LayoutElement>().preferredHeight = 48f;
             if (level.IsDraft)
             {
-                _ui.Button("SaveDraft", _content, "Save as new version...", () => SaveDraftRequested?.Invoke())
+                _ui.Button("SaveDraft", _content, "Save as new version…", () => SaveDraftRequested?.Invoke())
                     .interactable = level.HasUnsavedChanges;
                 _ui.Button("DiscardDraft", _content, "Discard changes", () => _workspace.DiscardDraft());
             }
@@ -474,7 +474,7 @@ namespace DigitalLogicSandbox.UI.Inspector
             _ui.Caption(_content, "Actions");
             if (node.Component.Kind == ComponentKind.Custom)
             {
-                Button open = _ui.Button("Open", _content, "Look inside", () => _workspace.OpenNode(id));
+                Button open = _ui.Button("Open", _content, "Open internal circuit", () => _workspace.OpenNode(id));
                 open.interactable = _workspace.CanOpenNode(id);
                 _ui.MakePrimary(open);
             }
@@ -638,6 +638,8 @@ namespace DigitalLogicSandbox.UI.Inspector
                     _ui.MakePrimary(button);
                 }
 
+                // The default label padding would leave no room for the digit in a 26-pixel tile.
+                UiFactory.Stretch(button.GetComponentInChildren<TextMeshProUGUI>().rectTransform);
                 _ui.AddTooltip(button.gameObject, "Bit " + bit + (bit == 0 ? " (least significant)" : string.Empty));
             }
 
@@ -1065,6 +1067,8 @@ namespace DigitalLogicSandbox.UI.Inspector
                     return "Tri-state driver";
                 case ComponentKind.Display:
                     return DisplayStyles.DisplayName(component.DisplayStyle);
+                case ComponentKind.Constant:
+                    return "Constant (" + component.Width + "-bit)";
                 default:
                     return "Circuit output";
             }

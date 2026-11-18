@@ -131,8 +131,8 @@ namespace DigitalLogicSandbox.Tests.PlayMode
 
             Vector2 screen = _workspace.WorkspaceCamera.WorldToScreen(Vector2.zero);
             _workspace.RequestContextMenu(screen, Vector2.zero);
-            Assert.That(_app.Shell.ContextMenu.Labels, Does.Contain("Truth Table"));
-            Assert.That(_app.Shell.ContextMenu.Invoke("Truth Table"), Is.True);
+            Assert.That(_app.Shell.ContextMenu.Labels, Does.Contain("Truth table"));
+            Assert.That(_app.Shell.ContextMenu.Invoke("Truth table"), Is.True);
             yield return null;
 
             Assert.That(_dialog.IsOpen, Is.True);
@@ -143,7 +143,7 @@ namespace DigitalLogicSandbox.Tests.PlayMode
 
             // Empty space: the main circuit has no outputs yet, so the item is disabled and generation explains why.
             _workspace.RequestContextMenu(_workspace.WorkspaceCamera.WorldToScreen(new Vector2(20, 20)), new Vector2(20, 20));
-            Assert.That(_app.Shell.ContextMenu.Labels, Does.Contain("Generate Truth Table..."));
+            Assert.That(_app.Shell.ContextMenu.Labels, Does.Contain("Generate truth table…"));
             _app.Shell.ContextMenu.Close();
             _dialog.OpenForCurrentCircuit();
             Assert.That(_dialog.Plan.CanGenerate, Is.False);

@@ -146,7 +146,7 @@ namespace DigitalLogicSandbox.UI.Dialogs
 
         private void Build(RectTransform blocker)
         {
-            Image window = _ui.Card("Window", blocker, _ui.Theme.PanelBackground);
+            Image window = _ui.Card("Window", blocker, _ui.Theme.DialogBackground);
             _window = window.rectTransform;
             _window.anchorMin = _window.anchorMax = new Vector2(0.5f, 0.5f);
             _window.pivot = new Vector2(0.5f, 0.5f);
@@ -318,6 +318,16 @@ namespace DigitalLogicSandbox.UI.Dialogs
                 {
                     if (diagnostics[i].Severity != wanted)
                     {
+                        continue;
+                    }
+
+                    if (diagnostics[i].Code == DiagnosticCode.MissingName)
+                    {
+                        // Not a mistake yet, just the next step: shown as a neutral prompt, not a red error (the
+                        // Create button stays disabled until there is a name).
+                        _builder.Append("<color=#").Append(ColorUtility.ToHtmlStringRGB(_ui.Theme.TextSecondary))
+                            .Append('>').Append(diagnostics[i].Message).Append("</color>\n");
+                        listed++;
                         continue;
                     }
 

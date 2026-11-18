@@ -254,20 +254,31 @@ namespace DigitalLogicSandbox.UI.Panels
             }
         }
 
+        /// <summary>
+        /// Shows the first error, else the first warning. Feedback-loop warnings are left out: every latch, flip-flop
+        /// and memory is a loop on purpose, so in a sequential circuit that warning was permanently on. Loops that
+        /// actually misbehave still surface as oscillation or contention.
+        /// </summary>
         private void DescribeFirstProblem(ValidationReport report)
         {
             IReadOnlyList<Diagnostic> diagnostics = report.Diagnostics;
+            int feedback = 0;
+            for (int i = 0; i < diagnostics.Count; i++)
+            {
+                feedback += diagnostics[i].Code == DiagnosticCode.FeedbackLoop ? 1 : 0;
+            }
+
             for (int pass = 0; pass < 2; pass++)
             {
                 DiagnosticSeverity wanted = pass == 0 ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning;
                 for (int i = 0; i < diagnostics.Count; i++)
                 {
-                    if (diagnostics[i].Severity != wanted)
+                    if (diagnostics[i].Severity != wanted || diagnostics[i].Code == DiagnosticCode.FeedbackLoop)
                     {
                         continue;
                     }
 
-                    int count = pass == 0 ? report.ErrorCount : report.WarningCount;
+                    int count = pass == 0 ? report.ErrorCount : report.WarningCount - feedback;
                     string suffix = count > 1 ? "  (+" + (count - 1) + " more)" : string.Empty;
                     _message.text = (pass == 0 ? "Error: " : "Warning: ") + diagnostics[i].Message + suffix;
                     _message.color = pass == 0 ? _ui.Theme.Error : _ui.Theme.Warning;

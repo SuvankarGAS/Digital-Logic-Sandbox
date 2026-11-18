@@ -272,7 +272,7 @@ namespace DigitalLogicSandbox.UI.Panels
             icon.gameObject.AddComponent<LayoutElement>().preferredHeight = 24f;
             _customEmptyText = _ui.Text("Text", box, string.Empty, 12f, _ui.Theme.TextSecondary, TextAlignmentOptions.TopLeft);
             _customEmptyText.enableWordWrapping = true;
-            _customEmptyText.gameObject.AddComponent<LayoutElement>().preferredHeight = 34f;
+            _customEmptyText.gameObject.AddComponent<LayoutElement>().preferredHeight = 52f; // three lines: the hint wraps in the panel width
             return box.gameObject;
         }
 

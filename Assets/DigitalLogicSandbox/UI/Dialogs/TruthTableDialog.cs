@@ -49,6 +49,13 @@ namespace DigitalLogicSandbox.UI.Dialogs
         private TruthTableJobDriver _driver;
 
         private RectTransform _layoutRoot;
+        private RectTransform _window;
+
+        /// <summary>Window width for narrow tables; wider tables grow the window up to the screen (see <see cref="FitWindow"/>).</summary>
+        private const float DefaultWindowWidth = 620f;
+
+        /// <summary>Horizontal padding of the window's content column (left + right).</summary>
+        private const float WindowPadding = 40f;
         private TextMeshProUGUI _title;
         private TextMeshProUGUI _summary;
         private TextMeshProUGUI _status;
@@ -103,7 +110,7 @@ namespace DigitalLogicSandbox.UI.Dialogs
         /// <summary>Shown when the target is sequential (truth tables refuse it).</summary>
         public Button SequenceButton => _sequenceButton;
 
-        /// <summary>Raised by "Sequence Analysis..." with the refused target and its title.</summary>
+        /// <summary>Raised by "Sequence analysis…" with the refused target and its title.</summary>
         public event Action<CircuitDefinition, string> SequenceAnalysisRequested;
 
         public ScrollRect Scroll => _scroll;
@@ -461,7 +468,8 @@ namespace DigitalLogicSandbox.UI.Dialogs
             }
 
             // Stripes span at least the visible width.
-            float contentWidth = Mathf.Max(x + LeftPadding, _scroll.viewport.rect.width);
+            float viewportWidth = FitWindow(x + LeftPadding);
+            float contentWidth = Mathf.Max(x + LeftPadding, viewportWidth);
             _headerContent.sizeDelta = new Vector2(contentWidth, _headerContent.sizeDelta.y);
             _content.sizeDelta = new Vector2(contentWidth, _content.sizeDelta.y);
 
@@ -640,17 +648,35 @@ namespace DigitalLogicSandbox.UI.Dialogs
             }
         }
 
+        /// <summary>
+        /// Widens the window so a table of <paramref name="tableWidth"/> fits without scrolling sideways (wide bus
+        /// tables such as an ALU used to hide their last output columns), up to the screen width minus a margin.
+        /// Returns the resulting viewport width. Anything wider still scrolls horizontally.
+        /// </summary>
+        private float FitWindow(float tableWidth)
+        {
+            var parent = (RectTransform)_window.parent;
+            float max = Mathf.Max(DefaultWindowWidth, parent.rect.width - 80f);
+            float width = Mathf.Clamp(tableWidth + WindowPadding, DefaultWindowWidth, max);
+            _window.sizeDelta = new Vector2(width, _window.sizeDelta.y);
+            return width - WindowPadding;
+        }
+
+        /// <summary>Current window width (tests).</summary>
+        public float WindowWidth => _window.sizeDelta.x;
+
         // ------------------------------------------------------------------------------------------------
         // Construction
         // ------------------------------------------------------------------------------------------------
 
         private void Build(RectTransform blocker)
         {
-            Image window = _ui.Card("Window", blocker, _ui.Theme.PanelBackground);
+            Image window = _ui.Card("Window", blocker, _ui.Theme.DialogBackground);
             RectTransform rect = window.rectTransform;
             rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
             rect.pivot = new Vector2(0.5f, 0.5f);
-            rect.sizeDelta = new Vector2(620f, 620f);
+            rect.sizeDelta = new Vector2(DefaultWindowWidth, 620f);
+            _window = rect;
 
             RectTransform column = UiFactory.Column("Content", rect, 6f, new RectOffset(20, 20, 14, 16));
             UiFactory.Stretch(column);
@@ -752,7 +778,7 @@ namespace DigitalLogicSandbox.UI.Dialogs
             _copyButton = _ui.Button("Copy", buttons, "Copy", () => CopyToClipboard(), 80f);
             _exportButton = _ui.Button("Export", buttons, "Export CSV", () => ExportCsv(), 110f);
             UiFactory.Flexible(buttons);
-            _sequenceButton = _ui.Button("Sequence", buttons, "Sequence Analysis...", OpenSequenceAnalysis, 170f);
+            _sequenceButton = _ui.Button("Sequence", buttons, "Sequence analysis…", OpenSequenceAnalysis, 170f);
             _cancelButton = _ui.Button("Cancel", buttons, "Cancel", CancelGeneration, 90f);
             _generateButton = _ui.Button("Generate", buttons, "Generate", Generate, 100f);
             _ui.MakePrimary(_generateButton);

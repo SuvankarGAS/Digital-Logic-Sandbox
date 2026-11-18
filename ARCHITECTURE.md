@@ -660,7 +660,8 @@ latches, and so on. The engine has no sequential primitive. What makes this well
   - While a draft or library preview is shown, the main circuit's runner is advanced too, in the background.
     Nothing draws it, so its change log is cleared after each advance. Returning to it rebinds the presenter,
     which redraws every view from the live context.
-- **Feedback is legal.** Validation and the compiler report loops as `FeedbackLoop` warnings, and
+- **Feedback is legal.** Validation and the compiler report loops as `FeedbackLoop` warnings (listed by packaging and
+  the compiler, but left out of the status bar headline, where every memory made it permanent), and
   self-connections are allowed. `CompiledCircuit.IsSequential` (cycles or a clock) is what consumers check.
 - **Sequence analysis** (`TruthTable.Generation.SequenceAnalyzer`):
   - It is the analysis mode for sequential circuits. The input is a `SequenceSpec`: per-input 0/1 patterns

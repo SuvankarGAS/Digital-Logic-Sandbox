@@ -26,6 +26,9 @@ namespace DigitalLogicSandbox.GateLibrary.Examples
 
         public const string MainCircuitName = "CPU demo";
 
+        /// <summary>Shown when the demo opens: what to do first.</summary>
+        public const string OpenHint = "Running Fibonacci: watch OUT. Click a program word to edit it.";
+
         /// <summary>
         /// The demo program: prints Fibonacci numbers (1, 1, 2, 3, 5, 8) on OUT and halts when the next sum
         /// overflows 4 bits. RAM[0] and RAM[1] hold the last two numbers, RAM[2] is scratch.

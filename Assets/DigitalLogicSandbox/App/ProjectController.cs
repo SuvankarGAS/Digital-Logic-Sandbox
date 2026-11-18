@@ -54,7 +54,12 @@ namespace DigitalLogicSandbox.App
 
         public string CurrentPath { get; private set; }
 
-        public string DisplayName => CurrentPath == null ? "Untitled" : Path.GetFileNameWithoutExtension(CurrentPath);
+        public string DisplayName => CurrentPath != null
+            ? Path.GetFileNameWithoutExtension(CurrentPath)
+            : _unsavedName ?? "Untitled";
+
+        /// <summary>Title of a project that has no file yet (e.g. "CPU demo"); null means "Untitled".</summary>
+        private string _unsavedName;
 
         public bool IsDirty { get; private set; }
 
@@ -164,9 +169,12 @@ namespace DigitalLogicSandbox.App
             document.Settings.Simulation.ClockFrequency = demo.ClockFrequency;
             Apply(document);
             SetPath(null);
+            _unsavedName = CpuDemo.MainCircuitName;
             SetDirty(false);
+            Changed?.Invoke(); // the title changed even when the dirty flag did not
             ProjectReplaced?.Invoke();
             _workspace.FrameContent();
+            _workspace.PostNotification(CpuDemo.OpenHint);
         }
 
         public bool Open(string path, out string message)
@@ -536,6 +544,7 @@ namespace DigitalLogicSandbox.App
         private void SetPath(string path)
         {
             CurrentPath = path;
+            _unsavedName = null;
             if (path != null && RememberLastProject)
             {
                 PlayerPrefs.SetString(LastProjectKey, path);

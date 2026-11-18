@@ -66,7 +66,7 @@ namespace DigitalLogicSandbox.Rendering
         [SerializeField] private float _selectedOutlineThickness = 0.055f;
 
         [Header("UI")]
-        [SerializeField] private Color _panelBackground = new Color(0.075f, 0.084f, 0.112f, 0.96f);
+        [SerializeField] private Color _panelBackground = new Color(0.075f, 0.084f, 0.112f, 1f); // opaque: glowing gate text showed through at 0.96
         [SerializeField] private Color _panelBorder = Hex(0x252A38);
         [SerializeField] private Color _panelHeader = Hex(0x171A23);
         [SerializeField] private Color _buttonNormal = Hex(0x1D212C);
@@ -124,6 +124,12 @@ namespace DigitalLogicSandbox.Rendering
         public float SelectedOutlineThickness => _selectedOutlineThickness;
 
         public Color PanelBackground => _panelBackground;
+
+        /// <summary>
+        /// Panel colour made fully opaque, for modal dialogs: even if a theme makes panels slightly translucent, gate
+        /// titles behind a dialog must not show through its text.
+        /// </summary>
+        public Color DialogBackground => new Color(_panelBackground.r, _panelBackground.g, _panelBackground.b, 1f);
 
         public Color PanelBorder => _panelBorder;
 

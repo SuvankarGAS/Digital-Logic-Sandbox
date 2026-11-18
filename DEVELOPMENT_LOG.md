@@ -1686,3 +1686,38 @@ project (File → "Open CPU demo").
 - The flip-flop power-on value depends on the resolver's cycle order; tests guard it, but a different cycle search
   would need the latch revisited.
 - No assembler UI; programs are entered one Constant at a time (the label helps).
+
+## Usability pass (2026-11-18)
+
+Walked the app as a new user in play mode (game view 905×414, so also a small-window check), screenshot by
+screenshot: first launch, the NAND/OR acceptance workflow, packaging, inspection, truth tables, the example pack
+and the CPU demo. Everything below was found that way and checked again after the fix.
+
+### Fixed
+| # | Finding | Fix |
+|---|---|---|
+| F1 | "My Gates" empty hint cut off ("ready to reu…") | Room for three lines |
+| F2 | Packaging dialog opens with a red "Error: Give the gate a name." | Shown as a neutral prompt; Create stays disabled |
+| F3 | Dialogs slightly see-through: gate titles behind showed between fields | `VisualTheme.DialogBackground` (opaque) for all six dialogs |
+| F4 | First breadcrumbs squeezed to "… › N…" when opening a gate | The bar was hidden while its crumbs were measured; it is shown first |
+| F5 | Inspector called a Constant "Circuit output" | "Constant (8-bit)" |
+| F6 | Constant bit toggles showed no 0/1 | Label padding removed in the 26-unit tiles |
+| F8 | "Warning: Feedback loop through 22 gate(s)…" permanently in the status bar for any memory | `FeedbackLoop` left out of the headline (oscillation and contention still show; packaging still lists loops) |
+| F9 | CPU demo titled "Untitled" | Unsaved projects can carry a name: "CPU demo" until saved |
+| F10 | Wide truth tables (ALU) hid their last outputs off the right edge | The window grows to fit the columns, up to the screen width |
+| F11 | Workspace text showed through the side panels (96 % opaque) | Panels fully opaque |
+| F12 | Context menu in Title Case ("Open Internal Circuit", "Truth Table"), inspector in sentence case ("Look inside") | Sentence case everywhere, one name: "Open internal circuit"; real ellipses (…) |
+| F13 | CPU demo opened without saying what to do | Hint: "Running Fibonacci: watch OUT. Click a program word to edit it." |
+
+### Not changed (reviewed)
+- Opening a gate, NAND workflow, truth table, packaging flow and library grouping all read clearly.
+- The CPU's internal circuit is very wide (about 50 parts in ~25 columns); readable when zoomed, a known limit of
+  the generated layout.
+- Selecting a node in the demo opens the inspector over the displays on the right; framing happens before the
+  inspector appears. Left as is (closing the inspector or panning shows them).
+
+### Test results
+- EditMode: **449 / 449 passed**.
+- PlayMode: **91 / 91 passed** (3 new, `UsabilityPassTests`: demo title, hint and no feedback warning; crumbs fit
+  their text on the first open; the packaging prompt is not an error; the ALU truth table window grows so nothing
+  scrolls sideways). Context-menu label assertions updated to the sentence-case names.

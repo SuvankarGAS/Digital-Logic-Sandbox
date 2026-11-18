@@ -30,16 +30,16 @@ namespace DigitalLogicSandbox.UI.ContextMenus
         private RectTransform _root;
         private RectTransform _menu;
 
-        /// <summary>Raised by "Create Custom Gate..." items (true = from the selection).</summary>
+        /// <summary>Raised by "Create custom gate…" items (true = from the selection).</summary>
         public event Action<bool> PackageRequested;
 
         /// <summary>"Generate Truth Table" on empty space (the shown circuit).</summary>
         public event Action CircuitTruthTableRequested;
 
-        /// <summary>"Truth Table" on a gate.</summary>
+        /// <summary>"Truth table" on a gate.</summary>
         public event Action<NodeId> NodeTruthTableRequested;
 
-        /// <summary>"Truth Table" on a library entry (a component with no instance in the circuit).</summary>
+        /// <summary>"Truth table" on a library entry (a component with no instance in the circuit).</summary>
         public event Action<ComponentRef, string> ComponentTruthTableRequested;
 
         public bool IsOpen => gameObject.activeSelf;
@@ -90,13 +90,13 @@ namespace DigitalLogicSandbox.UI.ContextMenus
                 if (node.Component.Kind == ComponentKind.Custom)
                 {
                     NodeId id = request.Node;
-                    Add("Open Internal Circuit", () => _workspace.OpenNode(id), _workspace.CanOpenNode(id));
+                    Add("Open internal circuit", () => _workspace.OpenNode(id), _workspace.CanOpenNode(id));
                 }
 
                 if (!node.Component.IsUtility)
                 {
                     NodeId gate = request.Node;
-                    Add("Truth Table", () => NodeTruthTableRequested?.Invoke(gate), true);
+                    Add("Truth table", () => NodeTruthTableRequested?.Invoke(gate), true);
                 }
 
                 Add("Rotate", () => _workspace.RotateSelection(), editable);
@@ -104,32 +104,32 @@ namespace DigitalLogicSandbox.UI.ContextMenus
                 Add("Delete", () => _workspace.DeleteSelection(), editable);
                 if (_workspace.CanPackage)
                 {
-                    Add("Create Custom Gate from Selection...", () => PackageRequested?.Invoke(true), true);
+                    Add("Create custom gate from selection…", () => PackageRequested?.Invoke(true), true);
                 }
             }
             else if (request.Wire.HasValue)
             {
                 PinRef wire = request.Wire.Value;
-                Add("Delete Wire", () => _workspace.DeleteWire(wire), editable);
+                Add("Delete wire", () => _workspace.DeleteWire(wire), editable);
             }
             else
             {
                 if (_workspace.CanPackage)
                 {
-                    Add("Create Custom Gate...", () => PackageRequested?.Invoke(false), circuit.Outputs.Count > 0);
+                    Add("Create custom gate…", () => PackageRequested?.Invoke(false), circuit.Outputs.Count > 0);
                 }
 
-                Add("Generate Truth Table...", () => CircuitTruthTableRequested?.Invoke(), circuit.Outputs.Count > 0);
-                Add("Select All", _workspace.SelectAll, circuit.Nodes.Count > 0);
-                Add("Frame Content", _workspace.FrameContent, true);
+                Add("Generate truth table…", () => CircuitTruthTableRequested?.Invoke(), circuit.Outputs.Count > 0);
+                Add("Select all", _workspace.SelectAll, circuit.Nodes.Count > 0);
+                Add("Frame content", _workspace.FrameContent, true);
                 if (_workspace.Navigator.CurrentIndex > 0)
                 {
-                    Add("Back to Parent Circuit", () => _workspace.NavigateUp(), true);
+                    Add("Back to parent circuit", () => _workspace.NavigateUp(), true);
                 }
 
                 if (_workspace.Navigator.CanBeginEdit(out _))
                 {
-                    Add("Edit Implementation", () => _workspace.BeginEdit(), true);
+                    Add("Edit implementation", () => _workspace.BeginEdit(), true);
                 }
             }
 
@@ -148,10 +148,10 @@ namespace DigitalLogicSandbox.UI.ContextMenus
             {
                 ComponentRef component = request.Component;
                 string name = request.DisplayName;
-                Add("Truth Table", () => ComponentTruthTableRequested?.Invoke(component, name), true);
+                Add("Truth table", () => ComponentTruthTableRequested?.Invoke(component, name), true);
                 if (component.Kind == ComponentKind.Custom)
                 {
-                    Add("Open Internal Circuit", () => _workspace.OpenDefinition(component.Definition),
+                    Add("Open internal circuit", () => _workspace.OpenDefinition(component.Definition),
                         _workspace.CanOpenDefinition(component.Definition));
                 }
             }

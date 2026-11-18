@@ -42,7 +42,7 @@ namespace DigitalLogicSandbox.UI.Dialogs
             var dialog = blocker.gameObject.AddComponent<ConfirmDialog>();
             dialog._workspace = workspace;
 
-            Image window = ui.Card("Window", blocker.rectTransform, ui.Theme.PanelBackground);
+            Image window = ui.Card("Window", blocker.rectTransform, ui.Theme.DialogBackground);
             RectTransform rect = window.rectTransform;
             rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
             rect.pivot = new Vector2(0.5f, 0.5f);
