@@ -457,6 +457,11 @@ namespace DigitalLogicSandbox.UI.Inspector
                 BuildResizeSection(node);
             }
 
+            if (node.Component.Kind == ComponentKind.Custom || node.Component.Kind == ComponentKind.Primitive)
+            {
+                BuildLabelField(node); // drawn above the gate, e.g. "PC" on a register
+            }
+
             _ui.Property(_content, "Position", node.Position.X.ToString("0.##", CultureInfo.InvariantCulture) + ", " +
                 node.Position.Y.ToString("0.##", CultureInfo.InvariantCulture));
             _ui.Property(_content, "Rotation", ((int)node.Rotation * 90) + "°");
@@ -646,7 +651,9 @@ namespace DigitalLogicSandbox.UI.Inspector
             BuildLabelField(node);
         }
 
-        /// <summary>Free-text label drawn on constants (before the value) and displays (as the caption).</summary>
+        /// <summary>
+        /// Free-text label: drawn on constants (before the value), on displays (as the caption) and above gates.
+        /// </summary>
         private void BuildLabelField(NodeDefinition node)
         {
             NodeId id = node.Id;

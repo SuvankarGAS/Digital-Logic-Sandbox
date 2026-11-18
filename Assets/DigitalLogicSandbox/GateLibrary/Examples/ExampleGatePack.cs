@@ -177,6 +177,7 @@ namespace DigitalLogicSandbox.GateLibrary.Examples
         private readonly List<CircuitDefinition> _definitions = new List<CircuitDefinition>();
         private readonly Dictionary<string, CircuitDefinition> _byKey = new Dictionary<string, CircuitDefinition>();
         private readonly NodeSizer _sizer;
+        private readonly PinOffset _pins;
         private readonly Func<string, string> _nameFor;
 
         internal ExamplePack(PrimitiveRegistry primitives, NodeSizer sizer, Func<string, string> nameFor)
@@ -184,6 +185,7 @@ namespace DigitalLogicSandbox.GateLibrary.Examples
             Library = new DefinitionLibrary();
             Catalog = new ComponentCatalog(primitives, Library);
             _sizer = sizer;
+            _pins = LayeredLayout.SignaturePins(Catalog);
             _nameFor = nameFor;
         }
 
@@ -221,6 +223,10 @@ namespace DigitalLogicSandbox.GateLibrary.Examples
                 PinRef bb = b.In("B");
                 b.Out("OUT", b.And(b.Gate("or", a, bb)[0], b.Gate("nand", a, bb)[0]));
             });
+            AddBitwise("and4", "AND 4-bit", "Y = A AND B, bit by bit, on 4-bit buses.", (b, x, y) => b.And(x, y));
+            AddBitwise("or4", "OR 4-bit", "Y = A OR B, bit by bit, on 4-bit buses.", (b, x, y) => b.Gate("or", x, y)[0]);
+            AddBitwise("xor4", "XOR 4-bit", "Y = A XOR B, bit by bit, on 4-bit buses. XOR with all ones inverts A.",
+                (b, x, y) => b.Gate("xor", x, y)[0]);
 
             // Routing
             Add("mux2", "MUX 2:1", ExampleGatePack.RoutingCategory, "OUT = A when S is 0, B when S is 1.", b =>
@@ -241,6 +247,21 @@ namespace DigitalLogicSandbox.GateLibrary.Examples
                 PinRef high = b.Gate("mux2", s[0], i2, i3)[0];
                 b.Out("OUT", b.Gate("mux2", s[1], low, high)[0]);
             });
+            Add("mux2x4", "MUX 2:1 4-bit", ExampleGatePack.RoutingCategory, "OUT = bus A when S is 0, bus B when S is 1 (4-bit buses).", b =>
+            {
+                PinRef s = b.In("S");
+                PinRef[] a = b.Split(b.In("A", 4), 4);
+                PinRef[] bb = b.Split(b.In("B", 4), 4);
+                var bits = new PinRef[4];
+                for (int i = 0; i < 4; i++)
+                {
+                    bits[i] = b.Gate("mux2", s, a[i], bb[i])[0];
+                }
+
+                b.Out("OUT", b.Merge(bits), 4);
+            });
+            AddBusMux4("mux4x4", "MUX 4:1 4-bit", 4);
+            AddBusMux4("mux4x8", "MUX 4:1 8-bit", 8);
             Add("dec2", "Decoder 2→4", ExampleGatePack.RoutingCategory, "Output Y(A) is HIGH, the others LOW; A is a 2-bit bus.", b =>
             {
                 PinRef[] a = b.Split(b.In("A", 2), 2);
@@ -301,32 +322,23 @@ namespace DigitalLogicSandbox.GateLibrary.Examples
                 "0 for logic operations. ZERO is HIGH when Y is 0.", b =>
             {
                 PinRef aBus = b.In("A", 4);
-                PinRef[] a = b.Split(aBus, 4);
-                PinRef[] bb = b.Split(b.In("B", 4), 4);
+                PinRef bBus = b.In("B", 4);
                 PinRef opBus = b.In("OP", 2);
                 PinRef[] op = b.Split(opBus, 2);
 
-                // Subtraction is A + NOT B + 1: XOR each B bit with OP0 and carry OP0 in.
-                var bx = new PinRef[4];
-                for (int i = 0; i < 4; i++)
-                {
-                    bx[i] = b.Gate("xor", bb[i], op[0])[0];
-                }
+                // Subtraction is A + NOT B + 1: XOR B with OP0 on every bit and carry OP0 in.
+                PinRef bx = b.Label(b.Gate("xor4", bBus, b.Merge(op[0], op[0], op[0], op[0]))[0], "B or NOT B");
+                PinRef[] adder = b.Gate("adder4", aBus, bx, op[0]);
+                b.Label(adder[0], "Add / subtract");
+                PinRef and = b.Gate("and4", aBus, bBus)[0];
+                PinRef or = b.Gate("or4", aBus, bBus)[0];
+                PinRef y = b.Label(b.Gate("mux4x4", opBus, adder[0], adder[0], and, or)[0], "Result (by OP)");
 
-                PinRef[] adder = b.Gate("adder4", aBus, b.Merge(bx), op[0]);
-                PinRef[] sum = b.Split(adder[0], 4);
-                var y = new PinRef[4];
-                for (int i = 0; i < 4; i++)
-                {
-                    PinRef and = b.And(a[i], bb[i]);
-                    PinRef or = b.Gate("or", a[i], bb[i])[0];
-                    y[i] = b.Gate("mux4", opBus, sum[i], sum[i], and, or)[0];
-                }
-
-                b.Out("Y", b.Merge(y), 4);
+                b.Out("Y", y, 4);
                 b.Out("COUT", b.And(adder[1], b.Not(op[1])));
-                PinRef any = b.Gate("or", b.Gate("or", y[0], y[1])[0], b.Gate("or", y[2], y[3])[0])[0];
-                b.Out("ZERO", b.Not(any));
+                PinRef[] bits = b.Split(y, 4);
+                PinRef any = b.Gate("or", b.Gate("or", bits[0], bits[1])[0], b.Gate("or", bits[2], bits[3])[0])[0];
+                b.Out("ZERO", b.Label(b.Not(any), "Zero test"));
             });
 
             // Memory
@@ -350,40 +362,60 @@ namespace DigitalLogicSandbox.GateLibrary.Examples
                 b.Out("Q", q);
                 b.Out("QN", qn);
             });
+            Add("latch4", "Latch 4-bit", ExampleGatePack.MemoryCategory, "Four D latches sharing E: Q follows bus D while E is HIGH and holds while E is LOW.", b =>
+            {
+                PinRef[] d = b.Split(b.In("D", 4), 4);
+                PinRef e = b.In("E");
+                var q = new PinRef[4];
+                for (int i = 0; i < 4; i++)
+                {
+                    q[i] = b.Gate("d-latch", d[i], e)[0];
+                }
+
+                b.Out("Q", b.Merge(q), 4);
+            });
             Add("dff", "D Flip-Flop", ExampleGatePack.MemoryCategory, "Stores D on the rising edge of CLK. Master-slave pair of D latches.", b =>
             {
                 PinRef d = b.In("D");
                 PinRef clk = b.In("CLK");
                 PinRef[] master = b.Gate("d-latch", d, b.Not(clk));
                 PinRef[] slave = b.Gate("d-latch", master[0], clk);
+                b.Label(master[0], "Master");
+                b.Label(slave[0], "Slave");
                 b.Out("Q", slave[0]);
                 b.Out("QN", slave[1]);
             });
             Add("register4", "Register 4-bit", ExampleGatePack.MemoryCategory, "On a rising CLK edge Q takes D when LOAD is HIGH, otherwise keeps its value.", b =>
             {
-                PinRef[] d = b.Split(b.In("D", 4), 4);
+                PinRef d = b.In("D", 4);
                 PinRef load = b.In("LOAD");
                 PinRef clk = b.In("CLK");
+                var flipFlops = new NodeDefinition[4];
                 var q = new PinRef[4];
                 for (int i = 0; i < 4; i++)
                 {
-                    NodeDefinition flipFlop = b.Instance("dff");
-                    q[i] = b.OutputOf(flipFlop, 0);
-                    PinRef next = b.Gate("mux2", load, q[i], d[i])[0];
-                    b.Wire(next, b.InputOf(flipFlop, 0));
-                    b.Wire(clk, b.InputOf(flipFlop, 1));
+                    flipFlops[i] = b.Label(b.Instance("dff"), "Bit " + i);
+                    q[i] = b.OutputOf(flipFlops[i], 0);
                 }
 
-                b.Out("Q", b.Merge(q), 4);
+                PinRef stored = b.Merge(q);
+                PinRef[] next = b.Split(b.Label(b.Gate("mux2x4", load, stored, d)[0], "Load or keep"), 4);
+                for (int i = 0; i < 4; i++)
+                {
+                    b.Wire(next[i], b.InputOf(flipFlops[i], 0));
+                    b.Wire(clk, b.InputOf(flipFlops[i], 1));
+                }
+
+                b.Out("Q", stored, 4);
             });
             Add("counter4", "Counter 4-bit", ExampleGatePack.MemoryCategory,
                 "Counts up by one on each rising CLK edge and wraps from 15 to 0. Synchronous: a register that loads " +
                 "its own value plus one, so all bits change together.", b =>
             {
                 PinRef clock = b.In("CLK");
-                NodeDefinition register = b.Instance("register4");
+                NodeDefinition register = b.Label(b.Instance("register4"), "Count");
                 PinRef q = b.OutputOf(register, 0);
-                PinRef next = b.Gate("adder4", q, b.Const(4, 0), b.Const(1, 1))[0];
+                PinRef next = b.Label(b.Gate("adder4", q, b.Const(4, 0), b.Const(1, 1))[0], "Count + 1");
                 b.Wire(next, b.InputOf(register, 0));
                 b.Wire(b.Const(1, 1), b.InputOf(register, 1));
                 b.Wire(clock, b.InputOf(register, 2));
@@ -394,69 +426,54 @@ namespace DigitalLogicSandbox.GateLibrary.Examples
                 "to that word. Change ADDR only while CLK is LOW.", b =>
             {
                 PinRef addr = b.In("ADDR", 4);
-                PinRef[] din = b.Split(b.In("DIN", 4), 4);
+                PinRef din = b.In("DIN", 4);
                 PinRef we = b.In("WE");
                 PinRef clk = b.In("CLK");
                 PinRef[] a = b.Split(addr, 4);
                 PinRef low = b.Merge(a[0], a[1]);
                 PinRef high = b.Merge(a[2], a[3]);
                 PinRef[] select = b.Gate("dec4", addr);
+                b.Label(select[0], "Address decoder");
                 PinRef write = b.And(we, clk);
 
-                var cells = new PinRef[16, 4];
+                var words = new PinRef[16];
                 for (int word = 0; word < 16; word++)
                 {
-                    PinRef enable = b.And(select[word], write);
-                    for (int bit = 0; bit < 4; bit++)
-                    {
-                        cells[word, bit] = b.Gate("d-latch", din[bit], enable)[0];
-                    }
+                    words[word] = b.Label(b.Gate("latch4", din, b.And(select[word], write))[0], "Word " + word);
                 }
 
-                var dout = new PinRef[4];
-                for (int bit = 0; bit < 4; bit++)
+                var groups = new PinRef[4];
+                for (int g = 0; g < 4; g++)
                 {
-                    var groups = new PinRef[4];
-                    for (int g = 0; g < 4; g++)
-                    {
-                        groups[g] = b.Gate("mux4", low, cells[g * 4, bit], cells[g * 4 + 1, bit], cells[g * 4 + 2, bit],
-                            cells[g * 4 + 3, bit])[0];
-                    }
-
-                    dout[bit] = b.Gate("mux4", high, groups[0], groups[1], groups[2], groups[3])[0];
+                    groups[g] = b.Label(b.Gate("mux4x4", low, words[g * 4], words[g * 4 + 1], words[g * 4 + 2],
+                        words[g * 4 + 3])[0], "Words " + g * 4 + "-" + (g * 4 + 3));
                 }
 
-                b.Out("DOUT", b.Merge(dout), 4);
+                b.Out("DOUT", b.Label(b.Gate("mux4x4", high, groups[0], groups[1], groups[2], groups[3])[0], "Read"), 4);
             });
 
             // Computer
             Add("rom16x8", "ROM 16×8", ExampleGatePack.ComputerCategory,
                 "DATA is word W(ADDR). Wire a Constant to each W input to hold a program: the words survive Reset " +
-                "and saving. Each data bit is a tree of five MUX 4:1.", b =>
+                "and saving. A tree of five MUX 4:1 8-bit selects the word.", b =>
             {
-                var words = new PinRef[16][];
+                var words = new PinRef[16];
                 for (int w = 0; w < 16; w++)
                 {
-                    words[w] = b.Split(b.In("W" + w, 8), 8);
+                    words[w] = b.In("W" + w, 8);
                 }
 
                 PinRef[] a = b.Split(b.In("ADDR", 4), 4);
                 PinRef low = b.Merge(a[0], a[1]);
                 PinRef high = b.Merge(a[2], a[3]);
-                var data = new PinRef[8];
-                for (int bit = 0; bit < 8; bit++)
+                var groups = new PinRef[4];
+                for (int g = 0; g < 4; g++)
                 {
-                    var groups = new PinRef[4];
-                    for (int g = 0; g < 4; g++)
-                    {
-                        groups[g] = b.Gate("mux4", low, words[g * 4][bit], words[g * 4 + 1][bit], words[g * 4 + 2][bit],
-                            words[g * 4 + 3][bit])[0];
-                    }
-
-                    data[bit] = b.Gate("mux4", high, groups[0], groups[1], groups[2], groups[3])[0];
+                    groups[g] = b.Label(b.Gate("mux4x8", low, words[g * 4], words[g * 4 + 1], words[g * 4 + 2],
+                        words[g * 4 + 3])[0], "W" + g * 4 + "-W" + (g * 4 + 3));
                 }
 
-                b.Out("DATA", b.Merge(data), 8);
+                b.Out("DATA", b.Label(b.Gate("mux4x8", high, groups[0], groups[1], groups[2], groups[3])[0], "Read"), 8);
             });
             Add("cpu4", "CPU 4-bit", ExampleGatePack.ComputerCategory, CpuDescription, BuildCpu);
         }
@@ -479,8 +496,8 @@ namespace DigitalLogicSandbox.GateLibrary.Examples
             PinRef[] instr = b.Split(b.In("INSTR", 8), 8);
             PinRef clk = b.In("CLK");
             PinRef n = b.Merge(instr[0], instr[1], instr[2], instr[3]);
-            PinRef[] nBits = { instr[0], instr[1], instr[2], instr[3] };
             PinRef[] op = b.Gate("dec4", b.Merge(instr[4], instr[5], instr[6], instr[7]));
+            b.Label(op[0], "Opcode decoder");
 
             PinRef Or(PinRef x, PinRef y) => b.Gate("or", x, y)[0];
             PinRef immediate = Or(op[1], Or(op[6], op[7])); // LDI, ADDI, SUBI use n itself
@@ -489,34 +506,24 @@ namespace DigitalLogicSandbox.GateLibrary.Examples
             PinRef loadA = Or(arithmetic, Or(op[1], op[2]));
 
             // Registers are placed first so their outputs can feed the logic that computes their inputs.
-            NodeDefinition pcRegister = b.Instance("register4");
-            NodeDefinition aRegister = b.Instance("register4");
-            NodeDefinition outRegister = b.Instance("register4");
-            NodeDefinition zeroFlag = b.Instance("dff");
-            NodeDefinition carryFlag = b.Instance("dff");
+            NodeDefinition pcRegister = b.Label(b.Instance("register4"), "PC");
+            NodeDefinition aRegister = b.Label(b.Instance("register4"), "A");
+            NodeDefinition outRegister = b.Label(b.Instance("register4"), "OUT");
+            NodeDefinition zeroFlag = b.Label(b.Instance("dff"), "Z flag");
+            NodeDefinition carryFlag = b.Label(b.Instance("dff"), "C flag");
             PinRef pc = b.OutputOf(pcRegister, 0);
             PinRef a = b.OutputOf(aRegister, 0);
             PinRef zero = b.OutputOf(zeroFlag, 0);
             PinRef carry = b.OutputOf(carryFlag, 0);
 
             // Operand: n for immediates, otherwise the RAM word at n. The RAM writes A during the LOW half of STA.
-            PinRef[] ram = b.Split(b.Gate("ram16x4", n, a, op[3], b.Not(clk))[0], 4);
-            var operandBits = new PinRef[4];
-            for (int i = 0; i < 4; i++)
-            {
-                operandBits[i] = b.Gate("mux2", immediate, ram[i], nBits[i])[0];
-            }
-
-            PinRef operand = b.Merge(operandBits);
+            PinRef ram = b.Label(b.Gate("ram16x4", n, a, op[3], b.Not(clk))[0], "Data RAM");
+            PinRef operand = b.Label(b.Gate("mux2x4", immediate, ram, n)[0], "Operand");
             PinRef[] alu = b.Gate("alu4", a, operand, b.Merge(subtract, b.Const(1, 0)));
-            PinRef[] y = b.Split(alu[0], 4);
-            var nextA = new PinRef[4];
-            for (int i = 0; i < 4; i++)
-            {
-                nextA[i] = b.Gate("mux2", arithmetic, operandBits[i], y[i])[0];
-            }
+            b.Label(alu[0], "ALU");
+            PinRef nextA = b.Label(b.Gate("mux2x4", arithmetic, operand, alu[0])[0], "Next A");
 
-            b.Wire(b.Merge(nextA), b.InputOf(aRegister, 0));
+            b.Wire(nextA, b.InputOf(aRegister, 0));
             b.Wire(loadA, b.InputOf(aRegister, 1));
             b.Wire(clk, b.InputOf(aRegister, 2));
 
@@ -529,14 +536,10 @@ namespace DigitalLogicSandbox.GateLibrary.Examples
             // PC: n when a jump is taken, otherwise PC + 1 (PC + 0 while halted).
             PinRef halt = op[15];
             PinRef taken = Or(op[8], Or(b.And(op[9], zero), b.And(op[10], carry)));
-            PinRef[] next = b.Split(b.Gate("adder4", pc, b.Const(4, 0), b.Not(halt))[0], 4);
-            var nextPc = new PinRef[4];
-            for (int i = 0; i < 4; i++)
-            {
-                nextPc[i] = b.Gate("mux2", taken, next[i], nBits[i])[0];
-            }
+            PinRef next = b.Label(b.Gate("adder4", pc, b.Const(4, 0), b.Not(halt))[0], "PC + 1");
+            PinRef nextPc = b.Label(b.Gate("mux2x4", taken, next, n)[0], "Next PC");
 
-            b.Wire(b.Merge(nextPc), b.InputOf(pcRegister, 0));
+            b.Wire(nextPc, b.InputOf(pcRegister, 0));
             b.Wire(b.Const(1, 1), b.InputOf(pcRegister, 1));
             b.Wire(clk, b.InputOf(pcRegister, 2));
 
@@ -550,6 +553,46 @@ namespace DigitalLogicSandbox.GateLibrary.Examples
             b.Out("HALT", halt);
         }
 
+        /// <summary>A 4-bit bitwise gate: <paramref name="bit"/> applied to each pair of bits of A and B.</summary>
+        private void AddBitwise(string key, string name, string description, Func<Builder, PinRef, PinRef, PinRef> bit)
+        {
+            Add(key, name, ExampleGatePack.LogicCategory, description, b =>
+            {
+                PinRef[] a = b.Split(b.In("A", 4), 4);
+                PinRef[] bb = b.Split(b.In("B", 4), 4);
+                var y = new PinRef[4];
+                for (int i = 0; i < 4; i++)
+                {
+                    y[i] = bit(b, a[i], bb[i]);
+                }
+
+                b.Out("Y", b.Merge(y), 4);
+            });
+        }
+
+        /// <summary>A 4:1 multiplexer on <paramref name="width"/>-bit buses: one MUX 4:1 per bit, sharing S.</summary>
+        private void AddBusMux4(string key, string name, int width)
+        {
+            Add(key, name, ExampleGatePack.RoutingCategory,
+                "OUT = bus number S (I0 … I3) on " + width + "-bit buses; S is a 2-bit bus. One MUX 4:1 per bit.", b =>
+            {
+                PinRef select = b.In("S", 2);
+                var inputs = new PinRef[4][];
+                for (int i = 0; i < 4; i++)
+                {
+                    inputs[i] = b.Split(b.In("I" + i, width), width);
+                }
+
+                var bits = new PinRef[width];
+                for (int bit = 0; bit < width; bit++)
+                {
+                    bits[bit] = b.Gate("mux4", select, inputs[0][bit], inputs[1][bit], inputs[2][bit], inputs[3][bit])[0];
+                }
+
+                b.Out("OUT", b.Merge(bits), width);
+            });
+        }
+
         private void Add(string key, string name, string category, string description, Action<Builder> build)
         {
             var circuit = new CircuitDefinition(new DefinitionId(ExampleGatePack.IdPrefix + key), _nameFor?.Invoke(name) ?? name)
@@ -558,7 +601,7 @@ namespace DigitalLogicSandbox.GateLibrary.Examples
                 Description = description,
             };
             build(new Builder(this, circuit));
-            LayeredLayout.Arrange(circuit, node => _sizer(Catalog, circuit, node));
+            LayeredLayout.Arrange(circuit, node => _sizer(Catalog, circuit, node), _pins);
             Library.Add(circuit);
             _definitions.Add(circuit);
             _byKey[key] = circuit;
@@ -593,6 +636,20 @@ namespace DigitalLogicSandbox.GateLibrary.Examples
             public void Wire(PinRef source, PinRef destination)
             {
                 _circuit.Connect(source, destination);
+            }
+
+            /// <summary>Names the node that drives <paramref name="pin"/> (drawn above it); returns the pin.</summary>
+            public PinRef Label(PinRef pin, string text)
+            {
+                _circuit.SetNodeLabel(pin.Node, text);
+                return pin;
+            }
+
+            /// <summary>Names <paramref name="node"/> (drawn above it); returns it.</summary>
+            public NodeDefinition Label(NodeDefinition node, string text)
+            {
+                _circuit.SetNodeLabel(node.Id, text);
+                return node;
             }
 
             public PinRef Not(PinRef input)

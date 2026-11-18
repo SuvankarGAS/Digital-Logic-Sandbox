@@ -822,10 +822,15 @@ the workspace views (`GateView`, `WireView`, `GridView`).
 
 ## 19. Example gate pack *(implemented – Phase E)*
 
-- **What it is.** `GateLibrary.Examples.ExampleGatePack` builds 19 ordinary custom gates: NAND, OR, NOR, XOR;
-  MUX 2:1, MUX 4:1, Decoder 2→4, Decoder 4→16; Half Adder, Full Adder, Adder 4-bit, ALU 4-bit; D Latch,
-  D Flip-Flop, Register 4-bit, Counter 4-bit and RAM 16×4; ROM 16×8 and CPU 4-bit (section 20). A new project never contains them; File → "Add example
+- **What it is.** `GateLibrary.Examples.ExampleGatePack` builds 26 ordinary custom gates: NAND, OR, NOR, XOR,
+  AND/OR/XOR 4-bit; MUX 2:1, MUX 4:1, MUX 2:1 4-bit, MUX 4:1 4-bit, MUX 4:1 8-bit, Decoder 2→4, Decoder 4→16;
+  Half Adder, Full Adder, Adder 4-bit, ALU 4-bit; D Latch, Latch 4-bit, D Flip-Flop, Register 4-bit, Counter 4-bit
+  and RAM 16×4; ROM 16×8 and CPU 4-bit (section 20). A new project never contains them; File → "Add example
   gates" adds them.
+- **Bus-width building blocks.** The bitwise, bus-multiplexer and 4-bit latch gates exist so the big gates are
+  built from a few bus-level parts instead of rows of single-bit ones (the RAM is 16 Latch 4-bit words and five
+  MUX 4:1 4-bit, the ROM five MUX 4:1 8-bit, the CPU's datapath rows are MUX 2:1 4-bit). Flattened, the circuits
+  are gate for gate the same as the earlier bit-level versions (the CPU still compiles to 2 842 gates).
 - **Built from AND and NOT only.** Each gate contains AND/NOT primitives, boundaries, splitters/mergers and
   instances of *earlier* pack gates, referenced by ID (the Full Adder holds two Half Adder instances, not copies).
   No primitive, simulator path or UI code knows any pack gate by name: once published they are indistinguishable
@@ -838,13 +843,28 @@ the workspace views (`GateView`, `WireView`, `GridView`).
   `WorkspaceController.LoadExampleGates` publishes the result as one `CompositeCommand` of
   `PublishDefinitionCommand`s, so a single undo removes the whole pack. Like packaging, it is only offered on the
   main circuit.
-- **Layout.** Generated gates get positions from `LayeredLayout.Arrange`. Feedback edges (DFS back edges) are
-  ignored, each node goes one column right of its furthest predecessor, inputs come first and outputs last, and
-  nodes aim for the average height of their predecessors before a top-down sweep removes overlaps. Sizes come from
-  a `NodeSizer` delegate: the workspace passes `Rendering.GeometryNodeSizer` (the renderer's real gate sizes), so
-  the GateLibrary assembly needs no reference to Rendering.
-- **Memory without a primitive.** The RAM is 64 D-latch cells (cross-coupled NANDs), a 4→16 decoder for the write
-  enables (`WE · CLK · select`) and twenty MUX 4:1 for reading: 1 041 AND/NOT gates once flattened. Writes are
+- **Layout** (`LayeredLayout`, a layered Sugiyama-style layout; also behind the editor's "Tidy layout"):
+  1. Columns: feedback edges (DFS back edges) are ignored; inputs come first, outputs last, every other node right
+     of its predecessors (constants and clocks start one column right of the inputs). A balancing pass then moves
+     nodes with more outgoing than incoming wires (constants, splitters) right, next to their users.
+  2. Lanes: a wire spanning several columns gets a virtual node in each column it crosses, shared per source pin.
+  3. Order: up to 24 alternating barycenter sweeps on pin heights, each followed by adjacent swaps, keeping the
+     order with the fewest crossings (merge-sort count per column pair). Boundary columns keep interface order.
+  4. Heights: nodes move to the median height of the pins they connect to, with order and spacing kept by an
+     isotonic (pool-adjacent-violators) fit; lanes weigh more, so long wires run straight. Snapped to 0.5.
+  5. Column gaps grow with the wires that change height between two columns (3.5 to 7 units).
+  Sizes come from a `NodeSizer` delegate (the workspace passes `Rendering.GeometryNodeSizer`) and pin heights from
+  `LayeredLayout.SignaturePins`, which restates the renderer's pin rule (1 unit apart, centred, first on top); a
+  test checks the two agree, so GateLibrary needs no reference to Rendering. `ComputePositions` returns positions
+  without touching the circuit; `Arrange` applies them.
+- **Part labels.** Builders name key parts with node labels ("PC", "Z flag", "Data RAM", "Word 7", "Read"). The
+  renderer draws a custom or primitive gate's label above its body in the accent colour (`GateGeometry.Caption`).
+- **Tidy layout.** `WorkspaceController.TidyLayout` (workspace context menu, editable circuits only) computes the
+  same layout for the current circuit and applies it as one `TransformNodesCommand`, resetting rotations so the
+  circuit reads left to right. Projects saved with the earlier pack keep their positions until tidied.
+- **Memory without a primitive.** The RAM is 16 Latch 4-bit words (64 D-latch cells of cross-coupled NANDs), a
+  4→16 decoder for the write enables (`WE · CLK · select`) and five MUX 4:1 4-bit for reading: 1 041 AND/NOT
+  gates once flattened. Writes are
   level-sensitive while CLK is HIGH, so the address must only change while CLK is LOW.
 - **Extension point.** More packs follow the same shape: a builder that returns definitions in dependency order with
   fixed IDs, then `Prepare` and one composite publish command.
@@ -859,8 +879,9 @@ the workspace views (`GateView`, `WireView`, `GridView`).
     truth table, sequence analysis), and each bit is a real driver for contention checks.
   - Editing: `WorkspaceController.ChangeConstantValue` and width changes go through `ChangeComponentCommand`
     (undoable). The inspector offers a value field (decimal, `0x`, `0b`), one toggle per bit and a label.
-  - Node labels: `SetNodeLabelCommand` makes them undoable. A label is drawn before a constant's value and replaces
-    a display's BIN/HEX/DEC caption; other kinds still ignore it.
+  - Node labels: `SetNodeLabelCommand` makes them undoable. A label is drawn before a constant's value, replaces
+    a display's BIN/HEX/DEC caption, and is drawn above custom and primitive gates (section 19); boundaries are
+    named by their port instead.
   - Persistence: `"kind": "constant"` with `width` and `value` (schema v7).
 - **Power-on at 0.** The resolved power-on rule forces the first unknown net of each loop LOW, in the order the
   cycle search reaches the loop's gates. The pack's D latch builds its reset-side NAND first, so the search enters

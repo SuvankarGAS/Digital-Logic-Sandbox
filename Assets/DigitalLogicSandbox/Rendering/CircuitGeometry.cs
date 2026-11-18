@@ -1224,8 +1224,20 @@ namespace DigitalLogicSandbox.Rendering
                 icon = definition.Icon;
             }
 
-            return GateLayout.Compute(node.Component.Kind, signature, node.Rotation, TitleOf(node), icon,
+            GateGeometry geometry = GateLayout.Compute(node.Component.Kind, signature, node.Rotation, TitleOf(node), icon,
                 node.Component.DisplayStyle, node.Component.LedColor);
+            geometry.Caption = CaptionOf(node);
+            return geometry;
+        }
+
+        /// <summary>
+        /// The label drawn above a gate (custom and primitive gates). Constants and displays show their label inside
+        /// the body instead (see <see cref="TitleOf(NodeDefinition)"/>); boundaries are named by their port.
+        /// </summary>
+        public static string CaptionOf(NodeDefinition node)
+        {
+            bool gate = node.Component.Kind == ComponentKind.Custom || node.Component.Kind == ComponentKind.Primitive;
+            return gate && !string.IsNullOrWhiteSpace(node.Label) ? node.Label.Trim() : string.Empty;
         }
 
         private void InvalidateWiresOf(NodeId node)

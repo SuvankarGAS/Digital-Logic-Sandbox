@@ -122,6 +122,7 @@ namespace DigitalLogicSandbox.UI.ContextMenus
                 Add("Generate truth table…", () => CircuitTruthTableRequested?.Invoke(), circuit.Outputs.Count > 0);
                 Add("Select all", _workspace.SelectAll, circuit.Nodes.Count > 0);
                 Add("Frame content", _workspace.FrameContent, true);
+                Add("Tidy layout", () => _workspace.TidyLayout(), _workspace.CanTidyLayout);
                 if (_workspace.Navigator.CurrentIndex > 0)
                 {
                     Add("Back to parent circuit", () => _workspace.NavigateUp(), true);

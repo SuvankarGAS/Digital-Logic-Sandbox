@@ -88,6 +88,11 @@ namespace DigitalLogicSandbox.Rendering.Gates
 
         public string Subtitle { get; }
 
+        /// <summary>The node's label drawn above a gate body ("PC", "Data RAM"), or empty.</summary>
+        public string Caption { get; internal set; } = string.Empty;
+
+        public bool HasCaption => Caption.Length > 0;
+
         /// <summary>Axis-aligned body size after rotation.</summary>
         public Vector2 Size { get; }
 

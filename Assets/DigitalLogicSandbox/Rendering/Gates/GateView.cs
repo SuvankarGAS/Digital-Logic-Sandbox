@@ -35,6 +35,7 @@ namespace DigitalLogicSandbox.Rendering.Gates
         private SpriteRenderer _stateRing;
         private TextMeshPro _title;
         private TextMeshPro _subtitle;
+        private TextMeshPro _caption;
         private DisplayVisual _display;
         private GateGeometry _geometry;
         private Signal _stateSignal;
@@ -69,6 +70,7 @@ namespace DigitalLogicSandbox.Rendering.Gates
             view._title = CreateText(go.transform, "Title", 3.4f, theme, FontWeight.SemiBold);
             view._title.characterSpacing = 4f;
             view._subtitle = CreateText(go.transform, "Subtitle", 2.1f, theme, FontWeight.Regular);
+            view._caption = CreateText(go.transform, "Caption", CaptionFontSize, theme, FontWeight.SemiBold);
             view._display = new DisplayVisual(go.transform, theme);
             return view;
         }
@@ -156,6 +158,12 @@ namespace DigitalLogicSandbox.Rendering.Gates
             _subtitle.rectTransform.sizeDelta = new Vector2(size.x, 0.5f);
             _subtitle.transform.localPosition = new Vector3(0f, -0.32f, 0f);
 
+            // The node's label sits just above the body, outside it, so the gate keeps its own title.
+            _caption.gameObject.SetActive(geometry.HasCaption);
+            _caption.text = geometry.Caption;
+            _caption.rectTransform.sizeDelta = new Vector2(Mathf.Max(size.x, 6f), CaptionHeight);
+            _caption.transform.localPosition = new Vector3(0f, size.y * 0.5f + CaptionHeight * 0.5f + 0.05f, 0f);
+
             ConfigurePins(_inputPins, _inputRings, _inputSignals, geometry.InputPins, "In");
             ConfigurePins(_outputPins, _outputRings, _outputSignals, geometry.OutputPins, "Out");
             ConfigureTexts(size, isBoundary, isBus);
@@ -209,6 +217,7 @@ namespace DigitalLogicSandbox.Rendering.Gates
             _state.sortingOrder = SortingOrders.GateState + 2 + offset;
             _title.sortingOrder = SortingOrders.Text + offset;
             _subtitle.sortingOrder = SortingOrders.Text + offset;
+            _caption.sortingOrder = SortingOrders.Text + offset;
             SetPinOrder(_inputPins, _inputRings, offset);
             SetPinOrder(_outputPins, _outputRings, offset);
             for (int i = 0; i < _bitCells.Count; i++)
@@ -693,6 +702,7 @@ namespace DigitalLogicSandbox.Rendering.Gates
             _fill.color = Tint(fill);
             _title.color = Tint(_theme.GateText);
             _subtitle.color = Tint(_theme.GateSubtext);
+            _caption.color = Tint(_theme.Accent);
             for (int i = 0; i < _inputLabels.Count; i++)
             {
                 _inputLabels[i].color = Tint(_theme.GateSubtext);
@@ -751,6 +761,13 @@ namespace DigitalLogicSandbox.Rendering.Gates
         /// <summary>How much larger than the body the shadow is (world units), and how far it drops.</summary>
         private const float ShadowSpread = 1.0f;
         private const float ShadowDrop = 0.14f;
+
+        /// <summary>Size of the label above a gate (fits in the layout's row gap).</summary>
+        private const float CaptionFontSize = 3.2f;
+        private const float CaptionHeight = 0.7f;
+
+        /// <summary>Text of the label drawn above the gate (empty when it has none).</summary>
+        public string CaptionText => _caption.gameObject.activeSelf ? _caption.text : string.Empty;
 
         private static TextMeshPro CreateText(Transform parent, string name, float size, VisualTheme theme, FontWeight weight)
         {

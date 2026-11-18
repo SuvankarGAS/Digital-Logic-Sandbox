@@ -1613,7 +1613,8 @@ as an optional pack that File → "Add example gates" puts into My Gates. A new 
   at 0.)
 - The RAM's DOUT can glitch through the read multiplexers while several address bits change at once (up to 17
   waves). It settles correctly; it only matters for animation.
-- Generated layouts are tidy but not hand-tuned; the RAM (112 nodes) is large to browse.
+- Generated layouts are tidy but not hand-tuned; the RAM (112 nodes) is large to browse. (Resolved: see
+  "Tidier layouts".)
 - No CPU yet (out of scope for this phase). (Done in Phase E+.)
 
 ## Phase E+ – A simple 4-bit CPU (2026-11-18)
@@ -1721,3 +1722,63 @@ and the CPU demo. Everything below was found that way and checked again after th
 - PlayMode: **91 / 91 passed** (3 new, `UsabilityPassTests`: demo title, hint and no feedback warning; crumbs fit
   their text on the first open; the packaging prompt is not an error; the ALU truth table window grows so nothing
   scrolls sideways). Context-menu label assertions updated to the sentence-case names.
+
+## Tidier layouts: layered layout, part labels, "Tidy layout" (2026-11-18)
+
+The user chose to make the big example gates easier to browse, with part labels and a "Tidy layout" command for
+any circuit (no group frames, no file-format change).
+
+### Implemented
+- **Layered layout** (`LayeredLayout` rewritten; same `Arrange`, new `ComputePositions` and `SignaturePins`):
+  balanced columns (constants and splitters next to their users), lane nodes for long wires, barycenter sweeps on
+  pin heights with adjacent swaps (fewest crossings kept), median heights fitted with pool-adjacent-violators so
+  chains run straight, and column gaps that grow with the wires between columns. Deterministic; the whole pack
+  lays out in about 0.1 s.
+- **Bus-width building blocks** (pack: 19 → 26 gates): AND/OR/XOR 4-bit, MUX 2:1 4-bit, MUX 4:1 4-bit,
+  MUX 4:1 8-bit and Latch 4-bit. RAM, ROM, ALU, Register and CPU are rebuilt from them. The flattened circuits are
+  unchanged (CPU: still 2 842 gates and at most 2 703 evaluations per clock edge), and every behaviour test
+  passes unmodified.
+- **Part labels:** CPU (PC, A, OUT, Z flag, C flag, Opcode decoder, Data RAM, Operand, ALU, Next A, PC + 1,
+  Next PC), ALU, RAM (Address decoder, Word 0–15, Words 0-3 …, Read), ROM, Register (Bit 0–3, Load or keep),
+  Counter, D Flip-Flop (Master, Slave). Labels on custom and primitive gates are drawn above the body in the
+  accent colour, and the inspector's Label field now appears for gates too.
+- **Tidy layout** (workspace context menu): rearranges the current editable circuit with the same layout as one
+  undoable step; rotations are reset; "already tidy" is reported. Disabled while inspecting.
+
+### Results (crossings between straight pin-to-pin lines; size in world units)
+| Gate | Before | After |
+|---|---|---|
+| RAM 16×4 | 3 173 crossings, 55 × 191 | 333, 67 × 56 |
+| ROM 16×8 | 2 859, 43 × 191 | 37, 51 × 50 |
+| ALU 4-bit | 137, 69 × 38 | 10, 80 × 12 |
+| CPU 4-bit | 424, 164 × 24 | 124, 151 × 30 |
+| Register 4-bit | 25, 36 × 15 | 6, 38 × 11 |
+| Decoder 4→16 | 172 | 157 (the 4 × 4 fan-out pattern crosses by nature) |
+
+### Decisions
+- **Hierarchy before heuristics.** The layout alone cut crossings by only about a quarter on RAM, ROM and CPU:
+  most crossings came from the bit-level structure itself (64 latches feeding bit-sliced mux trees). Packaging the
+  repeated rows as bus-width gates is the app's own idea of composition, and it shrank the RAM and ROM to a
+  quarter of their height. These gates are new library entries, which is why the pack grew; behaviour is
+  identical.
+- **Pin rule restated, not referenced.** GateLibrary cannot depend on Rendering; `SignaturePins` copies the
+  renderer's rule and a test compares both for every node in the pack.
+- **Saved projects keep their positions.** Re-laying out loaded gates silently would move what users arranged;
+  "Tidy layout" (in edit mode) is the explicit way.
+
+### Test results
+- EditMode: **461 / 461 passed** (12 new, `LayoutQualityTests`: crossing and height limits for the big gates,
+  small gates nearly crossing-free, deterministic positions, constants next to a user, signature pins equal the
+  renderer's pins, part labels present and short, `ComputePositions` leaves the circuit unchanged). Pack counts
+  updated to 26.
+- PlayMode: **93 / 93 passed** (2 new, `TidyLayoutTests`: a scrambled, rotated NAND is tidied left to right without
+  overlaps, a second tidy changes nothing, one undo restores positions and rotations; the CPU's PC register shows
+  its label and "Tidy layout" is disabled while inspecting).
+- Manual (play mode screenshots): the CPU inside reads as one block with labelled registers, flags and muxes; the
+  RAM reads decoder → enables → 16 labelled words → 4 group muxes → Read. Label size and colour were raised once
+  after the first screenshot (too faint).
+
+### Known issues / deferred
+- The CPU is still wide (21 columns): its longest path runs decoder → control ORs → ALU → muxes → registers.
+- Decoder 4→16 keeps most of its crossings (inherent to ANDing every pair of 2→4 outputs).
+- A label can overlap a wire lane that passes right above a gate; the router does not avoid label text.

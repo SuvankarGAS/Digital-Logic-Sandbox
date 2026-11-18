@@ -1050,6 +1050,64 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
                 Circuit, nodes, from, to, rotations, rotations));
         }
 
+        /// <summary>True when "Tidy layout" can rearrange the current circuit.</summary>
+        public bool CanTidyLayout => IsEditable && Circuit != null && Circuit.Nodes.Count > 1;
+
+        /// <summary>
+        /// Rearranges the whole current circuit into left-to-right columns with <see cref="LayeredLayout"/> (the
+        /// example gates' layout) as one undoable step. Rotations are reset so everything reads left to right.
+        /// Returns false when the circuit is read-only, too small, or already tidy.
+        /// </summary>
+        public bool TidyLayout()
+        {
+            EnsureCircuit();
+            if (!CheckEditable())
+            {
+                return false;
+            }
+
+            CircuitDefinition circuit = Circuit;
+            IReadOnlyList<NodeDefinition> list = circuit.Nodes;
+            if (list.Count < 2)
+            {
+                PostNotification("Nothing to tidy: place a few parts first.");
+                return false;
+            }
+
+            var nodes = new NodeId[list.Count];
+            for (int i = 0; i < nodes.Length; i++)
+            {
+                nodes[i] = list[i].Id;
+            }
+
+            var sizer = new GeometryNodeSizer();
+            CircuitPoint[] to = LayeredLayout.ComputePositions(circuit, node =>
+            {
+                CircuitPoint size = sizer.Measure(_catalog, circuit, node);
+                bool quarterTurn = node.Rotation == Rotation.R90 || node.Rotation == Rotation.R270;
+                return quarterTurn ? new CircuitPoint(size.Y, size.X) : size; // measured unrotated
+            }, LayeredLayout.SignaturePins(_catalog));
+
+            TransformNodesCommand.CaptureTransforms(circuit, nodes, out CircuitPoint[] from, out Rotation[] rotations);
+            var upright = new Rotation[nodes.Length];
+            bool changed = false;
+            for (int i = 0; i < nodes.Length; i++)
+            {
+                changed |= !from[i].Equals(to[i]) || rotations[i] != Rotation.R0;
+            }
+
+            if (!changed)
+            {
+                PostNotification("The layout is already tidy.");
+                return false;
+            }
+
+            History.Execute(new TransformNodesCommand("Tidy layout", circuit, nodes, from, to, rotations, upright));
+            _selection.Clear();
+            FrameContent();
+            return true;
+        }
+
         public void SelectAll()
         {
             if (Circuit == null)

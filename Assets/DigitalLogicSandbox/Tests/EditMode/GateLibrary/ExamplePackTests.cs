@@ -93,9 +93,9 @@ namespace DigitalLogicSandbox.Tests.EditMode.GateLibrary
         // ------------------------------------------------------------------------------------------------
 
         [Test]
-        public void Pack_HasNineteenValidGates_BuiltOnlyFromAndNotWiringAndEarlierPackGates()
+        public void Pack_HasTwentySixValidGates_BuiltOnlyFromAndNotWiringAndEarlierPackGates()
         {
-            Assert.That(_plan.Definitions.Count, Is.EqualTo(19));
+            Assert.That(_plan.Definitions.Count, Is.EqualTo(26));
             var packager = new CircuitPackager(_env.Catalog, _env.Library);
             var earlier = new HashSet<DefinitionId>();
             foreach (CircuitDefinition gate in _plan.Definitions)
@@ -539,11 +539,11 @@ namespace DigitalLogicSandbox.Tests.EditMode.GateLibrary
 
             var history = new CommandHistory();
             history.Execute(new CompositeCommand("Add example gates", commands));
-            Assert.That(fresh.Library.DefinitionCount, Is.EqualTo(19));
+            Assert.That(fresh.Library.DefinitionCount, Is.EqualTo(26));
             history.Undo();
             Assert.That(fresh.Library.DefinitionCount, Is.Zero);
             history.Redo();
-            Assert.That(fresh.Library.DefinitionCount, Is.EqualTo(19));
+            Assert.That(fresh.Library.DefinitionCount, Is.EqualTo(26));
         }
 
         [Test]
@@ -560,7 +560,7 @@ namespace DigitalLogicSandbox.Tests.EditMode.GateLibrary
             Assert.That(result.Document, Is.Not.Null);
             Assert.That(result.Report.HasErrors, Is.False);
             ProjectDocument loaded = result.Document;
-            Assert.That(loaded.Definitions.Count, Is.EqualTo(19));
+            Assert.That(loaded.Definitions.Count, Is.EqualTo(26));
             var reloaded = new TestEnvironment();
             foreach (CircuitDefinition definition in loaded.Definitions)
             {
