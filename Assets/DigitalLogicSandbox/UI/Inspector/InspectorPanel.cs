@@ -89,6 +89,9 @@ namespace DigitalLogicSandbox.UI.Inspector
         /// <summary>"Truth Table" for the selected gate.</summary>
         public event Action<NodeId> NodeTruthTableRequested;
 
+        /// <summary>Raised by "Edit program…" with the gate whose program words should be edited.</summary>
+        public event Action<NodeId> ProgramEditRequested;
+
         public string HeaderText => _header.text;
 
         public static InspectorPanel Create(Transform parent, UiFactory ui, WorkspaceController workspace)
@@ -482,6 +485,11 @@ namespace DigitalLogicSandbox.UI.Inspector
                 Button open = _ui.Button("Open", _content, "Open internal circuit", () => _workspace.OpenNode(id));
                 open.interactable = _workspace.CanOpenNode(id);
                 _ui.MakePrimary(open);
+                if (_workspace.HasProgram(id))
+                {
+                    _ui.Button("EditProgram", _content, _workspace.IsEditable ? "Edit program…" : "View program…",
+                        () => ProgramEditRequested?.Invoke(id));
+                }
             }
 
             if (!node.Component.IsUtility)
@@ -649,6 +657,11 @@ namespace DigitalLogicSandbox.UI.Inspector
             }
 
             BuildLabelField(node);
+            if (_workspace.TryGetProgramOwner(id, out NodeId owner))
+            {
+                _ui.Button("EditProgram", _content, _workspace.IsEditable ? "Edit program…" : "View program…",
+                    () => ProgramEditRequested?.Invoke(owner));
+            }
         }
 
         /// <summary>
@@ -666,35 +679,7 @@ namespace DigitalLogicSandbox.UI.Inspector
         /// <summary>Parses a constant typed as decimal, <c>0x</c> hexadecimal or <c>0b</c> binary.</summary>
         public static bool TryParseConstant(string text, out int value)
         {
-            value = 0;
-            text = (text ?? string.Empty).Trim().Replace("_", string.Empty);
-            if (text.StartsWith("0x", System.StringComparison.OrdinalIgnoreCase))
-            {
-                return int.TryParse(text.Substring(2), NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out value);
-            }
-
-            if (text.StartsWith("0b", System.StringComparison.OrdinalIgnoreCase))
-            {
-                string digits = text.Substring(2);
-                if (digits.Length == 0 || digits.Length > 16)
-                {
-                    return false;
-                }
-
-                for (int i = 0; i < digits.Length; i++)
-                {
-                    if (digits[i] != '0' && digits[i] != '1')
-                    {
-                        return false;
-                    }
-
-                    value = (value << 1) | (digits[i] - '0');
-                }
-
-                return true;
-            }
-
-            return int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out value);
+            return DigitalLogicSandbox.GateLibrary.Examples.CpuAssembler.TryParseNumber(text, out value);
         }
 
         /// <summary>One swatch per LED colour; the current one carries a check mark.</summary>

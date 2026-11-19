@@ -1682,11 +1682,11 @@ project (File → "Open CPU demo").
   displays are labelled and ordered like the CPU pins.
 
 ### Known issues / deferred
-- A program word's label is plain text: changing the value does not update its mnemonic.
+- A program word's label is plain text: changing the value does not update its mnemonic. (Resolved: see "Program editor".)
 - A clock edge re-evaluates most of the CPU (single-cycle datapath, see above); fine at demo speeds.
 - The flip-flop power-on value depends on the resolver's cycle order; tests guard it, but a different cycle search
   would need the latch revisited.
-- No assembler UI; programs are entered one Constant at a time (the label helps).
+- No assembler UI; programs are entered one Constant at a time (the label helps). (Resolved: see "Program editor".)
 
 ## Usability pass (2026-11-18)
 
@@ -1782,3 +1782,67 @@ any circuit (no group frames, no file-format change).
 - The CPU is still wide (21 columns): its longest path runs decoder → control ORs → ALU → muxes → registers.
 - Decoder 4→16 keeps most of its crossings (inherent to ANDing every pair of 2→4 outputs).
 - A label can overlap a wire lane that passes right above a gate; the router does not avoid label text.
+
+## Program editor for the CPU (2026-11-19)
+
+The user chose an assembler UI next. It closes two Phase E+ deferred items: there was no way to enter a program
+except one Constant at a time, and word labels went stale when a value changed.
+
+### Implemented
+- **`CpuAssembler`** (GateLibrary/Examples, pure C#). The instruction table, `Assemble` and `Disassemble` moved
+  here from `CpuDemo`, which forwards to it.
+  - `Parse` reads one instruction per line, with `;` comments, an optional `N:` address prefix (must match),
+    decimal/`0x`/`0b` operands, and raw words (`0x2A`, `? 0xC3`). Missing words are padded with NOP. Errors are
+    line-numbered: unknown mnemonic, operand out of range, missing or unexpected operand, address out of order,
+    too many instructions.
+  - `Listing`, `WordLabel` ("3: LDA 0") and `IsWordLabel`.
+  - The inspector's number parser now uses `CpuAssembler.TryParseNumber` (one copy).
+- **Workspace API.**
+  - `TryGetProgramWords`, `HasProgram` and `TryGetProgramOwner` find the 8-bit Constants wired directly to a custom
+    gate's inputs, in input order. They work by structure, not by name.
+  - `ApplyProgram` writes values and labels as one "Edit program" undo step. An unchanged program adds no step, and
+    a program longer than the word count is refused.
+  - `ChangeConstantValue` keeps an "N: instruction" label in step with the value in the same undo step and leaves
+    free-text labels alone.
+- **`ProgramEditorDialog`.**
+  - Contents: the gate's program as a listing, the instruction set reference, live assembly with up to 5 errors,
+    and the used/padded word count.
+  - Behaviour: Apply is disabled while there are errors. Ctrl+Enter applies (Enter is a new line) and Esc closes.
+    The window height fits small screens. In inspection the dialog is read-only and titled "Program".
+  - Opened from: "Edit program…" in the context menu of the gate, the gate's inspector, and the inspector of each
+    program word.
+- The CPU demo hint now says "Right-click the ROM → Edit program… to change it."
+
+### Decisions
+- **Lossless disassembly.** The round-trip test found that a word like 0xB3 disassembled as "OUT". Applying an
+  untouched listing would then have silently changed that word to 0xB0. Such words, and unused opcodes, are now
+  listed as raw `? 0x..` words.
+- **Labels synced only when they look like word labels.** The assembler format ("N: instruction") marks a label
+  as generated. Anything else is the user's text and is never overwritten by a value change. Applying a program
+  always writes word labels, because that is what the editor shows.
+- **Structure, not names.** A gate qualifies when 8-bit Constants drive its inputs, so a user-built ROM gets the
+  editor too. The instruction set is the example CPU's; other machines would need their own assembler.
+- **No monospace font.** The app ships one text font (Nunito) plus icons. Adding a font for one field was not
+  worth it, and the `N:` prefixes keep the lines readable.
+
+### Test results
+- EditMode: **473 / 473 passed** (12 new, `CpuAssemblerTests`):
+  - All 256 words survive listing → parse.
+  - Comments, padding, prefixes and raw words parse.
+  - Six error kinds are reported on the right line, and too many instructions are refused.
+  - Word labels are recognised; stray operand bits are kept.
+  - `CpuDemo` forwarding still works.
+- PlayMode: **97 / 97 passed** (4 new, `ProgramEditorTests`):
+  - The demo's 16 words are found in W0..W15 order; displays and primitives have no program.
+  - The dialog opens from the ROM's context menu with the Fibonacci listing. A bad line disables Apply. A
+    countdown program applies in one undo step and runs to HALT with OUT = 1. Undo restores Fibonacci (OUT = 8).
+  - One word's mnemonic follows its value in one undo step; a free-text label is kept.
+  - An unchanged program adds no undo step, and 17 words are refused.
+- Manual (play mode screenshots):
+  - The dialog in the 905×414 game view shows "Line 8: Unknown instruction 'FOO'." with Apply disabled.
+  - After applying the countdown, the words read "0: LDI 9" … "6: NOP" and OUT counts down.
+
+### Known issues / deferred
+- The program field has no line numbers of its own and no syntax colouring. The `N:` prefixes in the listing
+  stand in for line numbers.
+- Only the example CPU's instruction set is known to the assembler.

@@ -978,7 +978,163 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
                 return false;
             }
 
-            return ChangeComponent(node, existing.Component.WithConstantValue(value));
+            ComponentRef changed = existing.Component.WithConstantValue(value);
+            if (!CpuAssembler.IsWordLabel(existing.Label, out int address) || existing.Component == changed)
+            {
+                return ChangeComponent(node, changed);
+            }
+
+            // A program word keeps its "address: instruction" label in step with its value, in the same undo step.
+            if (!CheckEditable())
+            {
+                return false;
+            }
+
+            History.Execute(new CompositeCommand("Change constant", new ICommand[]
+            {
+                new ChangeComponentCommand(Circuit, _catalog, node, changed, "Change constant"),
+                new SetNodeLabelCommand(Circuit, node, CpuAssembler.WordLabel(address, value)),
+            }));
+            _selection.Select(node);
+            return true;
+        }
+
+        /// <summary>
+        /// Collects the program words of <paramref name="node"/>: the 8-bit constants that drive its input pins
+        /// directly, in the order of its inputs. Found by structure, never by gate name, so any ROM-like gate fed by
+        /// constants works. Returns false (and leaves <paramref name="words"/> empty) when there are none.
+        /// </summary>
+        public bool TryGetProgramWords(NodeId node, List<NodeId> words)
+        {
+            if (words == null)
+            {
+                throw new ArgumentNullException(nameof(words));
+            }
+
+            words.Clear();
+            CircuitDefinition circuit = Circuit;
+            if (circuit == null || !circuit.TryGetNode(node, out NodeDefinition target) ||
+                target.Component.Kind != ComponentKind.Custom ||
+                !_catalog.TryGetSignature(target.Component, out ComponentSignature signature))
+            {
+                return false;
+            }
+
+            IReadOnlyList<PortDescriptor> inputs = signature.Inputs;
+            for (int i = 0; i < inputs.Count; i++)
+            {
+                if (circuit.TryGetConnectionTo(new PinRef(node, inputs[i].Id), out ConnectionDefinition connection) &&
+                    circuit.TryGetNode(connection.Source.Node, out NodeDefinition source) &&
+                    source.Component.Kind == ComponentKind.Constant && source.Component.Width == 8 &&
+                    !words.Contains(source.Id))
+                {
+                    words.Add(source.Id);
+                }
+            }
+
+            return words.Count > 0;
+        }
+
+        /// <summary>True when <paramref name="node"/> has program words (see <see cref="TryGetProgramWords"/>).</summary>
+        public bool HasProgram(NodeId node)
+        {
+            _scratchNodes.Clear();
+            bool found = TryGetProgramWords(node, _scratchNodes);
+            _scratchNodes.Clear();
+            return found;
+        }
+
+        /// <summary>
+        /// The gate a program word feeds: for an 8-bit constant, the first custom gate it drives that has program
+        /// words. Lets the inspector offer "Edit program…" on the words themselves.
+        /// </summary>
+        public bool TryGetProgramOwner(NodeId constant, out NodeId owner)
+        {
+            owner = NodeId.None;
+            CircuitDefinition circuit = Circuit;
+            if (circuit == null || !circuit.TryGetNode(constant, out NodeDefinition word) ||
+                word.Component.Kind != ComponentKind.Constant || word.Component.Width != 8)
+            {
+                return false;
+            }
+
+            var connections = new List<ConnectionDefinition>();
+            circuit.GetConnectionsFrom(constant, connections);
+            for (int i = 0; i < connections.Count; i++)
+            {
+                NodeId candidate = connections[i].Destination.Node;
+                if (circuit.TryGetNode(candidate, out NodeDefinition target) &&
+                    target.Component.Kind == ComponentKind.Custom && HasProgram(candidate))
+                {
+                    owner = candidate;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Writes a whole program into the program words of <paramref name="node"/> (in input order) and rewrites
+        /// their labels to "address: instruction", as one undoable step. Extra words in <paramref name="program"/>
+        /// are refused; missing ones are left unchanged. Returns the number of words whose value changed, or -1
+        /// when refused.
+        /// </summary>
+        public int ApplyProgram(NodeId node, IReadOnlyList<byte> program)
+        {
+            if (program == null)
+            {
+                throw new ArgumentNullException(nameof(program));
+            }
+
+            if (Circuit == null || !CheckEditable())
+            {
+                return -1;
+            }
+
+            var words = new List<NodeId>();
+            if (!TryGetProgramWords(node, words))
+            {
+                Notify("This gate has no program words (8-bit constants wired to its inputs).");
+                return -1;
+            }
+
+            if (program.Count > words.Count)
+            {
+                Notify("The program has " + program.Count + " words but the gate holds " + words.Count + ".");
+                return -1;
+            }
+
+            var commands = new List<ICommand>();
+            int changedWords = 0;
+            for (int i = 0; i < program.Count; i++)
+            {
+                NodeDefinition word = Circuit.GetNode(words[i]);
+                ComponentRef changed = word.Component.WithConstantValue(program[i]);
+                if (changed != word.Component)
+                {
+                    commands.Add(new ChangeComponentCommand(Circuit, _catalog, word.Id, changed, "Change constant"));
+                    changedWords++;
+                }
+
+                string label = CpuAssembler.WordLabel(i, program[i]);
+                if (!string.Equals(word.Label, label, StringComparison.Ordinal))
+                {
+                    commands.Add(new SetNodeLabelCommand(Circuit, word.Id, label));
+                }
+            }
+
+            if (commands.Count == 0)
+            {
+                Notify("Program unchanged.");
+                return 0;
+            }
+
+            History.Execute(new CompositeCommand("Edit program", commands));
+            Notify(changedWords == 0
+                ? "Program labels updated."
+                : "Program updated: " + changedWords + " word" + (changedWords == 1 ? "" : "s") + " changed.");
+            return changedWords;
         }
 
         /// <summary>Sets a node's free-text label (shown on constants, e.g. a mnemonic) as one undoable step.</summary>

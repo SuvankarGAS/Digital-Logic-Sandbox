@@ -902,3 +902,17 @@ the workspace views (`GateView`, `WireView`, `GridView`).
   returns definitions + main circuit + a 4 Hz clock rate, and `Assemble`/`Disassemble` encode the instruction set.
   `ProjectController.OpenCpuDemo` turns it into a new unsaved project; the File menu reaches it through the same
   unsaved-changes prompt as New. The program is Fibonacci (1, 1, 2, 3, 5, 8, then HLT on carry).
+- **Program editor** (2026-11-19).
+  - `GateLibrary.Examples.CpuAssembler` is pure data: `Assemble`/`Disassemble`, a lossless disassembly (stray
+    operand bits on NOP/OUT/HLT and unused opcodes show as raw `? 0x..` words), `Parse` (one instruction per line,
+    `;` comments, optional `N:` prefix, decimal/`0x`/`0b` operands, raw words, NOP padding, line-numbered
+    `AssemblyError`s), `Listing` and `WordLabel`/`IsWordLabel` ("3: LDA 0"). `CpuDemo` forwards to it.
+  - Program words are found by structure, never by gate name: `WorkspaceController.TryGetProgramWords` returns the
+    8-bit Constants that directly drive a custom node's inputs, in its input order. `TryGetProgramOwner` goes from
+    a word to its gate.
+  - `ApplyProgram` writes the values (`ChangeComponentCommand`) and word labels (`SetNodeLabelCommand`) as one
+    `CompositeCommand` ("Edit program"). `ChangeConstantValue` rewrites a word label in the same undo step when the
+    label has the `WordLabel` form; free-text labels are kept.
+  - `UI.Dialogs.ProgramEditorDialog` assembles on every edit and disables Apply on errors. Ctrl+Enter applies and
+    the dialog is read-only while inspecting. It opens from the context menu, the inspector of the gate, or the
+    inspector of any of its words.

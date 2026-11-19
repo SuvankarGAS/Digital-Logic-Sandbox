@@ -42,6 +42,9 @@ namespace DigitalLogicSandbox.UI.ContextMenus
         /// <summary>"Truth table" on a library entry (a component with no instance in the circuit).</summary>
         public event Action<ComponentRef, string> ComponentTruthTableRequested;
 
+        /// <summary>Raised by "Edit program…" on a gate fed by program words.</summary>
+        public event Action<NodeId> ProgramEditRequested;
+
         public bool IsOpen => gameObject.activeSelf;
 
         /// <summary>Labels of the items currently shown (tests and accessibility).</summary>
@@ -91,6 +94,10 @@ namespace DigitalLogicSandbox.UI.ContextMenus
                 {
                     NodeId id = request.Node;
                     Add("Open internal circuit", () => _workspace.OpenNode(id), _workspace.CanOpenNode(id));
+                    if (_workspace.HasProgram(id))
+                    {
+                        Add(editable ? "Edit program…" : "View program…", () => ProgramEditRequested?.Invoke(id), true);
+                    }
                 }
 
                 if (!node.Component.IsUtility)

@@ -51,6 +51,9 @@ namespace DigitalLogicSandbox.UI
 
         public VersionSaveDialog VersionSaveDialog { get; private set; }
 
+        /// <summary>Assembly editor for gates fed by program words (the CPU demo's ROM).</summary>
+        public ProgramEditorDialog ProgramEditor { get; private set; }
+
         public SignalSettingsPanel SignalSettings { get; private set; }
 
         public TruthTableDialog TruthTable { get; private set; }
@@ -98,6 +101,7 @@ namespace DigitalLogicSandbox.UI
             shell.ContextMenu = ContextMenuView.Create(go.transform, shell.Factory, workspace);
             shell.PackagingDialog = PackagingDialog.Create(go.transform, shell.Factory, workspace);
             shell.VersionSaveDialog = VersionSaveDialog.Create(go.transform, shell.Factory, workspace);
+            shell.ProgramEditor = ProgramEditorDialog.Create(go.transform, shell.Factory, workspace);
             shell.TruthTable = TruthTableDialog.Create(go.transform, shell.Factory, workspace, truthTableLimits);
             shell.SequenceAnalysis = SequenceAnalysisDialog.Create(go.transform, shell.Factory, workspace);
             shell.Confirm = ConfirmDialog.Create(go.transform, shell.Factory, workspace);
@@ -123,6 +127,8 @@ namespace DigitalLogicSandbox.UI
             shell.Inspector.NodeTruthTableRequested += node => shell.TruthTable.OpenForNode(node);
             shell.ContextMenu.NodeTruthTableRequested += node => shell.TruthTable.OpenForNode(node);
             shell.ContextMenu.ComponentTruthTableRequested += (component, _) => shell.TruthTable.OpenForComponent(component);
+            shell.ContextMenu.ProgramEditRequested += node => shell.ProgramEditor.Open(node);
+            shell.Inspector.ProgramEditRequested += node => shell.ProgramEditor.Open(node);
             shell.TruthTable.SequenceAnalysisRequested += shell.SequenceAnalysis.Open;
             shell.Inspector.SequenceAnalysisRequested += shell.SequenceAnalysis.OpenForCurrentCircuit;
             shell.Library.ItemContextRequested += (request, screen) => shell.ContextMenu.ShowForLibraryEntry(screen, request);

@@ -15,19 +15,13 @@ namespace DigitalLogicSandbox.GateLibrary.Examples
     /// </summary>
     public static class CpuDemo
     {
-        /// <summary>Mnemonic of each opcode (null = unused, executes as NOP).</summary>
-        private static readonly string[] Mnemonics =
-        {
-            "NOP", "LDI", "LDA", "STA", "ADD", "SUB", "ADDI", "SUBI", "JMP", "JZ", "JC", "OUT", null, null, null, "HLT",
-        };
-
         /// <summary>Clock rate the demo project is saved with (instructions per second).</summary>
         public const float ClockFrequency = 4f;
 
         public const string MainCircuitName = "CPU demo";
 
         /// <summary>Shown when the demo opens: what to do first.</summary>
-        public const string OpenHint = "Running Fibonacci: watch OUT. Click a program word to edit it.";
+        public const string OpenHint = "Running Fibonacci: watch OUT. Right-click the ROM → Edit program… to change it.";
 
         /// <summary>
         /// The demo program: prints Fibonacci numbers (1, 1, 2, 3, 5, 8) on OUT and halts when the next sum
@@ -53,35 +47,16 @@ namespace DigitalLogicSandbox.GateLibrary.Examples
             Assemble("NOP"),     // 15
         };
 
-        /// <summary>Encodes one instruction: opcode in bits 7–4, operand in bits 3–0.</summary>
+        /// <summary>Encodes one instruction (see <see cref="CpuAssembler.Assemble"/>).</summary>
         public static byte Assemble(string mnemonic, int operand = 0)
         {
-            int opcode = Array.IndexOf(Mnemonics, (mnemonic ?? string.Empty).Trim().ToUpperInvariant());
-            if (opcode < 0)
-            {
-                throw new ArgumentException("Unknown instruction '" + mnemonic + "'.", nameof(mnemonic));
-            }
-
-            if (operand < 0 || operand > 15)
-            {
-                throw new ArgumentOutOfRangeException(nameof(operand), operand, "Operands are 0 to 15.");
-            }
-
-            return (byte)((opcode << 4) | operand);
+            return CpuAssembler.Assemble(mnemonic, operand);
         }
 
-        /// <summary>Readable form of an instruction word, e.g. "LDI 1", "OUT" or "? 0xC3".</summary>
+        /// <summary>Readable form of an instruction word (see <see cref="CpuAssembler.Disassemble"/>).</summary>
         public static string Disassemble(int word)
         {
-            word &= 0xFF;
-            string mnemonic = Mnemonics[word >> 4];
-            if (mnemonic == null)
-            {
-                return "? 0x" + word.ToString("X2");
-            }
-
-            bool takesOperand = mnemonic != "NOP" && mnemonic != "OUT" && mnemonic != "HLT";
-            return takesOperand ? mnemonic + " " + (word & 15) : mnemonic;
+            return CpuAssembler.Disassemble(word);
         }
 
         /// <summary>
@@ -113,7 +88,7 @@ namespace DigitalLogicSandbox.GateLibrary.Examples
                 // columns so neighbouring words do not overlap and every wire runs straight.
                 NodeDefinition word = circuit.AddNode(ComponentRef.Constant(8, program[w]),
                     new CircuitPoint(origin.X - (w % 2 == 0 ? 7.5f : 13.5f), origin.Y + 8f - w));
-                circuit.SetNodeLabel(word.Id, w + ": " + Disassemble(program[w]));
+                circuit.SetNodeLabel(word.Id, CpuAssembler.WordLabel(w, program[w]));
                 circuit.Connect(new PinRef(word.Id, BoundarySignatures.Pin), new PinRef(romNode.Id, rom.Inputs[w].Id));
                 words[w] = word.Id;
             }
