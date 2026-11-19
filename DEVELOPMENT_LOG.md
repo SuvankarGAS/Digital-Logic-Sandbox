@@ -1904,3 +1904,26 @@ The user picked the layout follow-ups from "Tidier layouts": wires running throu
 - Decoder 4→16 keeps its crossings (see Decisions).
 - Caption width is an estimate (0.25 units per character), not measured text. Generous for the semi-bold caption
   font.
+
+## Dot grid polish (2026-11-19)
+
+### Problem
+Dot radii were a fixed 1 / 1.5 screen pixels. At max zoom (ortho size 2, ~270 px per cell at 1080p) the dots
+were effectively invisible against the background. The minor-dot fade was keyed to camera size in `GridView`, so
+it depended on window resolution.
+
+### Implemented (`Rendering/Shaders/DlsGrid.shader`, `Rendering/GridView.cs`, theme)
+- Everything is driven by the on-screen cell size (`cellPx` from `fwidth`), so the grid looks the same at any
+  resolution.
+- Dot radius grows with cell size between a min and max (minor 1.0→2.6 px, major 1.5→3.6 px; new material
+  properties `_DotScale`, `_MinorDotMax`, `_MajorDotMax`). Major dots stay a step larger than visible minor dots.
+- Sparse dots get brighter (`_ZoomBoost`, up to 1.8× the dot colour from ~24 px cells); dense dots stay quiet.
+- Minor dots fade out between 11 and 5 px spacing, inside the shader. `GridView` no longer animates `_MinorAlpha`;
+  it now only resizes the quad. Major dots soften when they get dense, so the fully zoomed-out view stays calm.
+- Smoothstep anti-aliasing (rounder large dots). The vignette dims dots less (0.45 instead of 0.6).
+- Grid dot colours lifted slightly: minor `#252A3A`, major `#363E55`.
+
+### Test results
+- EditMode 479 / 479, PlayMode 97 / 97 passed. Shader compiles with no messages.
+- Manual (play mode screenshots at ortho size 2, 10, 30 and 80): dots are clearly visible at max zoom, and the
+  zoomed-out view is calm with no moiré.

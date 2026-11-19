@@ -25,8 +25,8 @@ namespace DigitalLogicSandbox.Rendering
 
         [Header("Workspace")]
         [SerializeField] private Color _workspaceBackground = Hex(0x0D0F15);
-        [SerializeField] private Color _gridMinor = Hex(0x1E2230);
-        [SerializeField] private Color _gridMajor = Hex(0x2C3244);
+        [SerializeField] private Color _gridMinor = Hex(0x252A3A);
+        [SerializeField] private Color _gridMajor = Hex(0x363E55);
         [SerializeField] private Color _vignette = new Color(0.02f, 0.025f, 0.04f, 0.85f);
 
         [Header("Gates")]

@@ -4,7 +4,7 @@ namespace DigitalLogicSandbox.Rendering
 {
     /// <summary>
     /// Infinite procedural background (dot grid and vignette): a single quad parented to the camera, resized to the view. One central
-    /// LateUpdate for the whole grid; minor dots fade out when zoomed far out.
+    /// LateUpdate keeps the quad covering the view; dot size, contrast and the minor-dot fade adapt to zoom in the shader.
     /// </summary>
     public sealed class GridView : MonoBehaviour
     {
@@ -34,6 +34,7 @@ namespace DigitalLogicSandbox.Rendering
             view._material.SetColor("_MinorColor", theme.GridMinor);
             view._material.SetColor("_MajorColor", theme.GridMajor);
             view._material.SetColor("_VignetteColor", theme.Vignette);
+            view._material.SetFloat(MinorAlphaId, 1f);
             var renderer = go.GetComponent<MeshRenderer>();
             renderer.sharedMaterial = view._material;
             renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
@@ -55,7 +56,6 @@ namespace DigitalLogicSandbox.Rendering
             _lastSize = size;
             _lastAspect = aspect;
             transform.localScale = new Vector3(size * 2f * aspect * 1.05f, size * 2f * 1.05f, 1f);
-            _material.SetFloat(MinorAlphaId, Mathf.InverseLerp(40f, 18f, size));
         }
 
         private void OnDestroy()
