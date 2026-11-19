@@ -321,7 +321,11 @@ CircuitNavigator (engine-free, CircuitEditor/Navigation)
   versions and the connections each mode would drop. It runs on probes, so nothing changes. The save dialog
   shows it.
 - **Old references stay valid.** Old versions remain in the library. A circuit that keeps v1 keeps v1's
-  behaviour. Gate titles show `vN` for N > 1, so mixed versions are distinguishable.
+  behaviour. Gate titles show `vN` for N > 1, so mixed versions are distinguishable. The suffix is formatted in
+  one place (`CircuitGeometry.NameOf`) and can be hidden with the project setting `showGateVersions` (View settings
+  → "Show versions in gate names"; optional, default true, no schema bump). Hiding it is display-only: canvas
+  titles, breadcrumbs, truth table / sequence titles and library tooltips drop the suffix. Version references,
+  the inspector's Version rows and the save-version dialog are unchanged.
 - **UI.**
   - `NavigationBar`: breadcrumbs, a mode badge and Edit / Save / Discard.
   - `ContextMenuView`: right-click without dragging.
@@ -402,6 +406,7 @@ TruthTableExporter`.
   "name": "My project",
   "savedUtc": "2026-11-14T10:00:00Z",
   "settings": { "gridVisible": true, "snapToGrid": true, "visualizationMode": "Standard",
+                "wireCrossings": "Hop", "showGateVersions": true,
                 "animation": { "enabled": true, "speed": 1.0, "showParticles": true, "maxBatchSeconds": 3.0 },
                 "truthTable": { "maxInputs": 16, "maxRows": 65536, "confirmRows": 1024 },
                 "camera": { "hasValue": true, "x": 0, "y": 0, "size": 12 },

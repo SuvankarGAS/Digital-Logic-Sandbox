@@ -258,5 +258,31 @@ namespace DigitalLogicSandbox.Tests.PlayMode
             Assert.That(Wire(_v).CrossingStyle, Is.EqualTo(WireCrossingStyle.Gap));
             Assert.That(Wire(_v).CrossingCount, Is.EqualTo(1));
         }
+
+        [UnityTest]
+        public IEnumerator VersionsToggle_HidesVersions_AndSurvivesSaveAndOpen()
+        {
+            yield return LoadCrossing();
+            var settings = _app.Shell.SignalSettings;
+            settings.Toggle();
+            Assert.That(settings.VersionsToggle.isOn, Is.True, "Shown by default.");
+            settings.VersionsToggle.isOn = false;
+            Assert.That(_workspace.ShowGateVersions, Is.False);
+            Assert.That(_app.Projects.IsDirty, Is.True, "A settings change marks the project modified.");
+            settings.Toggle();
+
+            string path = Path.Combine(_root, "versions" + DigitalLogicSandbox.Persistence.ProjectFormat.FileExtension);
+            Assert.That(_app.Projects.SaveAs(path, out string message), Is.True, message);
+            _app.Projects.NewProject();
+            yield return null;
+            Assert.That(_workspace.ShowGateVersions, Is.True, "A new project uses the default.");
+
+            Assert.That(_app.Projects.Open(path, out message), Is.True, message);
+            yield return null;
+            Assert.That(_workspace.ShowGateVersions, Is.False);
+            settings.Toggle();
+            Assert.That(settings.VersionsToggle.isOn, Is.False, "The popup reflects the loaded setting.");
+            settings.Toggle();
+        }
     }
 }

@@ -60,6 +60,9 @@ namespace DigitalLogicSandbox.UI.Panels
         private TMP_InputField _search;
         private string _filter = string.Empty;
 
+        /// <summary>Version display setting the custom gate tooltips were built with.</summary>
+        private bool _builtWithVersions = true;
+
         public IReadOnlyList<LibraryItemView> Items => _items;
 
         public TMP_InputField SearchField => _search;
@@ -107,6 +110,7 @@ namespace DigitalLogicSandbox.UI.Panels
             library.DefinitionAdded += panel.OnDefinitionAdded;
             library.DefinitionRemoved += panel.OnDefinitionAdded;
             library.DefinitionUpdated += panel.OnDefinitionAdded;
+            workspace.SettingsChanged += panel.OnWorkspaceSettingsChanged;
             return panel;
         }
 
@@ -149,6 +153,7 @@ namespace DigitalLogicSandbox.UI.Panels
             _customItems.Clear();
             _customHeaders.Clear();
 
+            _builtWithVersions = _workspace.ShowGateVersions;
             _scratchDefinitions.Clear();
             _library.GetLatestDefinitions(_scratchDefinitions);
             _scratchDefinitions.Sort(CompareByCategoryThenName);
@@ -172,7 +177,7 @@ namespace DigitalLogicSandbox.UI.Panels
                 ComponentSignature signature = definition.GetSignature();
                 string tile = string.IsNullOrWhiteSpace(definition.Icon) ? Initial(definition.Name) : definition.Icon;
                 string tooltip = string.IsNullOrWhiteSpace(definition.Description)
-                    ? definition.Name + (definition.Version > 1 ? "  ·  version " + definition.Version : string.Empty)
+                    ? definition.Name + (_builtWithVersions && definition.Version > 1 ? "  ·  version " + definition.Version : string.Empty)
                     : definition.Description;
                 LibraryItemView item = AddItem(_customSection, _customRoot,
                     new PlacementRequest(ComponentRef.Custom(definition.Reference), definition.Name),
@@ -399,6 +404,20 @@ namespace DigitalLogicSandbox.UI.Panels
                 _library.DefinitionAdded -= OnDefinitionAdded;
                 _library.DefinitionRemoved -= OnDefinitionAdded;
                 _library.DefinitionUpdated -= OnDefinitionAdded;
+            }
+
+            if (_workspace != null)
+            {
+                _workspace.SettingsChanged -= OnWorkspaceSettingsChanged;
+            }
+        }
+
+        /// <summary>Rebuilds the custom gate tooltips when the version display setting changes.</summary>
+        private void OnWorkspaceSettingsChanged()
+        {
+            if (_workspace.ShowGateVersions != _builtWithVersions)
+            {
+                RefreshCustomGates();
             }
         }
 

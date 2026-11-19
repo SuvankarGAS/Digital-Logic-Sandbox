@@ -1247,6 +1247,26 @@ namespace DigitalLogicSandbox.Rendering
             return "0x" + value.ToString("X" + ((width + 3) / 4));
         }
 
+        /// <summary>
+        /// Whether custom gate names carry their version ("NAND v2") from version 2 on. Display only: versioning and
+        /// version references are unaffected. Callers rebuild the views after changing it.
+        /// </summary>
+        public bool ShowGateVersions { get; set; } = true;
+
+        /// <summary>
+        /// Display name of a custom gate definition: the name, plus " v{version}" once the gate has several versions
+        /// and <see cref="ShowGateVersions"/> is on (so old and new instances are distinguishable).
+        /// </summary>
+        public string NameOf(CircuitDefinition definition)
+        {
+            if (definition == null)
+            {
+                return string.Empty;
+            }
+
+            return ShowGateVersions && definition.Version > 1 ? definition.Name + " v" + definition.Version : definition.Name;
+        }
+
         public string TitleOf(ComponentRef component)
         {
             switch (component.Kind)
@@ -1261,8 +1281,7 @@ namespace DigitalLogicSandbox.Rendering
                         return "Missing gate";
                     }
 
-                    // Show the version once a gate has several, so old and new instances are distinguishable.
-                    return definition.Version > 1 ? definition.Name + " v" + definition.Version : definition.Name;
+                    return NameOf(definition);
                 case ComponentKind.InputBoundary:
                     return "Input";
                 case ComponentKind.Clock:

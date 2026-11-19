@@ -246,6 +246,44 @@ namespace DigitalLogicSandbox.Tests.PlayMode
         }
 
         [UnityTest]
+        public IEnumerator HidingGateVersions_DropsTheSuffix_FromTitlesAndDraftCrumbs()
+        {
+            _workspace.OpenNode(_gate);
+            EditIntoAnd();
+            yield return null;
+            Assert.That(_workspace.CurrentLevel.Title, Is.EqualTo("NAND v2 (draft)"));
+            Assert.That(_workspace.CurrentLevel.TitleWithoutVersion, Is.EqualTo("NAND (draft)"));
+
+            DraftSaveResult result = _workspace.SaveDraft(VersionUpdateMode.UpdateMainCircuit);
+            yield return null;
+            Assert.That(result.Succeeded, Is.True, result.Error + " " + result.Report);
+            Assert.That(_workspace.ShowGateVersions, Is.True, "Versions are shown by default.");
+            Assert.That(Title(_gate), Is.EqualTo("NAND v2"));
+            int settingsChanges = 0;
+            _workspace.SettingsChanged += () => settingsChanges++;
+
+            _workspace.ShowGateVersions = false;
+            yield return null;
+            Assert.That(Title(_gate), Is.EqualTo("NAND"), "The view is rebuilt with the plain name.");
+            Assert.That(_workspace.Geometry.NameOf(result.Saved), Is.EqualTo("NAND"));
+            Assert.That(_workspace.Circuit.GetNode(_gate).Component.Definition, Is.EqualTo(result.Saved.Reference),
+                "Display only: the instance still references version 2.");
+            Assert.That(settingsChanges, Is.EqualTo(1));
+
+            _workspace.ShowGateVersions = false;
+            Assert.That(settingsChanges, Is.EqualTo(1), "Setting the same value is a no-op.");
+
+            _workspace.ShowGateVersions = true;
+            yield return null;
+            Assert.That(Title(_gate), Is.EqualTo("NAND v2"));
+        }
+
+        private string Title(NodeId node)
+        {
+            return _workspace.Presenter.TryGetGateView(node, out GateView view) ? view.Geometry.Title : null;
+        }
+
+        [UnityTest]
         public IEnumerator SaveDraft_UpdatingMainCircuit_SwitchesInstance_AndUndoRestores()
         {
             _workspace.OpenNode(_gate);

@@ -1927,3 +1927,31 @@ it depended on window resolution.
 - EditMode 479 / 479, PlayMode 97 / 97 passed. Shader compiles with no messages.
 - Manual (play mode screenshots at ortho size 2, 10, 30 and 80): dots are clearly visible at max zoom, and the
   zoomed-out view is calm with no moiré.
+
+## Setting: show/hide gate versions (2026-11-19)
+
+### Implemented
+- New project setting **Show versions in gate names**, in the toolbar popup (renamed from "Signal animation" to
+  "View settings"), under a new "Gates" caption. On by default, which matches the previous behaviour.
+- `CircuitGeometry.ShowGateVersions` + `NameOf(definition)` are now the single place the " vN" suffix is
+  formatted. Used by gate titles (`TitleOf`), the truth table and sequence analysis titles, and the library
+  tooltip. Breadcrumbs use `NavigationLevel.TitleWithoutVersion` ("NAND (draft)") when the setting is off.
+- `WorkspaceController.ShowGateVersions` rebuilds the views and breadcrumbs through `RefreshGateTitles()` (the
+  existing rename path, with no recompilation) and raises `SettingsChanged`, which marks the project dirty.
+  `LibraryPanel` rebuilds its custom gate tooltips when the value changes.
+- Persistence: `ProjectSettingsData.ShowGateVersions` (`settings.showGateVersions`). Optional; missing means
+  true. No schema bump (same approach as `wireCrossings`).
+
+### Decisions
+- Display only. Versioning, stable IDs, version references, the inspector's Version rows and the save-version
+  dialog are unchanged, because those are where versions are managed.
+- Stored per project, like the grid and wire crossing settings.
+
+### Test results
+- EditMode 480 / 480 (settings round-trip extended; `MissingGateVersionSetting_LoadsAsShown`).
+- PlayMode 99 / 99:
+  - `HidingGateVersions_DropsTheSuffix_FromTitlesAndDraftCrumbs`: "NAND v2" ↔ "NAND", and the instance still
+    references v2.
+  - `VersionsToggle_HidesVersions_AndSurvivesSaveAndOpen`: popup toggle → dirty → save → new project (default)
+    → reopen.
+- Manual: the popup lays out with the new "Gates" row (play mode screenshot).

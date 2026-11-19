@@ -627,9 +627,9 @@ namespace DigitalLogicSandbox.UI.Dialogs
             }
         }
 
-        private static string DisplayName(CircuitDefinition circuit)
+        private string DisplayName(CircuitDefinition circuit)
         {
-            return circuit.Version > 1 ? circuit.Name + " v" + circuit.Version : circuit.Name;
+            return _workspace.Geometry != null ? _workspace.Geometry.NameOf(circuit) : circuit.Name;
         }
 
         private void Update()

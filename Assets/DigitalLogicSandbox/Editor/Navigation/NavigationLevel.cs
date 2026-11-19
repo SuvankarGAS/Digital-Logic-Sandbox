@@ -91,6 +91,16 @@ namespace DigitalLogicSandbox.CircuitEditor.Navigation
             }
         }
 
+        /// <summary>Breadcrumb text when gate versions are hidden: the name, marked "(draft)" for drafts.</summary>
+        public string TitleWithoutVersion
+        {
+            get
+            {
+                string name = string.IsNullOrEmpty(Circuit.Name) ? "Untitled" : Circuit.Name;
+                return Kind == NavigationLevelKind.Draft ? name + " (draft)" : name;
+            }
+        }
+
         // Camera view remembered while the level is not shown (presentation state, not circuit data).
         public bool HasView { get; private set; }
 

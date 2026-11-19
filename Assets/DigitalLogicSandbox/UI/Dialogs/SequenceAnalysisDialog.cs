@@ -148,7 +148,7 @@ namespace DigitalLogicSandbox.UI.Dialogs
             CircuitDefinition circuit = _workspace.Circuit;
             if (circuit != null)
             {
-                Open(circuit, circuit.Version > 1 ? circuit.Name + " v" + circuit.Version : circuit.Name);
+                Open(circuit, _workspace.Geometry != null ? _workspace.Geometry.NameOf(circuit) : circuit.Name);
             }
         }
 

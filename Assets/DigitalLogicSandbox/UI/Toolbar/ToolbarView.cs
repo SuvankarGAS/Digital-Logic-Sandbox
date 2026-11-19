@@ -189,7 +189,7 @@ namespace DigitalLogicSandbox.UI.Toolbar
                 () => TruthTableRequested?.Invoke());
             Divider(rect);
 
-            _signals = _ui.IconButton("Signals", rect, Icons.Sparkles, "Signal animation",
+            _signals = _ui.IconButton("Signals", rect, Icons.Sparkles, "View settings",
                 () => SignalSettingsRequested?.Invoke());
             _properties = _ui.IconButton("Properties", rect, Icons.Sliders, "Circuit properties",
                 () => PropertiesRequested?.Invoke());

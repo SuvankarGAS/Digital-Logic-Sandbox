@@ -104,7 +104,8 @@ namespace DigitalLogicSandbox.UI.Panels
 
                 int index = i;
                 bool current = i == levels.Count - 1;
-                Button crumb = _ui.Button("Crumb " + i, _crumbRow, levels[i].Title, () => _workspace.NavigateTo(index),
+                string title = _workspace.ShowGateVersions ? levels[i].Title : levels[i].TitleWithoutVersion;
+                Button crumb = _ui.Button("Crumb " + i, _crumbRow, title, () => _workspace.NavigateTo(index),
                     -1f, 13f);
                 // Crumbs are text links: no resting background, a soft tile on hover.
                 ColorBlock colors = crumb.colors;
@@ -128,11 +129,11 @@ namespace DigitalLogicSandbox.UI.Panels
                 // Measure after the style is set: the semibold current crumb is wider than the default measurement.
                 LayoutElement layout = crumb.GetComponent<LayoutElement>();
                 // Long gate names are capped (ellipsis) so the trail stays on one line; the full name is a tooltip.
-                float natural = label.GetPreferredValues(levels[i].Title).x + 20f;
+                float natural = label.GetPreferredValues(title).x + 20f;
                 layout.preferredWidth = Mathf.Clamp(natural, 40f, MaxCrumbWidth);
                 if (natural > MaxCrumbWidth)
                 {
-                    _ui.AddTooltip(crumb.gameObject, levels[i].Title);
+                    _ui.AddTooltip(crumb.gameObject, title);
                 }
 
                 _crumbs.Add(crumb);

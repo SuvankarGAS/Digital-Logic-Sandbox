@@ -51,6 +51,11 @@ namespace DigitalLogicSandbox.Persistence
         /// <summary>How wire crossings are drawn ("Hop", "Gap" or "Plain"). Optional; missing means "Hop".</summary>
         public string WireCrossings = "Hop";
 
+        /// <summary>
+        /// Whether custom gate names show their version ("NAND v2"). Display only. Optional; missing means true.
+        /// </summary>
+        public bool ShowGateVersions = true;
+
         public TruthTableSettingsData TruthTable = new TruthTableSettingsData();
         public CameraSettingsData Camera = new CameraSettingsData();
         public SimulationSettingsData Simulation = new SimulationSettingsData();

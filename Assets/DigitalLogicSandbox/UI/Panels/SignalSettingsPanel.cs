@@ -10,9 +10,9 @@ using UnityEngine.UI;
 namespace DigitalLogicSandbox.UI.Panels
 {
     /// <summary>
-    /// Small popup (toolbar "Signals") with the signal visualization controls: animation on/off, speed,
-    /// travelling particles, high-contrast style, how wire crossings are drawn and "reset visual state". Changes apply
-    /// immediately and never affect simulation results.
+    /// Small popup (toolbar "View settings") with the visualization controls: signal animation on/off, speed,
+    /// travelling particles, high-contrast style, how wire crossings are drawn, whether gate names show their version,
+    /// and "reset visual state". Changes apply immediately and never affect simulation results.
     /// </summary>
     public sealed class SignalSettingsPanel : MonoBehaviour
     {
@@ -27,6 +27,7 @@ namespace DigitalLogicSandbox.UI.Panels
         private Toggle _enabled;
         private Toggle _particles;
         private Toggle _highContrast;
+        private Toggle _versions;
         private TextMeshProUGUI _speedLabel;
         private Button _slower;
         private Button _faster;
@@ -39,6 +40,9 @@ namespace DigitalLogicSandbox.UI.Panels
         public Toggle ParticlesToggle => _particles;
 
         public Toggle HighContrastToggle => _highContrast;
+
+        /// <summary>"Show versions in gate names".</summary>
+        public Toggle VersionsToggle => _versions;
 
         public Button SlowerButton => _slower;
 
@@ -60,7 +64,7 @@ namespace DigitalLogicSandbox.UI.Panels
             RectTransform rect = window.rectTransform;
             rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 1f);
             rect.pivot = new Vector2(0.5f, 1f);
-            rect.sizeDelta = new Vector2(280f, 316f);
+            rect.sizeDelta = new Vector2(280f, 384f);
             rect.anchoredPosition = new Vector2(0f, -UiFactory.TopInset + 4f);
 
             var panel = window.gameObject.AddComponent<SignalSettingsPanel>();
@@ -105,6 +109,9 @@ namespace DigitalLogicSandbox.UI.Panels
             ui.AddTooltip(panel._crossingButtons[(int)WireCrossingStyle.Hop].gameObject, "Hop over other wires");
             ui.AddTooltip(panel._crossingButtons[(int)WireCrossingStyle.Gap].gameObject, "Break the wire at crossings");
             ui.AddTooltip(panel._crossingButtons[(int)WireCrossingStyle.Plain].gameObject, "Wires simply cross");
+            ui.Caption(column, "Gates");
+            panel._versions = ui.Toggle("Versions", column, "Show versions in gate names (v2)",
+                workspace.ShowGateVersions, value => workspace.ShowGateVersions = value);
             ui.Separator(column, vertical: false);
             ui.Button("Reset", column, "Reset visual state", workspace.ResetVisualState);
 
@@ -166,6 +173,7 @@ namespace DigitalLogicSandbox.UI.Panels
             _enabled.SetIsOnWithoutNotify(_settings.Enabled);
             _particles.SetIsOnWithoutNotify(_settings.ShowParticles);
             _highContrast.SetIsOnWithoutNotify(_workspace.VisualizationMode == SignalVisualizationMode.HighContrast);
+            _versions.SetIsOnWithoutNotify(_workspace.ShowGateVersions);
             _speedLabel.text = "Speed " + _settings.Speed.ToString("0.##", CultureInfo.InvariantCulture) + "x";
             _slower.interactable = _settings.Speed > SignalAnimationSettings.MinSpeed;
             _faster.interactable = _settings.Speed < SignalAnimationSettings.MaxSpeed;

@@ -229,6 +229,24 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             }
         }
 
+        /// <summary>
+        /// Whether custom gate names show their version ("NAND v2") on the canvas, in breadcrumbs and in dialog
+        /// titles. Display only; defaults to true.
+        /// </summary>
+        public bool ShowGateVersions
+        {
+            get => _geometry == null || _geometry.ShowGateVersions;
+            set
+            {
+                if (_geometry != null && _geometry.ShowGateVersions != value)
+                {
+                    _geometry.ShowGateVersions = value;
+                    RefreshGateTitles();
+                    SettingsChanged?.Invoke();
+                }
+            }
+        }
+
         public CircuitGeometry Geometry => _geometry;
 
         public WorkspaceCamera WorkspaceCamera => _camera;
@@ -1960,7 +1978,15 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
 
         private void OnLibraryMetadataChanged(CircuitDefinition definition)
         {
-            // Gate titles come from definition names: rebuild the views (cheap; no recompilation needed).
+            RefreshGateTitles();
+        }
+
+        /// <summary>
+        /// Gate titles come from definition names (and the version display setting): rebuilds the views and the
+        /// breadcrumbs. Cheap; no recompilation needed.
+        /// </summary>
+        private void RefreshGateTitles()
+        {
             if (_shownLevel != null)
             {
                 _presenter.Bind(_shownLevel.Circuit);
