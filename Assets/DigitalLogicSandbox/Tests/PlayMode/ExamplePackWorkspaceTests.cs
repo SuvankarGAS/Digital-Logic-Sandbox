@@ -77,7 +77,7 @@ namespace DigitalLogicSandbox.Tests.PlayMode
 
             _app.Shell.Toolbar.ExampleGatesButton.onClick.Invoke();
             yield return null;
-            Assert.That(ExampleItems(), Is.EqualTo(26));
+            Assert.That(ExampleItems(), Is.EqualTo(27));
             bool memoryHeader = false;
             foreach (TextMeshProUGUI text in _app.Shell.Library.GetComponentsInChildren<TextMeshProUGUI>())
             {
@@ -87,14 +87,14 @@ namespace DigitalLogicSandbox.Tests.PlayMode
             Assert.That(memoryHeader, Is.True, "The library groups the pack by category.");
 
             Assert.That(_workspace.LoadExampleGates().Succeeded, Is.False, "A second load is refused.");
-            Assert.That(_workspace.Library.DefinitionCount, Is.EqualTo(26));
+            Assert.That(_workspace.Library.DefinitionCount, Is.EqualTo(27));
 
             Assert.That(_workspace.History.Undo(), Is.True);
             yield return null;
             Assert.That(ExampleItems(), Is.Zero);
             Assert.That(_workspace.History.Redo(), Is.True);
             yield return null;
-            Assert.That(ExampleItems(), Is.EqualTo(26));
+            Assert.That(ExampleItems(), Is.EqualTo(27));
         }
 
         [UnityTest]

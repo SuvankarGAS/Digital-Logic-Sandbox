@@ -275,6 +275,82 @@ namespace DigitalLogicSandbox.Rendering
             return new Rect(center - geometry.Size * 0.5f, geometry.Size);
         }
 
+        /// <summary>World area of a gate's caption (its label above the body), or a zero-size rect.</summary>
+        public Rect GetCaptionBounds(NodeId id)
+        {
+            GateGeometry geometry = GetGate(id);
+            if (!geometry.HasCaption)
+            {
+                return Rect.zero;
+            }
+
+            Rect local = geometry.CaptionRect;
+            local.position += GetPosition(id);
+            return local;
+        }
+
+        /// <summary>
+        /// Everything a gate occupies on screen for wire routing: its body and, when it has one, its caption. Hit
+        /// testing and selection use <see cref="GetBounds"/> (the body) instead.
+        /// </summary>
+        public Rect GetFootprint(NodeId id)
+        {
+            Rect body = GetBounds(id);
+            Rect caption = GetCaptionBounds(id);
+            if (caption.width <= 0f)
+            {
+                return body;
+            }
+
+            return Rect.MinMaxRect(Mathf.Min(body.xMin, caption.xMin), Mathf.Min(body.yMin, caption.yMin),
+                Mathf.Max(body.xMax, caption.xMax), Mathf.Max(body.yMax, caption.yMax));
+        }
+
+        /// <summary>
+        /// Adds a gate's body and, when it is clear of both endpoint gates and both pins, its caption as routing
+        /// obstacles. A caption that would block a pin or overlap an endpoint gate is left out, so it can never
+        /// make a wire unroutable.
+        /// </summary>
+        private void AddObstacles(NodeId node, Rect body, Vector2 from, Vector2 to, Rect fromBody, Rect toBody)
+        {
+            if (_areaObstacles.Count >= MaxAreaObstacles)
+            {
+                return;
+            }
+
+            _areaObstacles.Add(body);
+            AddCaptionObstacle(node, from, to, fromBody, toBody, isEndpoint: false);
+        }
+
+        /// <summary>
+        /// Adds a gate's caption as a routing obstacle when it is safe: clear of both pins and, for gates other
+        /// than the wire's own endpoints, clear of the endpoint bodies.
+        /// </summary>
+        private void AddCaptionObstacle(NodeId node, Vector2 from, Vector2 to, Rect fromBody, Rect toBody,
+            bool isEndpoint)
+        {
+            if (_areaObstacles.Count >= MaxAreaObstacles)
+            {
+                return;
+            }
+
+            Rect caption = GetCaptionBounds(node);
+            if (caption.width <= 0f || (!isEndpoint && (caption.Overlaps(fromBody) || caption.Overlaps(toBody))))
+            {
+                return;
+            }
+
+            Rect clearance = Rect.MinMaxRect(caption.xMin - PinClearance, caption.yMin - PinClearance,
+                caption.xMax + PinClearance, caption.yMax + PinClearance);
+            if (!clearance.Contains(from) && !clearance.Contains(to))
+            {
+                _areaObstacles.Add(caption);
+            }
+        }
+
+        /// <summary>How far a caption obstacle must stay from a wire's own pins (world units).</summary>
+        private const float PinClearance = 0.5f;
+
         /// <summary>World position of a pin; determines whether it is an input or output pin of its node.</summary>
         public bool TryGetPin(PinRef pin, out Vector2 world, out PortDirection direction)
         {
@@ -384,13 +460,25 @@ namespace DigitalLogicSandbox.Rendering
             for (int i = 0; i < _scratchNodes.Count && _areaObstacles.Count < MaxAreaObstacles; i++)
             {
                 NodeId node = _scratchNodes[i];
-                if (node == source || node == destination || !_nodeIndex.TryGetRect(node, out Rect body) ||
-                    body.Overlaps(fromBody) || body.Overlaps(toBody))
+                if (node == source || node == destination || !_nodeIndex.TryGetRect(node, out _))
                 {
                     continue;
                 }
 
-                _areaObstacles.Add(body);
+                Rect body = GetBounds(node);
+                if (body.Overlaps(fromBody) || body.Overlaps(toBody))
+                {
+                    continue;
+                }
+
+                AddObstacles(node, body, from, to, fromBody, toBody);
+            }
+
+            // A wire that loops over its own gate keeps out of that gate's caption too (unless a pin is right there).
+            AddCaptionObstacle(source, from, to, fromBody, toBody, isEndpoint: true);
+            if (destination != source)
+            {
+                AddCaptionObstacle(destination, from, to, fromBody, toBody, isEndpoint: true);
             }
 
             if (lanes == LaneMode.None)
@@ -933,10 +1021,13 @@ namespace DigitalLogicSandbox.Rendering
             for (int i = 0; i < _scratchNodes.Count; i++)
             {
                 NodeId node = _scratchNodes[i];
-                if (node == source || node == destination || !_nodeIndex.TryGetRect(node, out Rect body))
+                if (node == source || node == destination || !_nodeIndex.TryGetRect(node, out _))
                 {
                     continue;
                 }
+
+                // The fallback router only knows gate bodies (the index holds footprints, captions included).
+                Rect body = GetBounds(node);
 
                 // Gates overlapping an endpoint gate (stacked parts) would block every route; ignore them.
                 if (body.Overlaps(fromBody) || body.Overlaps(toBody))
@@ -981,7 +1072,7 @@ namespace DigitalLogicSandbox.Rendering
             IReadOnlyList<NodeDefinition> nodes = Circuit.Nodes;
             for (int i = 0; i < nodes.Count; i++)
             {
-                _nodeIndex.Set(nodes[i].Id, GetBounds(nodes[i].Id));
+                _nodeIndex.Set(nodes[i].Id, GetFootprint(nodes[i].Id));
             }
         }
 
@@ -1003,7 +1094,7 @@ namespace DigitalLogicSandbox.Rendering
             }
             else
             {
-                Rect newBody = GetBounds(node);
+                Rect newBody = GetFootprint(node);
                 _nodeIndex.Set(node, newBody);
                 InvalidateWiresTouching(newBody);
                 DirtyCrossingsNear(newBody);

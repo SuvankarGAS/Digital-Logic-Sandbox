@@ -93,6 +93,38 @@ namespace DigitalLogicSandbox.Rendering.Gates
 
         public bool HasCaption => Caption.Length > 0;
 
+        /// <summary>Height of the caption line above the body (world units).</summary>
+        public const float CaptionHeight = 0.7f;
+
+        /// <summary>Gap between the body's top edge and the caption line.</summary>
+        public const float CaptionGap = 0.05f;
+
+        /// <summary>Width of the box the caption is drawn in at least (it is centred and may be narrower text).</summary>
+        public const float CaptionMinBoxWidth = 6f;
+
+        /// <summary>Conservative world width of one caption character (semi-bold, font size 3.2).</summary>
+        public const float CaptionCharWidth = 0.25f;
+
+        /// <summary>
+        /// Node-local area covered by the caption text: centred above the body, as wide as the text is estimated to
+        /// be (never wider than its drawing box). Zero-size when there is no caption. Wire routing keeps out of it.
+        /// </summary>
+        public Rect CaptionRect
+        {
+            get
+            {
+                if (!HasCaption)
+                {
+                    return Rect.zero;
+                }
+
+                float box = Mathf.Max(Size.x, CaptionMinBoxWidth);
+                float width = Mathf.Min(box, Caption.Length * CaptionCharWidth + 0.3f);
+                float bottom = Size.y * 0.5f + CaptionGap;
+                return new Rect(-width * 0.5f, bottom, width, CaptionHeight);
+            }
+        }
+
         /// <summary>Axis-aligned body size after rotation.</summary>
         public Vector2 Size { get; }
 

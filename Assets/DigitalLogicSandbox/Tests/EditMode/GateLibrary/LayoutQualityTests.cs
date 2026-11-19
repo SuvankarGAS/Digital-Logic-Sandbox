@@ -36,7 +36,7 @@ namespace DigitalLogicSandbox.Tests.EditMode.GateLibrary
         [TestCase("ram16x4", 400, 70f)]
         [TestCase("rom16x8", 60, 65f)]
         [TestCase("alu4", 25, 20f)]
-        [TestCase("cpu4", 170, 40f)]
+        [TestCase("cpu4", 110, 25f)]
         [TestCase("dec4", 172, 50f)]
         [TestCase("register4", 12, 15f)]
         public void BigGates_HaveFewCrossings_AndStayCompact(string key, int maxCrossings, float maxHeight)
@@ -135,6 +135,93 @@ namespace DigitalLogicSandbox.Tests.EditMode.GateLibrary
                     }
                 }
             }
+        }
+
+        [Test]
+        public void Wires_KeepOutOfPartLabels()
+        {
+            int total = 0;
+            foreach (CircuitDefinition gate in _pack.Definitions)
+            {
+                _geometry.Bind(gate);
+                int crossings = 0;
+                foreach (ConnectionDefinition wire in gate.Connections)
+                {
+                    IReadOnlyList<Vector3> path = _geometry.GetWirePath(wire.Destination);
+                    Assert.That(_geometry.TryGetPin(wire.Source, out Vector2 from, out PortDirection _), Is.True);
+                    Assert.That(_geometry.TryGetPin(wire.Destination, out Vector2 to, out PortDirection _), Is.True);
+                    Rect fromBody = _geometry.GetBounds(wire.Source.Node);
+                    Rect toBody = _geometry.GetBounds(wire.Destination.Node);
+                    foreach (NodeDefinition node in gate.Nodes)
+                    {
+                        Rect caption = _geometry.GetCaptionBounds(node.Id);
+                        bool endpoint = node.Id == wire.Source.Node || node.Id == wire.Destination.Node;
+                        if (caption.width <= 0f || NearPin(caption, from, to) ||
+                            (!endpoint && (caption.Overlaps(fromBody) || caption.Overlaps(toBody))))
+                        {
+                            continue; // the router may pass these by design (see CircuitGeometry.AddObstacles)
+                        }
+
+                        if (PathCrosses(path, caption))
+                        {
+                            crossings++;
+                            TestContext.WriteLine(gate.Name + ": wire to " + wire.Destination + " crosses '" + node.Label + "'");
+                        }
+                    }
+                }
+
+                total += crossings;
+            }
+
+            Assert.That(_geometry.RouteFallbackCount, Is.EqualTo(0), "Every wire maze-routed.");
+            Assert.That(total, Is.EqualTo(0), "Wires crossing part labels.");
+        }
+
+        [Test]
+        public void Cpu_ReadsAsAControlBlockAndDatapath_InFewColumns()
+        {
+            CircuitDefinition cpu = _pack.Get("cpu4");
+            var columns = new HashSet<float>();
+            foreach (NodeDefinition node in cpu.Nodes)
+            {
+                if (node.Component.Kind != ComponentKind.InputBoundary && node.Component.Kind != ComponentKind.OutputBoundary)
+                {
+                    columns.Add(Mathf.Round(node.Position.X * 2f) / 2f);
+                }
+            }
+
+            Crossings(cpu, out Rect bounds);
+            TestContext.WriteLine("CPU: " + columns.Count + " columns, " + bounds.width + " × " + bounds.height);
+            Assert.That(Labels(cpu), Does.Contain("Control").And.Not.Contain("Opcode decoder"));
+            Assert.That(Labels(_pack.Get("ctrl4")), Does.Contain("Opcode decoder"));
+            Assert.That(columns.Count, Is.LessThanOrEqualTo(13), "Columns (was 21).");
+            Assert.That(bounds.width, Is.LessThan(135f), "Width (was 151).");
+        }
+
+        private static bool NearPin(Rect caption, Vector2 from, Vector2 to)
+        {
+            Rect clearance = Rect.MinMaxRect(caption.xMin - 0.5f, caption.yMin - 0.5f, caption.xMax + 0.5f, caption.yMax + 0.5f);
+            return clearance.Contains(from) || clearance.Contains(to);
+        }
+
+        /// <summary>True when any segment of the path runs through the interior of <paramref name="rect"/>.</summary>
+        private static bool PathCrosses(IReadOnlyList<Vector3> path, Rect rect)
+        {
+            const float inset = 0.01f;
+            Rect inner = Rect.MinMaxRect(rect.xMin + inset, rect.yMin + inset, rect.xMax - inset, rect.yMax - inset);
+            for (int i = 0; i < path.Count - 1; i++)
+            {
+                Vector2 p = path[i];
+                Vector2 q = path[i + 1];
+                float xMin = Mathf.Min(p.x, q.x), xMax = Mathf.Max(p.x, q.x);
+                float yMin = Mathf.Min(p.y, q.y), yMax = Mathf.Max(p.y, q.y);
+                if (xMax > inner.xMin && xMin < inner.xMax && yMax > inner.yMin && yMin < inner.yMax)
+                {
+                    return true; // axis-aligned segments: bounding-box overlap is an intersection
+                }
+            }
+
+            return false;
         }
 
         [Test]

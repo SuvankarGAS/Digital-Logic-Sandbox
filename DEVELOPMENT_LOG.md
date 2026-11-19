@@ -1779,9 +1779,9 @@ any circuit (no group frames, no file-format change).
   after the first screenshot (too faint).
 
 ### Known issues / deferred
-- The CPU is still wide (21 columns): its longest path runs decoder → control ORs → ALU → muxes → registers.
+- The CPU is still wide (21 columns): its longest path runs decoder → control ORs → ALU → muxes → registers. (Resolved: see "Wire/label polish", 12 columns.)
 - Decoder 4→16 keeps most of its crossings (inherent to ANDing every pair of 2→4 outputs).
-- A label can overlap a wire lane that passes right above a gate; the router does not avoid label text.
+- A label can overlap a wire lane that passes right above a gate; the router does not avoid label text. (Resolved: see "Wire/label polish".)
 
 ## Program editor for the CPU (2026-11-19)
 
@@ -1846,3 +1846,61 @@ except one Constant at a time, and word labels went stale when a value changed.
 - The program field has no line numbers of its own and no syntax colouring. The `N:` prefixes in the listing
   stand in for line numbers.
 - Only the example CPU's instruction set is known to the assembler.
+
+## Wire/label polish (2026-11-19)
+
+The user picked the layout follow-ups from "Tidier layouts": wires running through part labels, and the wide CPU.
+
+### Implemented
+- **Wires keep out of part labels.**
+  - `GateGeometry.CaptionRect`: estimated caption area. The caption constants moved from `GateView` here, so
+    drawing and routing share them.
+  - `CircuitGeometry`: `GetCaptionBounds` and `GetFootprint` (body ∪ caption). The routing node index stores
+    footprints, so moving or relabelling a gate (the existing `NodeLabelChanged` path) invalidates the wires its
+    old or new caption touches.
+  - The maze router gets captions as obstacles, including those of the wire's own endpoint gates. A caption within
+    0.5 units of either pin, or (for other gates) overlapping an endpoint body, is skipped, so a wire never becomes
+    unroutable.
+  - Hit testing, selection and the fallback router are unchanged (bodies only).
+- **Control 4-bit** (`ctrl4`, Examples · Computer; pack 26 → 27 gates).
+  - Contents: the opcode decoder, the OR chains and the branch terms, moved out of the CPU verbatim.
+  - Inputs: OPCODE, Z, C. Outputs: IMM, ARITH, SUB, LOADA, STORE, OUT, JUMP, HALT.
+  - The CPU labels it "Control"; "Opcode decoder" now labels the decoder inside the control unit.
+
+### Results
+| | Before | After |
+|---|---|---|
+| CPU columns | 21 | 12 |
+| CPU size (world units) | 151 × 30 | 125 × 19 |
+| CPU crossings (straight pin-to-pin) | 124 | 91 |
+| Wires through a part label, whole pack | some (e.g. the ALU's own input wire looped over "ALU") | 0, no fallback routes |
+
+### Decisions
+- **Footprint in the index rather than a second index.** Captions move with their gate and change with its label,
+  so storing body ∪ caption in the existing index reuses all invalidation for free.
+- **Endpoint captions count.** The first version exempted a wire's own gates. A play-mode screenshot showed the
+  ALU's input wire looping over "ALU", so they are obstacles now (still exempt near a pin). The pack-wide test
+  was tightened the same way.
+- **Hierarchy again for the CPU.** As with the RAM and ROM, packaging the repeated control logic shortens the
+  longest path far more than layout heuristics could.
+- **Decoder 4→16 left alone.** Its 157 crossings come from ANDing every pair of 2→4 outputs, and no ordering
+  removes them.
+
+### Test results
+- EditMode: **479 / 479 passed** (6 new):
+  - `CaptionRoutingTests`: a wire bends around a label; removing the label straightens it and adding it back
+    reroutes it (both invalidate the wire); footprints leave the body bounds alone.
+  - `LayoutQualityTests`: no wire in the pack crosses a part label (no fallback routes); CPU ≤ 13 columns and
+    narrower than 135 units, with a "Control" label. The `cpu4` limits were tightened to 110 crossings / 25 tall.
+  - `ExamplePackTests`: the control unit matches hand-written signals for all 16 opcodes × Z × C. Pack counts
+    updated to 27.
+  - Every CPU behaviour test passes unchanged, including Fibonacci, the traced program, and the evaluation bound
+    per edge.
+- PlayMode: **97 / 97 passed** (pack counts updated).
+- Manual (play mode screenshots): inside the CPU, "Operand", "ALU" and "Z flag" are clear of wires, and the CPU
+  frames as one compact strip.
+
+### Known issues / deferred
+- Decoder 4→16 keeps its crossings (see Decisions).
+- Caption width is an estimate (0.25 units per character), not measured text. Generous for the semi-bold caption
+  font.

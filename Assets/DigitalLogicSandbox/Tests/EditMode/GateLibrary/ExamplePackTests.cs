@@ -93,9 +93,9 @@ namespace DigitalLogicSandbox.Tests.EditMode.GateLibrary
         // ------------------------------------------------------------------------------------------------
 
         [Test]
-        public void Pack_HasTwentySixValidGates_BuiltOnlyFromAndNotWiringAndEarlierPackGates()
+        public void Pack_HasTwentySevenValidGates_BuiltOnlyFromAndNotWiringAndEarlierPackGates()
         {
-            Assert.That(_plan.Definitions.Count, Is.EqualTo(26));
+            Assert.That(_plan.Definitions.Count, Is.EqualTo(27));
             var packager = new CircuitPackager(_env.Catalog, _env.Library);
             var earlier = new HashSet<DefinitionId>();
             foreach (CircuitDefinition gate in _plan.Definitions)
@@ -230,6 +230,35 @@ namespace DigitalLogicSandbox.Tests.EditMode.GateLibrary
 
                 Settle(mux4);
                 Assert.That(Get(mux4, four, "OUT"), Is.EqualTo((ulong)((row >> (int)s) & 1)), "MUX 4:1 row " + row);
+            }
+        }
+
+        [Test]
+        public void ControlUnit_DecodesEveryOpcode_WithBothFlags()
+        {
+            // Expected signals written from the instruction set, not from the gate.
+            SimulationContext context = Context("ctrl4", out CircuitDefinition gate);
+            for (int row = 0; row < 64; row++)
+            {
+                int op = row >> 2;
+                int z = (row >> 1) & 1;
+                int c = row & 1;
+                Set(context, gate, "OPCODE", (ulong)op);
+                Set(context, gate, "Z", (ulong)z);
+                Set(context, gate, "C", (ulong)c);
+                Settle(context);
+                bool arithmetic = op >= 4 && op <= 7;
+                string at = "opcode " + op + ", Z " + z + ", C " + c;
+                Assert.That(Get(context, gate, "IMM"), Is.EqualTo(op == 1 || op == 6 || op == 7 ? 1UL : 0UL), "IMM " + at);
+                Assert.That(Get(context, gate, "ARITH"), Is.EqualTo(arithmetic ? 1UL : 0UL), "ARITH " + at);
+                Assert.That(Get(context, gate, "SUB"), Is.EqualTo(op == 5 || op == 7 ? 1UL : 0UL), "SUB " + at);
+                Assert.That(Get(context, gate, "LOADA"), Is.EqualTo(arithmetic || op == 1 || op == 2 ? 1UL : 0UL),
+                    "LOADA " + at);
+                Assert.That(Get(context, gate, "STORE"), Is.EqualTo(op == 3 ? 1UL : 0UL), "STORE " + at);
+                Assert.That(Get(context, gate, "OUT"), Is.EqualTo(op == 11 ? 1UL : 0UL), "OUT " + at);
+                bool jump = op == 8 || (op == 9 && z == 1) || (op == 10 && c == 1);
+                Assert.That(Get(context, gate, "JUMP"), Is.EqualTo(jump ? 1UL : 0UL), "JUMP " + at);
+                Assert.That(Get(context, gate, "HALT"), Is.EqualTo(op == 15 ? 1UL : 0UL), "HALT " + at);
             }
         }
 
@@ -539,11 +568,11 @@ namespace DigitalLogicSandbox.Tests.EditMode.GateLibrary
 
             var history = new CommandHistory();
             history.Execute(new CompositeCommand("Add example gates", commands));
-            Assert.That(fresh.Library.DefinitionCount, Is.EqualTo(26));
+            Assert.That(fresh.Library.DefinitionCount, Is.EqualTo(27));
             history.Undo();
             Assert.That(fresh.Library.DefinitionCount, Is.Zero);
             history.Redo();
-            Assert.That(fresh.Library.DefinitionCount, Is.EqualTo(26));
+            Assert.That(fresh.Library.DefinitionCount, Is.EqualTo(27));
         }
 
         [Test]
@@ -560,7 +589,7 @@ namespace DigitalLogicSandbox.Tests.EditMode.GateLibrary
             Assert.That(result.Document, Is.Not.Null);
             Assert.That(result.Report.HasErrors, Is.False);
             ProjectDocument loaded = result.Document;
-            Assert.That(loaded.Definitions.Count, Is.EqualTo(26));
+            Assert.That(loaded.Definitions.Count, Is.EqualTo(27));
             var reloaded = new TestEnvironment();
             foreach (CircuitDefinition definition in loaded.Definitions)
             {

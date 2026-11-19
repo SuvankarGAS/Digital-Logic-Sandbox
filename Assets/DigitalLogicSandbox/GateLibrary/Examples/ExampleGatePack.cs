@@ -475,6 +475,10 @@ namespace DigitalLogicSandbox.GateLibrary.Examples
 
                 b.Out("DATA", b.Label(b.Gate("mux4x8", high, groups[0], groups[1], groups[2], groups[3])[0], "Read"), 8);
             });
+            Add("ctrl4", "Control 4-bit", ExampleGatePack.ComputerCategory,
+                "Control unit of the CPU 4-bit: decodes OPCODE into the datapath's control signals. IMM (LDI, ADDI, " +
+                "SUBI use n), ARITH (ADD, SUB, ADDI, SUBI), SUB (subtract), LOADA (A loads), STORE (STA), OUT, " +
+                "JUMP (JMP, JZ with Z, JC with C) and HALT.", BuildControl);
             Add("cpu4", "CPU 4-bit", ExampleGatePack.ComputerCategory, CpuDescription, BuildCpu);
         }
 
@@ -491,19 +495,39 @@ namespace DigitalLogicSandbox.GateLibrary.Examples
         /// OUT, two flag flip-flops, the ALU, and a RAM 16×4 for data. Every register loads on the rising CLK edge;
         /// the RAM writes during the LOW half (its CLK is NOT CLK), while its address and data are stable.
         /// </summary>
-        private void BuildCpu(Builder b)
+        /// <summary>
+        /// The CPU's control unit: a 4→16 decoder on the opcode and the OR/AND terms that turn it into control
+        /// signals. Packaged separately so the CPU reads as one control block feeding the datapath.
+        /// </summary>
+        private void BuildControl(Builder b)
         {
-            PinRef[] instr = b.Split(b.In("INSTR", 8), 8);
-            PinRef clk = b.In("CLK");
-            PinRef n = b.Merge(instr[0], instr[1], instr[2], instr[3]);
-            PinRef[] op = b.Gate("dec4", b.Merge(instr[4], instr[5], instr[6], instr[7]));
+            PinRef[] op = b.Gate("dec4", b.In("OPCODE", 4));
             b.Label(op[0], "Opcode decoder");
+            PinRef zero = b.In("Z");
+            PinRef carry = b.In("C");
 
             PinRef Or(PinRef x, PinRef y) => b.Gate("or", x, y)[0];
             PinRef immediate = Or(op[1], Or(op[6], op[7])); // LDI, ADDI, SUBI use n itself
             PinRef arithmetic = Or(Or(op[4], op[5]), Or(op[6], op[7]));
             PinRef subtract = Or(op[5], op[7]);
             PinRef loadA = Or(arithmetic, Or(op[1], op[2]));
+            PinRef taken = Or(op[8], Or(b.And(op[9], zero), b.And(op[10], carry)));
+
+            b.Out("IMM", immediate);
+            b.Out("ARITH", arithmetic);
+            b.Out("SUB", subtract);
+            b.Out("LOADA", loadA);
+            b.Out("STORE", op[3]);
+            b.Out("OUT", op[11]);
+            b.Out("JUMP", taken);
+            b.Out("HALT", op[15]);
+        }
+
+        private void BuildCpu(Builder b)
+        {
+            PinRef[] instr = b.Split(b.In("INSTR", 8), 8);
+            PinRef clk = b.In("CLK");
+            PinRef n = b.Merge(instr[0], instr[1], instr[2], instr[3]);
 
             // Registers are placed first so their outputs can feed the logic that computes their inputs.
             NodeDefinition pcRegister = b.Label(b.Instance("register4"), "PC");
@@ -516,8 +540,19 @@ namespace DigitalLogicSandbox.GateLibrary.Examples
             PinRef zero = b.OutputOf(zeroFlag, 0);
             PinRef carry = b.OutputOf(carryFlag, 0);
 
+            PinRef[] control = b.Gate("ctrl4", b.Merge(instr[4], instr[5], instr[6], instr[7]), zero, carry);
+            b.Label(control[0], "Control");
+            PinRef immediate = control[0];
+            PinRef arithmetic = control[1];
+            PinRef subtract = control[2];
+            PinRef loadA = control[3];
+            PinRef store = control[4];
+            PinRef output = control[5];
+            PinRef taken = control[6];
+            PinRef halt = control[7];
+
             // Operand: n for immediates, otherwise the RAM word at n. The RAM writes A during the LOW half of STA.
-            PinRef ram = b.Label(b.Gate("ram16x4", n, a, op[3], b.Not(clk))[0], "Data RAM");
+            PinRef ram = b.Label(b.Gate("ram16x4", n, a, store, b.Not(clk))[0], "Data RAM");
             PinRef operand = b.Label(b.Gate("mux2x4", immediate, ram, n)[0], "Operand");
             PinRef[] alu = b.Gate("alu4", a, operand, b.Merge(subtract, b.Const(1, 0)));
             b.Label(alu[0], "ALU");
@@ -534,8 +569,6 @@ namespace DigitalLogicSandbox.GateLibrary.Examples
             b.Wire(clk, b.InputOf(carryFlag, 1));
 
             // PC: n when a jump is taken, otherwise PC + 1 (PC + 0 while halted).
-            PinRef halt = op[15];
-            PinRef taken = Or(op[8], Or(b.And(op[9], zero), b.And(op[10], carry)));
             PinRef next = b.Label(b.Gate("adder4", pc, b.Const(4, 0), b.Not(halt))[0], "PC + 1");
             PinRef nextPc = b.Label(b.Gate("mux2x4", taken, next, n)[0], "Next PC");
 
@@ -544,7 +577,7 @@ namespace DigitalLogicSandbox.GateLibrary.Examples
             b.Wire(clk, b.InputOf(pcRegister, 2));
 
             b.Wire(a, b.InputOf(outRegister, 0));
-            b.Wire(op[11], b.InputOf(outRegister, 1));
+            b.Wire(output, b.InputOf(outRegister, 1));
             b.Wire(clk, b.InputOf(outRegister, 2));
 
             b.Out("PC", pc, 4);

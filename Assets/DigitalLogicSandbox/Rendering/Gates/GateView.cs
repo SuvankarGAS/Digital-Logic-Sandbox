@@ -161,8 +161,10 @@ namespace DigitalLogicSandbox.Rendering.Gates
             // The node's label sits just above the body, outside it, so the gate keeps its own title.
             _caption.gameObject.SetActive(geometry.HasCaption);
             _caption.text = geometry.Caption;
-            _caption.rectTransform.sizeDelta = new Vector2(Mathf.Max(size.x, 6f), CaptionHeight);
-            _caption.transform.localPosition = new Vector3(0f, size.y * 0.5f + CaptionHeight * 0.5f + 0.05f, 0f);
+            _caption.rectTransform.sizeDelta = new Vector2(Mathf.Max(size.x, GateGeometry.CaptionMinBoxWidth),
+                GateGeometry.CaptionHeight);
+            _caption.transform.localPosition = new Vector3(0f,
+                size.y * 0.5f + GateGeometry.CaptionHeight * 0.5f + GateGeometry.CaptionGap, 0f);
 
             ConfigurePins(_inputPins, _inputRings, _inputSignals, geometry.InputPins, "In");
             ConfigurePins(_outputPins, _outputRings, _outputSignals, geometry.OutputPins, "Out");
@@ -764,7 +766,6 @@ namespace DigitalLogicSandbox.Rendering.Gates
 
         /// <summary>Size of the label above a gate (fits in the layout's row gap).</summary>
         private const float CaptionFontSize = 3.2f;
-        private const float CaptionHeight = 0.7f;
 
         /// <summary>Text of the label drawn above the gate (empty when it has none).</summary>
         public string CaptionText => _caption.gameObject.activeSelf ? _caption.text : string.Empty;

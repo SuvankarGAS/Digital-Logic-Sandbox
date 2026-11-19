@@ -859,6 +859,13 @@ the workspace views (`GateView`, `WireView`, `GridView`).
   without touching the circuit; `Arrange` applies them.
 - **Part labels.** Builders name key parts with node labels ("PC", "Z flag", "Data RAM", "Word 7", "Read"). The
   renderer draws a custom or primitive gate's label above its body in the accent colour (`GateGeometry.Caption`).
+  Wires keep out of captions: `GateGeometry.CaptionRect` estimates the text area. `CircuitGeometry` indexes each
+  gate's footprint (body ∪ caption, `GetFootprint`), so moving or relabelling a gate invalidates the wires near its
+  caption, and the maze router gets captions as extra obstacles. That includes a wire's own endpoint gates, since
+  a wire may loop over its own gate. A caption within 0.5 units of the wire's pins is left out (rotated gates can
+  have pins on top), and so is a caption that overlaps an endpoint body, so captions never make a wire
+  unroutable. Hit testing and selection still use `GetBounds` (the body), and the straight-line fallback router
+  only sees bodies.
 - **Tidy layout.** `WorkspaceController.TidyLayout` (workspace context menu, editable circuits only) computes the
   same layout for the current circuit and applies it as one `TransformNodesCommand`, resetting rotations so the
   circuit reads left to right. Projects saved with the earlier pack keep their positions until tidied.
@@ -897,6 +904,9 @@ the workspace views (`GateView`, `WireView`, `GridView`).
     address and data are stable (under unit delay the PC → ROM → decode path is far deeper than the inversion).
   - Flattened with a program ROM: 2 842 gates. A clock edge costs up to about one pass over them, because a new
     instruction ripples through most of a single-cycle datapath; edges allocate nothing.
+- **Control 4-bit** (`ctrl4`, 2026-11-19). The CPU's decoder, the OR chains and the branch terms are packaged as
+  one gate. Inputs: OPCODE, Z, C. Outputs: IMM, ARITH, SUB, LOADA, STORE, OUT, JUMP, HALT. The flattened CPU has
+  exactly the same gates, and its layout drops from 21 to 12 columns.
 - **CPU demo** (`GateLibrary.Examples.CpuDemo`). `AddComputer` places the ROM, the CPU and one labelled Constant per
   program word (two staggered columns, each word level with its ROM pin), `Build` adds a clock and displays and
   returns definitions + main circuit + a 4 Hz clock rate, and `Assemble`/`Disassemble` encode the instruction set.

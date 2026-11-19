@@ -98,7 +98,7 @@ namespace DigitalLogicSandbox.Tests.PlayMode
             yield return null;
 
             Assert.That(_workspace.RootCircuit.Name, Is.EqualTo(CpuDemo.MainCircuitName));
-            Assert.That(_workspace.Library.DefinitionCount, Is.EqualTo(26));
+            Assert.That(_workspace.Library.DefinitionCount, Is.EqualTo(27));
             Assert.That(_app.Projects.IsDirty, Is.False);
             Assert.That(_app.Projects.CurrentPath, Is.Null, "The demo is a new, unsaved project.");
             Assert.That(_workspace.ClockFrequency, Is.EqualTo(CpuDemo.ClockFrequency));
