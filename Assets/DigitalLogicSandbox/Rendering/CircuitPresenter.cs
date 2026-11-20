@@ -24,6 +24,9 @@ namespace DigitalLogicSandbox.Rendering
         private readonly VisualTheme _theme;
         private readonly CircuitGeometry _geometry;
         private readonly Transform _gateRoot;
+        private readonly Transform _shadowRoot;
+        private readonly List<GateView> _scratchStack = new List<GateView>();
+        private int _nextStack;
         private readonly Transform _wireRoot;
         private readonly ViewPool<GateView> _gatePool;
         private readonly ViewPool<WireView> _wirePool;
@@ -61,12 +64,14 @@ namespace DigitalLogicSandbox.Rendering
         {
             _theme = theme ?? throw new ArgumentNullException(nameof(theme));
             _geometry = geometry ?? throw new ArgumentNullException(nameof(geometry));
+            _shadowRoot = new GameObject("Gate Shadows").transform;
+            _shadowRoot.SetParent(root, false);
             _wireRoot = new GameObject("Wires").transform;
             _wireRoot.SetParent(root, false);
             _gateRoot = new GameObject("Gates").transform;
             _gateRoot.SetParent(root, false);
             _style = new SignalStyle(theme);
-            _gatePool = new ViewPool<GateView>(() => GateView.Create(_gateRoot, _theme));
+            _gatePool = new ViewPool<GateView>(() => GateView.Create(_gateRoot, _theme, _shadowRoot));
             _wirePool = new ViewPool<WireView>(() => WireView.Create(_wireRoot, _theme, _style));
         }
 
@@ -245,6 +250,76 @@ namespace DigitalLogicSandbox.Rendering
             view.SetPosition(_geometry.GetPosition(node));
             view.name = "Gate " + node;
             _gates[node] = view;
+            view.SetStackOrder(NextStackOrder());
+        }
+
+        /// <summary>Highest stack order handed out so far (tests).</summary>
+        public int TopStackOrder => SortingOrders.GateStackBase + _nextStack;
+
+        /// <summary>
+        /// Draws <paramref name="nodes"/> in front of every other gate, keeping their order among themselves (the
+        /// gates being dragged, so they never slide under the gates they cross). Visual only: not saved or undone.
+        /// </summary>
+        public void BringToFront(IReadOnlyList<NodeId> nodes)
+        {
+            if (nodes == null)
+            {
+                return;
+            }
+
+            if (_nextStack + nodes.Count > SortingOrders.GateStackMax - SortingOrders.GateStackBase)
+            {
+                RenumberStack();
+            }
+
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                if (_gates.TryGetValue(nodes[i], out GateView view))
+                {
+                    view.SetStackOrder(NextStackOrder());
+                }
+            }
+        }
+
+        /// <summary>Test hook: pretends many gates were brought to front, so the next one renumbers the stack.</summary>
+        internal void SetStackCounterForTests(int value)
+        {
+            _nextStack = value;
+        }
+
+        private int NextStackOrder()
+        {
+            if (_nextStack >= SortingOrders.GateStackMax - SortingOrders.GateStackBase)
+            {
+                RenumberStack();
+            }
+
+            _nextStack++;
+            return SortingOrders.GateStackBase + _nextStack;
+        }
+
+        /// <summary>Gives the gates compact stack orders again, keeping who is in front of whom.</summary>
+        private void RenumberStack()
+        {
+            _scratchStack.Clear();
+            foreach (GateView view in _gates.Values)
+            {
+                _scratchStack.Add(view);
+            }
+
+            _scratchStack.Sort(CompareStack);
+            for (int i = 0; i < _scratchStack.Count; i++)
+            {
+                _scratchStack[i].SetStackOrder(SortingOrders.GateStackBase + i + 1);
+            }
+
+            _nextStack = _scratchStack.Count;
+            _scratchStack.Clear();
+        }
+
+        private static int CompareStack(GateView a, GateView b)
+        {
+            return a.StackOrder.CompareTo(b.StackOrder);
         }
 
         private void CreateWireView(PinRef destination)
@@ -546,6 +621,7 @@ namespace DigitalLogicSandbox.Rendering
             }
 
             _gates.Clear();
+            _nextStack = 0;
             _wires.Clear();
             _junctionSources.Clear();
             _netTargets.Clear();
@@ -1261,7 +1337,7 @@ namespace DigitalLogicSandbox.Rendering
         {
             if (_ghost == null)
             {
-                _ghost = GateView.Create(_gateRoot, _theme);
+                _ghost = GateView.Create(_gateRoot, _theme, _shadowRoot);
                 _ghost.name = "Placement Ghost";
             }
 

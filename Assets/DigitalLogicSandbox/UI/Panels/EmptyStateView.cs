@@ -13,6 +13,9 @@ namespace DigitalLogicSandbox.UI.Panels
     {
         private const float FadeSpeed = 6f;
 
+        /// <summary>Faster fade-out, so the hint is gone before a placement ghost reaches it.</summary>
+        private const float FadeOutSpeed = 12f;
+
         private WorkspaceController _workspace;
         private CanvasGroup _group;
         private bool _wanted;
@@ -70,6 +73,7 @@ namespace DigitalLogicSandbox.UI.Panels
 
             workspace.StatusChanged += view.Refresh;
             workspace.NavigationChanged += view.Refresh;
+            workspace.PlacementChanged += view.Refresh;
             view.Refresh();
             view._group.alpha = view._wanted ? 1f : 0f;
             return view;
@@ -79,7 +83,9 @@ namespace DigitalLogicSandbox.UI.Panels
         {
             _wanted = _workspace != null && _workspace.IsInitialized && _workspace.Circuit != null &&
                 _workspace.Circuit.Nodes.Count == 0 && _workspace.IsEditable &&
-                _workspace.Navigator.CurrentIndex == 0;
+                _workspace.Navigator.CurrentIndex == 0 &&
+                // The hint is screen-space UI and always draws over the workspace: step aside for the ghost.
+                !_workspace.IsPlacing;
         }
 
         private void LateUpdate()
@@ -87,7 +93,8 @@ namespace DigitalLogicSandbox.UI.Panels
             float target = _wanted ? 1f : 0f;
             if (!Mathf.Approximately(_group.alpha, target))
             {
-                _group.alpha = Mathf.MoveTowards(_group.alpha, target, Time.unscaledDeltaTime * FadeSpeed);
+                _group.alpha = Mathf.MoveTowards(_group.alpha, target,
+                    Time.unscaledDeltaTime * (_wanted ? FadeSpeed : FadeOutSpeed));
             }
 
             if (_group.alpha > 0f)
@@ -123,6 +130,7 @@ namespace DigitalLogicSandbox.UI.Panels
             {
                 _workspace.StatusChanged -= Refresh;
                 _workspace.NavigationChanged -= Refresh;
+                _workspace.PlacementChanged -= Refresh;
             }
         }
     }

@@ -450,6 +450,8 @@ namespace DigitalLogicSandbox.CircuitEditor.Interaction
             }
 
             _dragNodes = _workspace.Selection.ToSortedArray();
+            // Dragged gates draw in front of the gates they pass over.
+            _workspace.Presenter.BringToFront(_dragNodes);
             TransformNodesCommand.CaptureTransforms(Circuit, _dragNodes, out _dragFrom, out _);
             _dragApplied = Vector2.zero;
             _mode = Mode.DraggingNodes;

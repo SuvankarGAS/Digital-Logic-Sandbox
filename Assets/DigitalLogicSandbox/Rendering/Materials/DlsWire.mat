@@ -29,7 +29,7 @@ Material:
     - _ColorA: {r: 1, g: 1, b: 1, a: 1}
     - _ColorB: {r: 1, g: 1, b: 1, a: 1}
     - _FrontColor: {r: 1, g: 1, b: 1, a: 1}
-    - _Junction: {r: 0, g: 0, b: 0, a: 0}
+    - _Junction: {r: 1, g: 2, b: 0.169575, a: 0.04}
     - _Path: {r: 100000, g: 0.6, b: 0.24, a: 0}
     - _Width: {r: 0.03, g: 0.03, b: 0, a: 0}
   m_BuildTextureStacks: []

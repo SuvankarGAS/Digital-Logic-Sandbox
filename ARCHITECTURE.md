@@ -1054,3 +1054,21 @@ the workspace views (`GateView`, `WireView`, `GridView`).
     - `BindInstructionSetCommand`: keeps or clears a program gate's instruction set binding.
   - `WorkspaceController.CanDeleteCustomGate` allows deletion only at the main level, and only while no version
     has an instance in the main circuit or in another gate.
+
+## 23. Workspace draw order *(2026-11-20)*
+
+- **Each `GateView` root has a `SortingGroup`.** The part orders in `SortingOrders` (outline, fill, state, pins,
+  text) only sort inside a gate, so overlapping gates never interleave. Before this, one gate's pins and title
+  drew over another gate's body.
+- **Gates are ordered by their group's stack order** (`GateStackBase` 10 … `GateStackMax` 30000), above wires
+  (0–2) and signal sparks (3).
+  - `CircuitPresenter` hands out increasing orders: new views go in front, and `BringToFront(nodes)` is called
+    when a drag starts.
+  - It renumbers compactly, keeping the stacking, when the counter reaches the max.
+  - Stacking is view-only: it is not saved and not part of undo.
+- **Shadows live under a shared "Gate Shadows" root** (order −10, below wires). `GateView` moves them in
+  `SetPosition` and shows or hides them with the gate.
+- **Ghost and selection:** the placement ghost uses group order `Ghost` (32000), above every gate. The selection
+  rectangle is at 32500.
+- **Screen-space UI always draws over the world.** The empty-workspace hint (`EmptyStateView`) therefore hides
+  while `WorkspaceController.IsPlacing`, fading out at twice its fade-in speed.

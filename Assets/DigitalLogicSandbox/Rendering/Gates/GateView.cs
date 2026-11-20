@@ -3,6 +3,7 @@ using DigitalLogicSandbox.Core.Nodes;
 using DigitalLogicSandbox.Core.Signals;
 using TMPro;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace DigitalLogicSandbox.Rendering.Gates
 {
@@ -28,6 +29,10 @@ namespace DigitalLogicSandbox.Rendering.Gates
 
         private VisualTheme _theme;
         private SpriteRenderer _shadow;
+        private bool _shadowDetached;
+        private SortingGroup _group;
+        private int _stackOrder = SortingOrders.GateStackBase;
+        private Vector2 _position;
         private SpriteRenderer _stateGlow;
         private SpriteRenderer _outline;
         private SpriteRenderer _fill;
@@ -52,13 +57,31 @@ namespace DigitalLogicSandbox.Rendering.Gates
 
         public bool IsSelected => _selected;
 
-        public static GateView Create(Transform parent, VisualTheme theme)
+        /// <summary>Order of this gate among the others (higher draws in front). See <see cref="SetStackOrder"/>.</summary>
+        public int StackOrder => _stackOrder;
+
+        /// <summary>Order the whole gate currently draws with (the ghost order while it is a placement ghost).</summary>
+        public int DrawOrder => _group != null ? _group.sortingOrder : _stackOrder;
+
+        /// <summary>The soft drop shadow (drawn under the wires, outside the gate's sorting group).</summary>
+        public SpriteRenderer Shadow => _shadow;
+
+        /// <summary>
+        /// Creates a gate view. Its parts sit in one <see cref="SortingGroup"/>, so overlapping gates never interleave
+        /// (one gate's text over another's body); the group order decides which gate is in front. The shadow lives
+        /// under <paramref name="shadowParent"/> (when given) so it stays below the wires.
+        /// </summary>
+        public static GateView Create(Transform parent, VisualTheme theme, Transform shadowParent = null)
         {
             var go = new GameObject("Gate");
             go.transform.SetParent(parent, false);
             var view = go.AddComponent<GateView>();
             view._theme = theme;
-            view._shadow = CreateSprite(go.transform, "Shadow", RenderAssets.SoftShadow, theme, SortingOrders.GateShadow);
+            view._group = go.AddComponent<SortingGroup>();
+            view._group.sortingOrder = view._stackOrder;
+            view._shadowDetached = shadowParent != null;
+            view._shadow = CreateSprite(shadowParent != null ? shadowParent : go.transform, "Shadow", RenderAssets.SoftShadow,
+                theme, SortingOrders.GateShadow);
             view._shadow.drawMode = SpriteDrawMode.Sliced;
             view._outline = CreateSprite(go.transform, "Outline", RenderAssets.RoundedRect, theme, SortingOrders.GateOutline);
             view._fill = CreateSprite(go.transform, "Fill", RenderAssets.RoundedRect, theme, SortingOrders.GateFill);
@@ -86,7 +109,7 @@ namespace DigitalLogicSandbox.Rendering.Gates
             Vector2 size = geometry.Size;
             _fill.size = size;
             _shadow.size = size + Vector2.one * ShadowSpread;
-            _shadow.transform.localPosition = new Vector3(0f, -ShadowDrop, 0f);
+            PlaceShadow();
             bool isCustom = geometry.Kind == ComponentKind.Custom;
             bool isInput = geometry.Kind == ComponentKind.InputBoundary;
             bool isOutput = geometry.Kind == ComponentKind.OutputBoundary;
@@ -179,7 +202,55 @@ namespace DigitalLogicSandbox.Rendering.Gates
 
         public void SetPosition(Vector2 position)
         {
+            _position = position;
             transform.localPosition = new Vector3(position.x, position.y, 0f);
+            PlaceShadow();
+        }
+
+        /// <summary>Sets which gates this one draws in front of (higher is in front). Ignored visually while a ghost.</summary>
+        public void SetStackOrder(int order)
+        {
+            _stackOrder = order;
+            if (_group != null && !_ghost)
+            {
+                _group.sortingOrder = order;
+            }
+        }
+
+        private void PlaceShadow()
+        {
+            if (_shadow == null)
+            {
+                return;
+            }
+
+            _shadow.transform.localPosition = _shadowDetached
+                ? new Vector3(_position.x, _position.y - ShadowDrop, 0f)
+                : new Vector3(0f, -ShadowDrop, 0f);
+        }
+
+        private void OnEnable()
+        {
+            if (_shadow != null)
+            {
+                _shadow.gameObject.SetActive(!_ghost);
+            }
+        }
+
+        private void OnDisable()
+        {
+            if (_shadow != null && _shadowDetached)
+            {
+                _shadow.gameObject.SetActive(false);
+            }
+        }
+
+        private void OnDestroy()
+        {
+            if (_shadow != null && _shadowDetached)
+            {
+                Destroy(_shadow.gameObject);
+            }
         }
 
         public void SetSelected(bool selected)
@@ -210,8 +281,14 @@ namespace DigitalLogicSandbox.Rendering.Gates
             _ghost = ghost;
             _ghostValid = valid;
             int offset = ghost ? SortingOrders.GhostOffset : 0;
+            if (_group != null)
+            {
+                // The ghost draws above every gate; a regular gate uses its stack order.
+                _group.sortingOrder = ghost ? SortingOrders.Ghost : _stackOrder;
+            }
+
             _shadow.sortingOrder = SortingOrders.GateShadow + offset;
-            _shadow.gameObject.SetActive(!ghost);
+            _shadow.gameObject.SetActive(!ghost && isActiveAndEnabled);
             _outline.sortingOrder = SortingOrders.GateOutline + offset;
             _fill.sortingOrder = SortingOrders.GateFill + offset;
             _stateGlow.sortingOrder = SortingOrders.GateState + offset;

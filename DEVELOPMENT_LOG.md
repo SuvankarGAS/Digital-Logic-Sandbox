@@ -2237,3 +2237,35 @@ The user reported four problems after the overhaul:
 
 - New `LibraryTabView` on each tab segment (All, Favorites, Recent). An inactive tab shows a soft tile when hovered, a darker one while pressed, and a secondary-coloured label. The active tab keeps its raised tile and lightens slightly on hover. Colours fade with DOTween; tooltips name each tab.
 - Tests: PlayMode `Tabs_ReactToHover`. The full suites passed (EditMode 519/519, PlayMode 120/120) before a final alpha tweak; after it, `LibraryPanelTests` passed 18/18.
+
+## Workspace draw order fixes (2026-11-20)
+
+The user reported that the empty-workspace hint drew over the placement ghost, and that gates overlapping while
+being dragged were sorted strangely.
+
+### Causes
+- **Hint over ghost:** the hint is on the Screen Space – Overlay canvas, which always renders after the world.
+  No sorting order on the ghost could beat it.
+- **Overlap:** every gate used the same global orders for each part. When two gates overlapped, one gate's text
+  and pins drew over the other's body.
+
+### Fixes
+- **One sorting group per gate:** each gate draws as a solid unit.
+- **Stack order:** new gates go in front, dragged gates come to the front when the drag starts, and the stack
+  renumbers itself if it ever runs long.
+- **Shadows** moved to their own root, so they stay under the wires.
+- **Ghost order** is 32000, above all gates. The selection rectangle moved to 32500 so it stays above the gate
+  stack.
+- **Empty-state hint** hides while a part is being placed.
+
+### Test results
+- EditMode **519/519** passed; PlayMode **126/126** passed. New `DrawOrderTests` (6 tests):
+  - gates are sorting groups and the newest is on top;
+  - shadows sit outside the group and below wires;
+  - bring to front;
+  - a deleted gate hides its shadow;
+  - the ghost is above all gates;
+  - the hint hides while placing;
+  - the stack renumbers.
+- Manual (play mode screenshots): two overlapping gates, before and after bringing the back one forward. The
+  front gate fully covers the back one, with no interleaved pins or text.
