@@ -25,6 +25,10 @@ namespace DigitalLogicSandbox.UI
     /// </summary>
     public sealed class AppShell : MonoBehaviour
     {
+        private const string ProjectExtension = DigitalLogicSandbox.Persistence.ProjectFormat.FileExtension;
+
+        private bool _useNativeFileDialogs;
+
         private Canvas _canvas;
 
         public UiFactory Factory { get; private set; }
@@ -68,6 +72,24 @@ namespace DigitalLogicSandbox.UI
 
         /// <summary>Open / Save As picker. Null when no project service is attached.</summary>
         public ProjectFileDialog ProjectFiles { get; private set; }
+
+        /// <summary>
+        /// Use the operating system's Open / Save As dialogs (Windows) instead of the in-app picker, also for CSV
+        /// export. On by default in Windows player builds; off in the editor so tests never block on a modal window.
+        /// </summary>
+        public bool UseNativeFileDialogs
+        {
+            get => _useNativeFileDialogs;
+            set
+            {
+                _useNativeFileDialogs = value && NativeFileDialog.IsAvailable;
+                if (TruthTable != null)
+                {
+                    TruthTable.PickExportPath = _useNativeFileDialogs ? PickCsvPath : null;
+                    SequenceAnalysis.PickExportPath = _useNativeFileDialogs ? PickCsvPath : null;
+                }
+            }
+        }
 
         /// <summary>Project file operations, or null (UI-only setups such as some tests).</summary>
         public IProjectService Projects { get; private set; }
@@ -114,6 +136,7 @@ namespace DigitalLogicSandbox.UI
             shell._workspace = workspace;
             workspace.VisibleScreenArea = shell.GetWorkspaceScreenRect;
             shell.AttachProjects(projects);
+            shell.UseNativeFileDialogs = NativeFileDialog.DefaultEnabled;
             shell.Tooltip = TooltipView.Create(go.transform, shell.Factory);
             shell.Factory.Tooltip = shell.Tooltip;
 
@@ -168,7 +191,7 @@ namespace DigitalLogicSandbox.UI
         {
             if (Projects != null)
             {
-                ConfirmDiscard("opening another project", () => ProjectFiles.Show(ProjectFileDialogMode.Open));
+                ConfirmDiscard("opening another project", () => ShowProjectFiles(ProjectFileDialogMode.Open));
             }
         }
 
@@ -182,7 +205,7 @@ namespace DigitalLogicSandbox.UI
 
             if (Projects.CurrentPath == null)
             {
-                ProjectFiles.Show(ProjectFileDialogMode.SaveAs);
+                ShowProjectFiles(ProjectFileDialogMode.SaveAs);
                 return;
             }
 
@@ -192,7 +215,89 @@ namespace DigitalLogicSandbox.UI
 
         public void RequestSaveAs()
         {
-            ProjectFiles?.Show(ProjectFileDialogMode.SaveAs);
+            if (Projects != null)
+            {
+                ShowProjectFiles(ProjectFileDialogMode.SaveAs);
+            }
+        }
+
+        /// <summary>
+        /// Opens or saves through the native dialog when enabled, otherwise shows the in-app picker.
+        /// <paramref name="afterSuccess"/> runs after a successful open or save; cancelling does nothing.
+        /// </summary>
+        private void ShowProjectFiles(ProjectFileDialogMode mode, System.Action afterSuccess = null)
+        {
+            bool save = mode == ProjectFileDialogMode.SaveAs;
+            if (!TryPickNative(save, save ? "Save project as" : "Open project", NativeFileDialog.ProjectFilter,
+                    ProjectFolderOf(Projects.CurrentPath), save ? Projects.DisplayName + ProjectExtension : null,
+                    ProjectExtension.Substring(1), out bool cancelled, out string path))
+            {
+                if (!cancelled)
+                {
+                    ProjectFiles.Show(mode, afterSuccess);
+                }
+
+                return;
+            }
+
+            bool succeeded = save ? Projects.SaveAs(path, out string message) : Projects.Open(path, out message);
+            if (!string.IsNullOrEmpty(message))
+            {
+                _workspace.PostNotification(message);
+            }
+
+            if (succeeded)
+            {
+                afterSuccess?.Invoke();
+            }
+        }
+
+        private string ProjectFolderOf(string path)
+        {
+            string folder = string.IsNullOrEmpty(path) ? null : System.IO.Path.GetDirectoryName(path);
+            return string.IsNullOrEmpty(folder) ? Projects.ProjectsDirectory : folder;
+        }
+
+        private string PickCsvPath(string directory, string suggestedName)
+        {
+            return TryPickNative(true, "Export CSV", NativeFileDialog.CsvFilter, directory, suggestedName, "csv",
+                out _, out string path)
+                ? path
+                : null;
+        }
+
+        /// <summary>
+        /// Runs the native dialog. Returns true with a path when the user picked one. Returns false with
+        /// <paramref name="cancelled"/> set when they cancelled, or with it clear when native dialogs are off or
+        /// failed (the caller then falls back to the in-app picker).
+        /// </summary>
+        private bool TryPickNative(bool save, string title, string filter, string directory, string defaultName,
+            string extension, out bool cancelled, out string path)
+        {
+            cancelled = false;
+            path = null;
+            if (!_useNativeFileDialogs)
+            {
+                return false;
+            }
+
+            try
+            {
+                bool picked = save
+                    ? NativeFileDialog.TrySave(title, filter, directory, defaultName, extension, out path)
+                    : NativeFileDialog.TryOpen(title, filter, directory, out path);
+                cancelled = !picked;
+                return picked;
+            }
+            catch (System.Exception exception) when (exception is System.DllNotFoundException ||
+                                                     exception is System.EntryPointNotFoundException ||
+                                                     exception is System.IO.IOException ||
+                                                     exception is System.UnauthorizedAccessException)
+            {
+                Debug.LogWarning("Native file dialogs are unavailable; using the in-app picker. " + exception.Message);
+                UseNativeFileDialogs = false;
+                return false;
+            }
         }
 
         private void AttachProjects(IProjectService projects)
@@ -240,7 +345,7 @@ namespace DigitalLogicSandbox.UI
         {
             if (Projects.CurrentPath == null)
             {
-                ProjectFiles.Show(ProjectFileDialogMode.SaveAs, proceed);
+                ShowProjectFiles(ProjectFileDialogMode.SaveAs, proceed);
                 return;
             }
 

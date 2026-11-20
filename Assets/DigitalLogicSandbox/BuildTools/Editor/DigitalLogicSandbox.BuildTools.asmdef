@@ -1,0 +1,16 @@
+{
+    "name": "DigitalLogicSandbox.BuildTools",
+    "rootNamespace": "DigitalLogicSandbox.BuildTools",
+    "references": [],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

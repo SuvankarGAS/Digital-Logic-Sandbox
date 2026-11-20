@@ -239,18 +239,34 @@ namespace DigitalLogicSandbox.Rendering
         {
             if (_unlitMaterial == null)
             {
-                _unlitMaterial = new Material(Shader.Find("DigitalLogicSandbox/Unlit")) { name = "DLS Unlit (runtime)" };
+                _unlitMaterial = new Material(FindShader("DigitalLogicSandbox/Unlit")) { name = "DLS Unlit (runtime)" };
             }
 
             if (_gridMaterial == null)
             {
-                _gridMaterial = new Material(Shader.Find("DigitalLogicSandbox/Grid")) { name = "DLS Grid (runtime)" };
+                _gridMaterial = new Material(FindShader("DigitalLogicSandbox/Grid")) { name = "DLS Grid (runtime)" };
             }
 
             if (_wireMaterial == null)
             {
-                _wireMaterial = new Material(Shader.Find("DigitalLogicSandbox/Wire")) { name = "DLS Wire (runtime)" };
+                _wireMaterial = new Material(FindShader("DigitalLogicSandbox/Wire")) { name = "DLS Wire (runtime)" };
             }
+        }
+
+        /// <summary>
+        /// Finds a shader by name. If it was left out of a build, logs which one and falls back to a built-in shader
+        /// so the app still draws (flat, without the custom effects) instead of throwing.
+        /// </summary>
+        private static Shader FindShader(string name)
+        {
+            Shader shader = Shader.Find(name);
+            if (shader != null)
+            {
+                return shader;
+            }
+
+            Debug.LogError("Shader '" + name + "' is missing from this build; using Sprites/Default instead.");
+            return Shader.Find("Sprites/Default");
         }
 
         public static VisualTheme CreateRuntimeDefault()

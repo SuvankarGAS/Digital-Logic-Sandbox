@@ -40,6 +40,10 @@ namespace DigitalLogicSandbox.App
         [Tooltip("Seconds between autosaves while there are unsaved changes.")]
         [SerializeField] private float _autosaveIntervalSeconds = 60f;
 
+        [Tooltip("Editor only: use the Windows Open / Save As dialogs. Player builds on Windows always do; the editor " +
+                 "defaults to the in-app picker so play-mode tests never wait on a modal window.")]
+        [SerializeField] private bool _nativeFileDialogsInEditor;
+
         private WorkspaceControls _controls;
 
         public static AppBootstrap Instance { get; private set; }
@@ -99,11 +103,34 @@ namespace DigitalLogicSandbox.App
             });
 
             _truthTableLimits ??= new TruthTableLimits();
+            string smokeFolder = SmokeTest.FolderFromArguments(System.Environment.GetCommandLineArgs());
             Projects = gameObject.AddComponent<ProjectController>();
             Projects.AutosaveIntervalSeconds = _autosaveIntervalSeconds;
+            if (smokeFolder != null)
+            {
+                // Keep the smoke test away from the user's projects, autosaves and last-project setting.
+                Projects.ProjectsDirectory = System.IO.Path.Combine(smokeFolder, "Projects");
+                Projects.AutosaveDirectory = System.IO.Path.Combine(smokeFolder, "Autosave");
+                Projects.AutosaveIntervalSeconds = 0f;
+            }
+
             Projects.Initialize(Workspace, Library, Catalog.Primitives, Workspace.AnimationSettings, _truthTableLimits);
 
             Shell = AppShell.Create(_theme, Workspace, Catalog, Library, _truthTableLimits, Projects);
+            if (Application.isEditor && _nativeFileDialogsInEditor)
+            {
+                Shell.UseNativeFileDialogs = true;
+            }
+
+            if (smokeFolder != null)
+            {
+                Shell.UseNativeFileDialogs = false;
+                System.IO.Directory.CreateDirectory(smokeFolder);
+                Projects.RememberLastProject = false;
+                Projects.Startup(false, null);
+                SmokeTest.Attach(this, smokeFolder);
+                return;
+            }
 
             // Builds reopen the last project and offer to recover autosaved work. In the editor this is opt-in so
             // entering play mode (and automated tests) always start from a clean, empty project.

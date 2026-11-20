@@ -961,3 +961,21 @@ the workspace views (`GateView`, `WireView`, `GridView`).
   - `UI.Dialogs.CodeFieldDecorator` adds a line-number gutter (with a '!' on error lines) and syntax colouring to
     a multi-line TMP input field. The colouring is a rich-text copy drawn behind the field's own text, which has
     its alpha set to 0. Both follow the field's scroll offset in `LateUpdate`.
+
+## 21. Release build *(release readiness, 2026-11-20)*
+
+- **Build:** `BuildTools/Editor/ReleaseBuild.cs` (assembly `DigitalLogicSandbox.BuildTools`, editor only). Use the
+  menu *Digital Logic Sandbox → Build Windows (Release)*, or run headless:
+  `Unity -batchmode -quit -projectPath . -executeMethod DigitalLogicSandbox.BuildTools.ReleaseBuild.BuildWindowsFromCommandLine`.
+  Output: `Builds/Windows/DigitalLogicSandbox.exe` (gitignored). `CheckSettings` refuses the build if the scene
+  list is not just `Main.unity`, or if a shader named in `ReleaseBuild.RequiredShaders` would not reach the
+  player. Today the shaders reach it through `DefaultVisualTheme.asset` → `Rendering/Materials/*.mat`.
+- **Smoke test:** `DigitalLogicSandbox.exe -dlsSmokeTest <folder> -logFile <folder>/player.log`.
+  `AppBootstrap` sees the argument, points projects and autosaves at the folder, skips reopen-last and recovery,
+  and attaches `App.SmokeTest`. That checks shaders, runs the CPU demo, checks the NAND truth table and a project
+  round-trip, saves `smoke.png`, logs `SMOKE OK` / `SMOKE FAIL: …` and exits with 0 / 1.
+- **File dialogs:** `UI.Dialogs.NativeFileDialog` wraps comdlg32 (Windows only; `IsAvailable` is false
+  elsewhere). `AppShell.UseNativeFileDialogs` chooses between it and the in-app `ProjectFileDialog`. It defaults
+  to `NativeFileDialog.DefaultEnabled` (Windows player builds). CSV exports take an optional
+  `PickExportPath(folder, suggestedName)`.
+- **Packages:** `com.coplaydev.unity-mcp` is development tooling, pinned to a commit in `Packages/manifest.json`.

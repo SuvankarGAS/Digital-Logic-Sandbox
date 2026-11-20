@@ -691,7 +691,7 @@ Delivered – see the Phase 3 section below.
 - Manual: play-mode screenshot of the toolbar (title `Untitled *`) and the Save As dialog.
 
 ### Known issues / deferred
-- No native OS file dialog (see Decisions).
+- No native OS file dialog (see Decisions). (Resolved: see "Release readiness".)
 - An unsaved draft of a gate being edited is not part of the saved project until Save Version. Saving shows
   a reminder.
 - Autosave runs on the main thread. Projects are small JSON files, so this is fine; profile in Phase 9.
@@ -769,7 +769,7 @@ Delivered – see the Phase 3 section below.
   use the library Truth Table. (Resolved: library preview, see "Editor quality: open custom gates from the
   library".)
 - `com.coplaydev.unity-mcp` still tracks `#main`. It is development tooling; pin or remove it before
-  release builds.
+  release builds. (Resolved: see "Release readiness".)
 - `ProjectSettings/EditorSettings.asset` has an uncommitted local change: Enter Play Mode Options was
   turned on with domain and scene reload disabled. Its origin is unknown, so it was left out of the commits.
   (Resolved: committed on request in `fcfdabd`.)
@@ -1542,8 +1542,8 @@ a test and a note; four are fixed here.
 
 ### Known issues / deferred
 - Decimal displays are still integer only (no fixed-point or BCD mode).
-- No native OS file dialog (Phase 8 decision).
-- `com.coplaydev.unity-mcp` still tracks `#main`; pin or remove it before release builds.
+- No native OS file dialog (Phase 8 decision). (Resolved: see "Release readiness".)
+- `com.coplaydev.unity-mcp` still tracks `#main`; pin or remove it before release builds. (Resolved: see "Release readiness".)
 
 ## Phase E – Computer components: example gate pack (2026-11-17)
 
@@ -2026,3 +2026,62 @@ no symbolic labels. The editor stays a pure view of the wired words, so no progr
 ### Known issues / deferred
 - Only one operand field per instruction (in the low bits).
 - The instruction set dialog's help line is cramped at the smallest supported window size.
+
+## Release readiness (2026-11-20)
+
+The user chose release readiness next: a Windows player build that has been verified to work, native file
+dialogs, and a pinned tool package.
+
+### Implemented
+- **Pinned `com.coplaydev.unity-mcp`** to commit `81542a7e86292b5c4c21b1782c5af23b567f45ce` (v10.3.0, the version
+  already installed) instead of `#main`. It stays because development uses it. Its small `MCPForUnity.Runtime.dll`
+  ends up in the player but is never used at runtime. The build summary says whether it is there.
+- **Native file dialogs** (`UI/Dialogs/NativeFileDialog.cs`): the Windows common Open / Save As dialogs, called
+  through comdlg32 P/Invoke (no unsafe code, no new package), modal over the app window, with filters, the
+  starting folder and the dialog's own overwrite prompt.
+  - `AppShell.UseNativeFileDialogs` is on in Windows player builds and off in the editor, so play-mode tests and
+    MCP sessions never wait on a modal window. An `AppBootstrap` checkbox turns it on in the editor.
+  - Open, Save, Save As and "save before…" all go through `AppShell.ShowProjectFiles`. Cancel does nothing. If
+    the native call fails, the app logs a warning and switches to the in-app picker.
+  - Truth table and sequence **Export CSV** ask where to save through `PickExportPath` (folder, suggested
+    name → path, or null for cancel) when native dialogs are on. Otherwise files still go to
+    `persistentDataPath/Exports`.
+- **Release build script** (`BuildTools/Editor/ReleaseBuild.cs`, a new editor-only assembly): the menu
+  **Digital Logic Sandbox → Build Windows (Release)**, `BuildWindows()`, and
+  `BuildWindowsFromCommandLine` for `-executeMethod`. It builds `Builds/Windows/DigitalLogicSandbox.exe`
+  (64-bit, Mono, release). Before building it checks that the scene list is exactly `Main.unity` and that the
+  three shaders the app looks up by name reach the build. If either check fails, it refuses with a reason.
+- **Player smoke test** (`App/SmokeTest.cs`): `DigitalLogicSandbox.exe -dlsSmokeTest <folder>` runs four checks
+  inside the real player, logs `SMOKE OK` or `SMOKE FAIL: …`, and quits with exit code 0 or 1:
+  - the runtime shaders are present;
+  - the CPU demo runs to HALT and shows 8;
+  - the NAND truth table is generated and correct;
+  - Save As, New and Open round-trip the project (node, connection and definition counts).
+  It also takes a screenshot. Projects and autosaves go to the folder, and the last-project setting is
+  untouched.
+- `VisualTheme` falls back to `Sprites/Default` (and logs which shader) if a shader is missing, so a bad build
+  would draw flat instead of throwing.
+- Version 1.0.0.
+
+### Decisions
+- **Shaders:** an early worry was that the three `Shader.Find` shaders would be stripped. They are not: the scene
+  references `DefaultVisualTheme.asset`, whose materials use them. The build check guards that link instead of
+  adding them to Always Included.
+- **Product name kept** ("Digital-Logic-Sandbox"): Unity derives `persistentDataPath` and the PlayerPrefs key from
+  it, so renaming would hide existing projects, autosaves and settings. The .exe is named
+  `DigitalLogicSandbox.exe`.
+- **No native dialog in the editor by default:** a modal OS window would block automated tests.
+
+### Test results
+- EditMode: **508/508** passed (4 new in `ReleaseTests`: settings checks, the project's own settings, smoke-test
+  argument parsing).
+- PlayMode: **102/102** passed (`TruthTableUiTests` now also checks the export picker and cancel).
+- Build: succeeded in 67 s, 85.1 MB, 0 errors, 0 warnings.
+- Player smoke test (1280×720 window): exit code 0 and `SMOKE OK`, with no errors in the player log. The
+  screenshot shows the CPU demo with grid, glowing wires, fonts and icons drawn correctly.
+
+### Known issues / deferred
+- The native Open / Save As dialogs were not exercised automatically (they block until a person closes them).
+  Check them by hand in the built .exe.
+- Only Windows has native dialogs; other platforms use the in-app picker.
+- The player is not code-signed, so Windows SmartScreen may warn on first run.

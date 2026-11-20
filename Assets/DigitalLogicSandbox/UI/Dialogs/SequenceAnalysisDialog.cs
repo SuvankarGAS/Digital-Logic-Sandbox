@@ -118,6 +118,12 @@ namespace DigitalLogicSandbox.UI.Dialogs
         /// <summary>Folder for CSV exports (defaults to persistentDataPath/Exports).</summary>
         public string ExportDirectory { get; set; }
 
+        /// <summary>
+        /// Optional save-location picker (folder, suggested file name) returning a full path, or null when the user
+        /// cancels. Null means files go straight to <see cref="ExportDirectory"/>.
+        /// </summary>
+        public Func<string, string, string> PickExportPath { get; set; }
+
         /// <summary>Raised after the clipboard text has been produced (tests read it without the OS clipboard).</summary>
         public event Action<string> Copied;
 
@@ -267,7 +273,7 @@ namespace DigitalLogicSandbox.UI.Dialogs
             return text;
         }
 
-        /// <summary>Writes the result to a CSV file. Returns the path, or null on failure.</summary>
+        /// <summary>Writes the result to a CSV file. Returns the path, or null on failure or cancel.</summary>
         public string ExportCsv()
         {
             if (_table == null)
@@ -278,7 +284,15 @@ namespace DigitalLogicSandbox.UI.Dialogs
             try
             {
                 Directory.CreateDirectory(ExportDirectory);
-                string path = Path.Combine(ExportDirectory, SafeFileName(_table.Title) + " sequence.csv");
+                string fileName = SafeFileName(_table.Title) + " sequence.csv";
+                string path = PickExportPath != null
+                    ? PickExportPath(ExportDirectory, fileName)
+                    : Path.Combine(ExportDirectory, fileName);
+                if (string.IsNullOrEmpty(path))
+                {
+                    return null; // cancelled
+                }
+
                 string temp = path + ".tmp";
                 File.WriteAllText(temp, _table.ToCsv(), new UTF8Encoding(false));
                 if (File.Exists(path))

@@ -115,6 +115,29 @@ namespace DigitalLogicSandbox.Tests.PlayMode
             Assert.That(File.ReadAllText(path), Does.EndWith("0,0,1\r\n0,1,1\r\n1,0,1\r\n1,1,0\r\n"));
             Assert.That(File.Exists(path + ".tmp"), Is.False);
 
+            // A save-location picker (the native dialog in builds) chooses the file; cancelling writes nothing.
+            Assert.That(_app.Shell.UseNativeFileDialogs, Is.False, "The editor keeps the in-app pickers.");
+            string pickedFolder = null;
+            string suggested = null;
+            string chosen = Path.Combine(_exportDirectory, "Chosen", "my table.csv");
+            Directory.CreateDirectory(Path.GetDirectoryName(chosen));
+            _dialog.PickExportPath = (folder, name) =>
+            {
+                pickedFolder = folder;
+                suggested = name;
+                return chosen;
+            };
+            Assert.That(_dialog.ExportCsv(), Is.EqualTo(chosen));
+            Assert.That(pickedFolder, Is.EqualTo(_exportDirectory));
+            Assert.That(suggested, Is.EqualTo(Path.GetFileName(path)));
+            Assert.That(File.ReadAllText(chosen), Is.EqualTo(File.ReadAllText(path)));
+
+            File.Delete(path);
+            _dialog.PickExportPath = (folder, name) => null;
+            Assert.That(_dialog.ExportCsv(), Is.Null, "Cancelled.");
+            Assert.That(File.Exists(path), Is.False);
+            _dialog.PickExportPath = null;
+
             _dialog.Close();
             Assert.That(_dialog.IsOpen, Is.False);
             Assert.That(_workspace.InputSuspended, Is.False);

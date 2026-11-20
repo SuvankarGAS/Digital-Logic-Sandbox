@@ -16,6 +16,7 @@
         "DigitalLogicSandbox.CircuitEditor",
         "DigitalLogicSandbox.UI",
         "DigitalLogicSandbox.App",
+        "DigitalLogicSandbox.BuildTools",
         "Unity.TextMeshPro",
         "UnityEngine.UI",
         "UnityEngine.TestRunner",
