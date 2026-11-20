@@ -1072,3 +1072,24 @@ the workspace views (`GateView`, `WireView`, `GridView`).
   rectangle is at 32500.
 - **Screen-space UI always draws over the world.** The empty-workspace hint (`EmptyStateView`) therefore hides
   while `WorkspaceController.IsPlacing`, fading out at twice its fade-in speed.
+
+## 24. Start-up splash *(2026-11-20)*
+
+`UI/SplashScreen` plays an animated "power-on" intro on its own overlay canvas (sorting order 1000, above the
+`AppShell` canvas). It is presentation only. `AppBootstrap` shows it before `ProjectController.Startup`, so the first
+project loads behind it. A recovery prompt raised during start-up is queued until the intro completes.
+
+- **Rendering**: one full-screen `Image` with the `DigitalLogicSandbox/Splash` UGUI shader
+  (`Rendering/Shaders/DlsSplash.shader`, material `DlsSplash.mat` referenced by `VisualTheme._splashMaterial` so it
+  ships in builds). Everything is procedural and is a pure function of two uniforms: `_T` (seconds) and `_Exit` (0–1).
+  The shader draws the background, a dot grid, Truchet-style circuit traces with pads, inward signal streams, and a
+  shockwave when the gate fires. The logo is an SDF AND gate whose outline draws itself, whose inputs switch on and
+  whose output fires. The exit is a noisy radial dissolve with a glowing edge. Colours come from the theme.
+- **Driver**: a single `Update` on the splash object advances an unscaled clock (each step clamped to 1/30 s, so a
+  start-up hitch doesn't skip the animation). It sets the two uniforms and animates the TMP title in sync: letters
+  fade and rise one by one while tracking tightens. Any click or key calls `Skip()`, which jumps to the dissolve.
+  Raycast blocking stops as soon as the dissolve starts.
+- **When it plays**: always in player builds. In the editor only with `AppBootstrap._showSplashInEditor`, so
+  play-mode tests start with the editor immediately usable. It is never shown during the smoke test.
+- Unity's own splash (mandatory on Personal licences) uses the workspace background colour (`#0D0F15`), so the
+  handoff into the intro has no visible seam.

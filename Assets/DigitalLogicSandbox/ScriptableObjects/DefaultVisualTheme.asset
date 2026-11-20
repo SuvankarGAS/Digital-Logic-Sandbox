@@ -15,6 +15,7 @@ MonoBehaviour:
   _unlitMaterial: {fileID: 2100000, guid: 56c6c64df787ce5419634a1ba5cd1c66, type: 2}
   _gridMaterial: {fileID: 2100000, guid: 98dbaaeebb8e252488d7347613ad4fc2, type: 2}
   _wireMaterial: {fileID: 2100000, guid: f242e56b60c123843910a6f37e281dfa, type: 2}
+  _splashMaterial: {fileID: 2100000, guid: 02a7f7a741d706c4cae4365024fbc672, type: 2}
   _uiFont: {fileID: 11400000, guid: 644413ae054dd79409427f76efdc7f54, type: 2}
   _iconFont: {fileID: 11400000, guid: d84f02bfae8f5fa47bb8b473f1930e38, type: 2}
   _workspaceBackground: {r: 0.050980393, g: 0.05882353, b: 0.08235294, a: 1}
@@ -37,6 +38,12 @@ MonoBehaviour:
   _signalHigh: {r: 0.36078432, g: 0.9098039, b: 0.8156863, a: 1}
   _signalUnknown: {r: 0.95686275, g: 0.72156864, b: 0.3764706, a: 1}
   _signalHighImpedance: {r: 0.6627451, g: 0.54901963, b: 0.972549, a: 1}
+  _ledColors:
+  - {r: 1, g: 0.41960785, b: 0.47843137, a: 1}
+  - {r: 1, g: 0.62352943, b: 0.2627451, a: 1}
+  - {r: 0.54509807, g: 0.8901961, b: 0.41960785, a: 1}
+  - {r: 0.3882353, g: 0.6627451, b: 1, a: 1}
+  - {r: 1, g: 0.47843137, b: 0.8509804, a: 1}
   _glowStrength: 0.2
   _wireWidth: 0.055
   _wireWidthHigh: 0.085

@@ -16,6 +16,8 @@ namespace DigitalLogicSandbox.Rendering
         [SerializeField] private Material _gridMaterial;
         [Tooltip("Material with the DigitalLogicSandbox/Wire shader (anti-aliased signed-distance wires with glow).")]
         [SerializeField] private Material _wireMaterial;
+        [Tooltip("Material with the DigitalLogicSandbox/Splash shader (animated start-up intro).")]
+        [SerializeField] private Material _splashMaterial;
 
         [Header("Fonts")]
         [Tooltip("Text font for the whole application (UI and workspace). Falls back to Resources/DLSFonts.")]
@@ -86,6 +88,9 @@ namespace DigitalLogicSandbox.Rendering
         public Material GridMaterial => _gridMaterial;
 
         public Material WireMaterial => _wireMaterial;
+
+        /// <summary>Template material for the start-up splash; instantiate it before animating its properties.</summary>
+        public Material SplashMaterial => _splashMaterial;
 
         public float WireGlowRadius => _wireGlowRadius;
 
@@ -250,6 +255,11 @@ namespace DigitalLogicSandbox.Rendering
             if (_wireMaterial == null)
             {
                 _wireMaterial = new Material(FindShader("DigitalLogicSandbox/Wire")) { name = "DLS Wire (runtime)" };
+            }
+
+            if (_splashMaterial == null)
+            {
+                _splashMaterial = new Material(FindShader("DigitalLogicSandbox/Splash")) { name = "DLS Splash (runtime)" };
             }
         }
 

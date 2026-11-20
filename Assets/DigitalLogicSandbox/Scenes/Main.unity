@@ -291,6 +291,22 @@ MonoBehaviour:
   _theme: {fileID: 11400000, guid: 8fb3e9c48616ac54e8d61aa457805959, type: 2}
   _camera: {fileID: 519420031}
   _inputActions: {fileID: 0}
+  _signalAnimation:
+    _enabled: 1
+    _speed: 1
+    _showParticles: 1
+    _maxBatchSeconds: 3
+    _maxAnimatedWires: 2048
+  _truthTableLimits:
+    MaxInputs: 16
+    MaxRows: 65536
+    ConfirmRows: 1024
+    FrameBudgetMilliseconds: 6
+  _restoreLastSessionInEditor: 0
+  _autosaveIntervalSeconds: 60
+  _nativeFileDialogsInEditor: 0
+  _rememberUiLayoutInEditor: 0
+  _showSplashInEditor: 0
 --- !u!4 &1117987645
 Transform:
   m_ObjectHideFlags: 0

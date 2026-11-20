@@ -2269,3 +2269,33 @@ being dragged were sorted strangely.
   - the stack renumbers.
 - Manual (play mode screenshots): two overlapping gates, before and after bringing the back one forward. The
   front gate fully covers the back one, with no interleaved pins or text.
+
+## Animated start-up splash (2026-11-20)
+
+### Implemented
+- `Rendering/Shaders/DlsSplash.shader` + `Rendering/Materials/DlsSplash.mat` (assigned to `DefaultVisualTheme`):
+  a procedural "power-on" intro. It has a circuit board revealed by a power-on wave, inward signal pulses, a
+  self-drawing SDF AND-gate logo whose inputs and output energise, a bloom flash and shockwave, vignette and grain,
+  and a noisy radial dissolve with a glowing edge to exit.
+- `UI/SplashScreen.cs`: own overlay canvas, one clock driving the shader, a per-letter TMP title reveal with an
+  underlay glow, a subtitle, a status line ("INITIALIZING PRIMITIVES · AND · NOT" → "READY") and the version.
+  About 3.9 s in total; any click or key skips to the dissolve.
+- `AppBootstrap`: shows the splash in builds (editor opt-in via `_showSplashInEditor`, never during the smoke test).
+  The autosave-recovery prompt waits until the splash has finished.
+- `VisualTheme.SplashMaterial` with a runtime fallback in `EnsureMaterials()`.
+- ProjectSettings: Unity splash background set to the workspace colour `#0D0F15` for a seamless handoff.
+
+### Decisions
+- The visuals live entirely in the shader as a pure function of time, so there are no per-element GameObjects,
+  tweens or coroutines. The intro can't drift out of sync and costs one draw call.
+- Off by default in the editor to keep play-mode tests and iteration fast (same pattern as the other `...InEditor` flags).
+
+### Test results
+- New `Tests/PlayMode/SplashScreenTests.cs` (4 tests): off in the editor by default; blocks raycasts while playing,
+  then releases them on exit; finishes on its own and completes once; skip; replacing the current splash.
+- PlayMode: 130 / 130 passed. EditMode: 519 / 519 passed (including the architecture tests).
+- Visual check through Game-view captures of the boot, logo, fire and settled phases, plus an offline render of the
+  dissolve.
+
+### Known issues
+- Unity Personal 2022.3 still shows the "Made with Unity" splash before the intro; it can only be restyled.

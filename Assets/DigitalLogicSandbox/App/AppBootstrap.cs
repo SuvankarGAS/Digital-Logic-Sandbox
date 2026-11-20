@@ -48,7 +48,12 @@ namespace DigitalLogicSandbox.App
                  "Builds always do; the editor defaults to a fresh layout so play-mode tests are not affected.")]
         [SerializeField] private bool _rememberUiLayoutInEditor;
 
+        [Tooltip("Editor only: play the animated start-up intro when entering play mode. Builds always do; the editor " +
+                 "skips it by default so play-mode tests start with the editor immediately usable.")]
+        [SerializeField] private bool _showSplashInEditor;
+
         private WorkspaceControls _controls;
+        private System.Action _pendingAfterSplash;
 
         public static AppBootstrap Instance { get; private set; }
 
@@ -139,6 +144,13 @@ namespace DigitalLogicSandbox.App
                 return;
             }
 
+            // The intro plays above the editor while the project loads behind it. Shown before Startup so a recovery
+            // prompt raised during start-up waits for the intro to finish instead of appearing underneath it.
+            if (!Application.isEditor || _showSplashInEditor)
+            {
+                SplashScreen.Show(_theme, Shell.Factory, RunPendingAfterSplash);
+            }
+
             // Builds reopen the last project and offer to recover autosaved work. In the editor this is opt-in so
             // entering play mode (and automated tests) always start from a clean, empty project.
             bool restore = !Application.isEditor || _restoreLastSessionInEditor;
@@ -148,7 +160,24 @@ namespace DigitalLogicSandbox.App
 
         private void AskRecover(string description, System.Action recover, System.Action discard)
         {
-            Shell.Confirm.Show("Recover unsaved work?", description, "Recover", recover, "Discard", discard, null);
+            void Ask() => Shell.Confirm.Show("Recover unsaved work?", description, "Recover", recover, "Discard", discard, null);
+            if (SplashScreen.IsShowing)
+            {
+                _pendingAfterSplash += Ask;
+                return;
+            }
+
+            Ask();
+        }
+
+        private void RunPendingAfterSplash()
+        {
+            System.Action pending = _pendingAfterSplash;
+            _pendingAfterSplash = null;
+            if (this != null)
+            {
+                pending?.Invoke();
+            }
         }
 
         private void OnDestroy()
