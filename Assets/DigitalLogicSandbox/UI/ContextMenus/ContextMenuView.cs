@@ -169,6 +169,28 @@ namespace DigitalLogicSandbox.UI.ContextMenus
             Position(screen);
         }
 
+        /// <summary>
+        /// Shows a menu of arbitrary <paramref name="items"/> at <paramref name="screen"/> (for example the program
+        /// editor's instruction set picker). Each item closes the menu before its action runs.
+        /// </summary>
+        public void ShowItems(Vector2 screen, IReadOnlyList<MenuItem> items)
+        {
+            if (items == null)
+            {
+                throw new ArgumentNullException(nameof(items));
+            }
+
+            ClearItems();
+            for (int i = 0; i < items.Count; i++)
+            {
+                Add(items[i].Label, items[i].Action, items[i].Enabled && items[i].Action != null);
+            }
+
+            gameObject.SetActive(true);
+            transform.SetAsLastSibling();
+            Position(screen);
+        }
+
         public void Close()
         {
             gameObject.SetActive(false);
@@ -262,5 +284,22 @@ namespace DigitalLogicSandbox.UI.ContextMenus
                 _workspace.ContextMenuRequested -= Show;
             }
         }
+    }
+
+    /// <summary>One row of <see cref="ContextMenuView.ShowItems"/>.</summary>
+    public readonly struct MenuItem
+    {
+        public MenuItem(string label, Action action, bool enabled = true)
+        {
+            Label = label ?? string.Empty;
+            Action = action;
+            Enabled = enabled;
+        }
+
+        public string Label { get; }
+
+        public Action Action { get; }
+
+        public bool Enabled { get; }
     }
 }

@@ -13,6 +13,7 @@ using DigitalLogicSandbox.Core.Signals;
 using DigitalLogicSandbox.Core.Validation;
 using DigitalLogicSandbox.GateLibrary.Custom;
 using DigitalLogicSandbox.GateLibrary.Examples;
+using DigitalLogicSandbox.GateLibrary.Programs;
 using DigitalLogicSandbox.Persistence;
 using DigitalLogicSandbox.Persistence.Deserialization;
 using DigitalLogicSandbox.Persistence.Migration;
@@ -333,6 +334,7 @@ namespace DigitalLogicSandbox.App
                 }
             }
 
+            CaptureInstructionSets(document);
             ProjectSettingsData settings = document.Settings;
             settings.GridVisible = _workspace.GridVisible;
             settings.SnapToGrid = _workspace.SnapToGrid;
@@ -394,12 +396,59 @@ namespace DigitalLogicSandbox.App
                 }
 
                 ApplySettings(document.Settings);
+                ApplyInstructionSets(document);
                 _workspace.Sync();
             }
             finally
             {
                 _suppressDirty--;
             }
+        }
+
+        private void CaptureInstructionSets(ProjectDocument document)
+        {
+            InstructionSetLibrary programs = _workspace.Programs;
+            for (int i = 0; i < programs.Sets.Count; i++)
+            {
+                InstructionSetEntry entry = programs.Sets[i];
+                document.InstructionSets.Add(new InstructionSetData { Id = entry.Id, Name = entry.Name, Source = entry.Source });
+            }
+
+            var owners = new List<DefinitionId>(programs.Bindings.Keys);
+            owners.Sort((a, b) => string.CompareOrdinal(a.Value, b.Value));
+            for (int i = 0; i < owners.Count; i++)
+            {
+                document.ProgramBindings.Add(new ProgramBindingData
+                {
+                    DefinitionId = owners[i].Value,
+                    InstructionSetId = programs.Bindings[owners[i]],
+                });
+            }
+        }
+
+        private void ApplyInstructionSets(ProjectDocument document)
+        {
+            var sets = new List<InstructionSetEntry>(document.InstructionSets.Count);
+            for (int i = 0; i < document.InstructionSets.Count; i++)
+            {
+                InstructionSetData data = document.InstructionSets[i];
+                if (data != null && !string.IsNullOrEmpty(data.Id))
+                {
+                    sets.Add(new InstructionSetEntry(data.Id, data.Name, data.Source));
+                }
+            }
+
+            var bindings = new List<KeyValuePair<DefinitionId, string>>(document.ProgramBindings.Count);
+            for (int i = 0; i < document.ProgramBindings.Count; i++)
+            {
+                ProgramBindingData data = document.ProgramBindings[i];
+                if (data != null && !string.IsNullOrEmpty(data.DefinitionId))
+                {
+                    bindings.Add(new KeyValuePair<DefinitionId, string>(new DefinitionId(data.DefinitionId), data.InstructionSetId));
+                }
+            }
+
+            _workspace.Programs.Reset(sets, bindings);
         }
 
         private void ApplySimulationSettings(SimulationSettingsData simulation)

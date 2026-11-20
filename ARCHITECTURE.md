@@ -431,6 +431,9 @@ TruthTableExporter`.
   (`AddLedColorsMigration`, no-op: files without it use the default colour). v6 adds an optional clock
   `divider` (`AddClockDividersMigration`, no-op: files without it run every clock at the base rate). v7 adds the
   `constant` node kind with a `value` (`AddConstantsMigration`, no-op); see section 20.
+- Optional top-level `instructionSets` (`{id, name, source}`) and `programBindings`
+  (`{definitionId, instructionSetId}`) hold the program editor's user instruction sets (section 20). They were
+  added without a schema bump: a missing field means none, and older builds ignore them.
 - Each `(id, version)` is written once, regardless of instance count. Instances reference definitions by id
   and version, so old versions stay pinned exactly as in memory.
 - **Loading:**
@@ -609,6 +612,7 @@ UI panels (toolbar, library) --> WorkspaceController --> CommandHistory --> Circ
 | Displays (LED, 7-seg, hex, decimal) | Done (Phase D): `Display` utility kind + `DisplayStyle`, presenter-driven views (section 17) |
 | Fixed values (ROM words, masks) | Done (Phase E+): `Constant` utility, compiled to AND/NOT gates (section 20) |
 | New display styles | Add a `DisplayStyle`, its decoding in `DisplayEncoding`, a size in `GateLayout.DisplaySize` and a library entry |
+| Programming another CPU | Write an instruction set spec in the program editor (section 20); no code needed |
 | New file schema | Add an `IMigration` |
 
 ---
@@ -917,17 +921,43 @@ the workspace views (`GateView`, `WireView`, `GridView`).
   returns definitions + main circuit + a 4 Hz clock rate, and `Assemble`/`Disassemble` encode the instruction set.
   `ProjectController.OpenCpuDemo` turns it into a new unsaved project; the File menu reaches it through the same
   unsaved-changes prompt as New. The program is Fibonacci (1, 1, 2, 3, 5, 8, then HLT on carry).
-- **Program editor** (2026-11-19).
-  - `GateLibrary.Examples.CpuAssembler` is pure data: `Assemble`/`Disassemble`, a lossless disassembly (stray
-    operand bits on NOP/OUT/HLT and unused opcodes show as raw `? 0x..` words), `Parse` (one instruction per line,
-    `;` comments, optional `N:` prefix, decimal/`0x`/`0b` operands, raw words, NOP padding, line-numbered
-    `AssemblyError`s), `Listing` and `WordLabel`/`IsWordLabel` ("3: LDA 0"). `CpuDemo` forwards to it.
-  - Program words are found by structure, never by gate name: `WorkspaceController.TryGetProgramWords` returns the
-    8-bit Constants that directly drive a custom node's inputs, in its input order. `TryGetProgramOwner` goes from
-    a word to its gate.
+- **Program editor** (2026-11-19; instruction sets, line numbers and colouring 2026-11-20).
+  - `GateLibrary.Programs` is pure data:
+    - `InstructionSet`: parsed from a text spec. `opcode N` gives the opcode field width (top bits of each word).
+      Then one line per instruction: `MNEMONIC opcode [operand]`, where a third token means "takes an operand"
+      and a trailing `;` comment is its description. Mnemonics and opcodes are unique; errors are line-numbered.
+      `InstructionSet.ExampleCpu` is the demo CPU's set, written in this format.
+    - `Assembler(set, wordWidth)`: `Assemble`/`Disassemble`, `Parse`, `Listing`, `WordLabel`/`IsWordLabel`.
+      Disassembly is lossless: unknown opcodes and stray operand bits show as raw `? 0x..` words. `Parse` takes
+      one instruction per line, `;` comments, an optional `N:` prefix, decimal/`0x`/`0b` numbers, raw words, and
+      pads with 0. A null set means raw words (numbers only). A set that does not fit the word width is reported
+      as `Problem`.
+    - `ProgramSyntax`: allocation-free token spans for programs and specs. `AppendRichText` renders them as TMP
+      rich text, with every `<` wrapped in `<noparse>` so the user's text can never form a tag.
+    - `InstructionSetLibrary`: the project's user sets (`InstructionSetEntry`: id, name, spec source, parsed set)
+      and bindings from a program gate's `DefinitionId` to a set id. Bindings are version-independent, so a new
+      ROM version keeps its set. `Resolve` order: binding (user set, `ExampleCpuId` or `RawId`), then the example
+      CPU for 8-bit words, then raw words. A binding to a deleted set falls back to the default.
+  - `GateLibrary.Examples.CpuAssembler` is now a façade over `Assembler(ExampleCpu, 8)` for `CpuDemo` and tests.
+  - Program words are found by structure, never by gate name. `WorkspaceController.TryGetProgramWords` returns
+    the Constants that directly drive a custom node's inputs, in its input order. All words share the first
+    one's width (2–8 bits), and there must be at least two. `ProgramWordWidth`, `ProgramAssembler` and
+    `TryGetProgramInstructionSet` resolve the node's set through `WorkspaceController.Programs`.
+    `TryGetProgramOwner` goes from a word to its gate.
   - `ApplyProgram` writes the values (`ChangeComponentCommand`) and word labels (`SetNodeLabelCommand`) as one
-    `CompositeCommand` ("Edit program"). `ChangeConstantValue` rewrites a word label in the same undo step when the
-    label has the `WordLabel` form; free-text labels are kept.
-  - `UI.Dialogs.ProgramEditorDialog` assembles on every edit and disables Apply on errors. Ctrl+Enter applies and
-    the dialog is read-only while inspecting. It opens from the context menu, the inspector of the gate, or the
-    inspector of any of its words.
+    `CompositeCommand` ("Edit program"), with labels in the gate's own set. `ChangeConstantValue` rewrites a word
+    label in the same undo step when the label has the `WordLabel` form; free-text labels are kept.
+  - Instruction set changes are undoable `Commands.Programs` commands on the current level's history:
+    `Add…`, `Edit…`, `Remove…` (which also removes and restores its bindings) and `BindInstructionSetCommand`.
+    The workspace wraps them as `AddInstructionSet` (add and bind in one step), `EditInstructionSet`,
+    `RemoveInstructionSet` and `BindInstructionSet`. Changing a set or binding never rewrites existing labels.
+  - UI:
+    - `UI.Dialogs.ProgramEditorDialog` assembles on every edit and disables Apply on errors. Ctrl+Enter applies,
+      and the dialog is read-only while inspecting. It opens from the gate's context menu, the gate's inspector,
+      or the inspector of any of its words.
+    - Its "Change…" button opens a picker in the shared `ContextMenuView` (`ShowItems`): Example CPU, the user
+      sets, Raw words, "New instruction set…" and "New from Example CPU…".
+    - `InstructionSetDialog` edits a set's name and spec, with live errors and a reference preview.
+  - `UI.Dialogs.CodeFieldDecorator` adds a line-number gutter (with a '!' on error lines) and syntax colouring to
+    a multi-line TMP input field. The colouring is a rich-text copy drawn behind the field's own text, which has
+    its alpha set to 0. Both follow the field's scroll offset in `LateUpdate`.

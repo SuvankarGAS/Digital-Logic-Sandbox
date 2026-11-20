@@ -30,8 +30,34 @@ namespace DigitalLogicSandbox.Persistence
 
         public ProjectSettingsData Settings { get; set; } = new ProjectSettingsData();
 
+        /// <summary>User instruction sets for the program editor, in creation order.</summary>
+        public List<InstructionSetData> InstructionSets { get; } = new List<InstructionSetData>();
+
+        /// <summary>Which instruction set each program gate (by definition id) assembles with.</summary>
+        public List<ProgramBindingData> ProgramBindings { get; } = new List<ProgramBindingData>();
+
         /// <summary>When the file was written (UTC). Set by the serializer.</summary>
         public DateTime SavedUtc { get; set; }
+    }
+
+    /// <summary>A user instruction set: stable id, display name and spec text (parsed by the app).</summary>
+    [Serializable]
+    public sealed class InstructionSetData
+    {
+        public string Id;
+        public string Name;
+        public string Source;
+    }
+
+    /// <summary>
+    /// A program gate's instruction set: the gate's definition id (any version) and a set id (a user set, or the
+    /// app's built-in/raw ids).
+    /// </summary>
+    [Serializable]
+    public sealed class ProgramBindingData
+    {
+        public string DefinitionId;
+        public string InstructionSetId;
     }
 
     /// <summary>

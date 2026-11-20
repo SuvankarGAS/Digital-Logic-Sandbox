@@ -54,6 +54,8 @@ namespace DigitalLogicSandbox.UI
         /// <summary>Assembly editor for gates fed by program words (the CPU demo's ROM).</summary>
         public ProgramEditorDialog ProgramEditor { get; private set; }
 
+        public InstructionSetDialog InstructionSetEditor { get; private set; }
+
         public SignalSettingsPanel SignalSettings { get; private set; }
 
         public TruthTableDialog TruthTable { get; private set; }
@@ -104,7 +106,11 @@ namespace DigitalLogicSandbox.UI
             shell.ProgramEditor = ProgramEditorDialog.Create(go.transform, shell.Factory, workspace);
             shell.TruthTable = TruthTableDialog.Create(go.transform, shell.Factory, workspace, truthTableLimits);
             shell.SequenceAnalysis = SequenceAnalysisDialog.Create(go.transform, shell.Factory, workspace);
+            shell.InstructionSetEditor = InstructionSetDialog.Create(go.transform, shell.Factory, workspace,
+                null);
             shell.Confirm = ConfirmDialog.Create(go.transform, shell.Factory, workspace);
+            shell.InstructionSetEditor.AttachConfirm(shell.Confirm);
+            shell.ProgramEditor.Attach(shell.ContextMenu, shell.InstructionSetEditor);
             shell._workspace = workspace;
             workspace.VisibleScreenArea = shell.GetWorkspaceScreenRect;
             shell.AttachProjects(projects);

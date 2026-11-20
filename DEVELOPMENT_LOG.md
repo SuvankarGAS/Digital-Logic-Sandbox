@@ -1844,8 +1844,8 @@ except one Constant at a time, and word labels went stale when a value changed.
 
 ### Known issues / deferred
 - The program field has no line numbers of its own and no syntax colouring. The `N:` prefixes in the listing
-  stand in for line numbers.
-- Only the example CPU's instruction set is known to the assembler.
+  stand in for line numbers. (Resolved: see "Program editor polish".)
+- Only the example CPU's instruction set is known to the assembler. (Resolved: see "Program editor polish".)
 
 ## Wire/label polish (2026-11-19)
 
@@ -1955,3 +1955,74 @@ it depended on window resolution.
   - `VersionsToggle_HidesVersions_AndSurvivesSaveAndOpen`: popup toggle → dirty → save → new project (default)
     → reopen.
 - Manual: the popup lays out with the new "Gates" row (play mode screenshot).
+
+## Program editor polish: user instruction sets, line numbers, colouring (2026-11-20)
+
+The user chose this next. It closes both deferred items from "Program editor for the CPU". Decided with the user:
+no symbolic labels. The editor stays a pure view of the wired words, so no program source is saved.
+
+### Implemented
+- **`GateLibrary/Programs`** (pure C#):
+  - `InstructionSet`: a text spec (`opcode N`, then `MNEMONIC opcode [operand] ; description`) with line-numbered
+    errors and a generated reference.
+  - `Assembler(set, wordWidth)`: today's `CpuAssembler`, generalised to any instruction set and word width (raw
+    words when there is no set).
+  - `ProgramSyntax`: allocation-free tokens and injection-safe rich text.
+  - `InstructionSetLibrary`: the project's sets, and bindings from program gate definition ids to sets.
+  - `CpuAssembler` is now a façade over `Assembler(InstructionSet.ExampleCpu, 8)`; the example set is written in
+    the same spec format.
+- **Commands** (`Commands/Programs`): add, edit, remove (with its bindings) and bind, all undoable.
+- **Workspace:**
+  - Program words may be 2–8 bits wide. All words share the first one's width, and there must be at least two.
+  - New methods: `ProgramWordWidth`, `ProgramAssembler`, `TryGetProgramInstructionSet`, `BindInstructionSet`,
+    `AddInstructionSet` (add and bind in one undo step), `EditInstructionSet` and `RemoveInstructionSet`.
+  - `ApplyProgram` takes `int` words (the byte overload stays). It and `ChangeConstantValue` write labels in the
+    gate's own set.
+- **UI:**
+  - The program editor shows "Instruction set: … (default)" with "Change…", a picker built on the shared context
+    menu (`ContextMenuView.ShowItems`) offering Example CPU, the user sets, Raw words, "New instruction set…"
+    and "New from Example CPU…". User sets also get "Edit set…".
+  - New `InstructionSetDialog`: name, spec, live errors, a reference preview, Save, Delete (with confirmation) and
+    Close. Ctrl+Enter saves.
+  - New `CodeFieldDecorator`, used by both fields: a line-number gutter with a '!' on error lines (shape, not only
+    colour), and syntax colouring drawn behind the field's invisible text. Both follow the field's scrolling.
+- **Persistence:** optional `instructionSets` and `programBindings` at the top level of the project file, mapped by
+  `ProjectController`. No schema bump; a missing field means none.
+
+### Decisions
+- **Bindings are keyed by definition id, not version.** A new ROM version keeps its instruction set, and every
+  instance of the gate uses the same set.
+- **Defaults keep old projects unchanged.** An unbound gate uses the example CPU for 8-bit words (as before) and
+  raw words for other widths.
+- **Opcode in the top bits, one operand in the rest.** This covers the example CPU and typical SAP-style designs
+  while keeping the spec to one line per instruction. Wider formats (several operand fields) would extend
+  `Instruction`.
+- **Colouring by overlay.** TMP input fields with rich text break caret placement when tags are typed. Instead the
+  field's own glyphs are made transparent and a rich-text copy is drawn behind them, with the same font, size and
+  rect. Tags change no glyph widths, so the caret and selection line up.
+- **Changing a set never rewrites labels.** Applying from the editor does that. An untouched listing is shown again
+  in the newly chosen set; edited text is kept and re-assembled.
+- **At least two program words.** Widening program words to 2–8 bits would otherwise offer "Edit program…" on any
+  gate fed by a single constant.
+
+### Test results
+- EditMode **504 / 504** passed (24 new):
+  - `ProgramsTests`: the example spec matches the old table for all 256 words; ten spec error cases are reported
+    on the right line; a 6-bit user set round-trips all 64 words; raw words; a width mismatch is reported; token
+    spans for programs and specs; the rich text shows exactly the source and cannot be injected; resolve order;
+    an invalid stored spec; undo and redo of add, edit, bind and remove.
+  - Persistence: sets and bindings round-trip, and files without them load as empty.
+- PlayMode **102 / 102** passed (3 new, `ProgramEditorTests`):
+  - A ROM with 6-bit inputs: raw by default; define "Tiny" in the dialog (a duplicate opcode shows "Line 3" and a
+    gutter '!'); save binds it in one undo step; the listing switches to NOP; apply a program (values and labels);
+    a single word's label follows its value; undo removes everything.
+  - The demo ROM shows line numbers, an error marker on line 2 and colouring whose visible text equals the source;
+    the field's own glyphs are hidden.
+  - Sets and bindings survive Save As → New → Open, and the reopened ROM lists in the user set.
+- Manual (play mode screenshots, 905×414 game view): the gutter and colouring line up with the text, including
+  after scrolling to line 32; the '!' marker sits on the error line; `<b>` in a comment shows literally; the
+  instruction set dialog colours its spec.
+
+### Known issues / deferred
+- Only one operand field per instruction (in the low bits).
+- The instruction set dialog's help line is cramped at the smallest supported window size.

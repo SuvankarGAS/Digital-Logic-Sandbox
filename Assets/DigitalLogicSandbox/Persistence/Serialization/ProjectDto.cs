@@ -19,6 +19,12 @@ namespace DigitalLogicSandbox.Persistence.Serialization
         public CircuitDto RootCircuit;
         public List<CircuitDto> Definitions;
         public List<InputValueDto> InputValues;
+
+        /// <summary>Optional (missing = none); added without a schema bump, older builds ignore it.</summary>
+        public List<InstructionSetData> InstructionSets;
+
+        /// <summary>Optional (missing = none).</summary>
+        public List<ProgramBindingData> ProgramBindings;
     }
 
     internal sealed class AppInfoDto

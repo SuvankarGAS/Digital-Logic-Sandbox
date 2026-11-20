@@ -1,4 +1,5 @@
 using DigitalLogicSandbox.GateLibrary.Examples;
+using DigitalLogicSandbox.GateLibrary.Programs;
 using NUnit.Framework;
 
 namespace DigitalLogicSandbox.Tests.EditMode.GateLibrary

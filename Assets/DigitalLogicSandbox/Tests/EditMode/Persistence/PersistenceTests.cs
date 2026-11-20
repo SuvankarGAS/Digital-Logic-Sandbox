@@ -495,6 +495,39 @@ namespace DigitalLogicSandbox.Tests.EditMode.PersistenceTests
         }
 
         [Test]
+        public void InstructionSetsAndBindings_SurviveSaveAndLoad()
+        {
+            const string Spec = "opcode 2\nNOP 0\nJMP 1 n ; jump";
+            ProjectDocument document = BuildDocument(BuildRoot());
+            document.InstructionSets.Add(new InstructionSetData { Id = "set1", Name = "Tiny", Source = Spec });
+            document.ProgramBindings.Add(new ProgramBindingData { DefinitionId = "rom-def", InstructionSetId = "set1" });
+
+            ProjectLoadResult result = new ProjectDeserializer().Read(ProjectSerializer.ToJson(document));
+
+            Assert.That(result.Document.InstructionSets.Count, Is.EqualTo(1));
+            Assert.That(result.Document.InstructionSets[0].Id, Is.EqualTo("set1"));
+            Assert.That(result.Document.InstructionSets[0].Name, Is.EqualTo("Tiny"));
+            Assert.That(result.Document.InstructionSets[0].Source, Is.EqualTo(Spec));
+            Assert.That(result.Document.ProgramBindings.Count, Is.EqualTo(1));
+            Assert.That(result.Document.ProgramBindings[0].DefinitionId, Is.EqualTo("rom-def"));
+            Assert.That(result.Document.ProgramBindings[0].InstructionSetId, Is.EqualTo("set1"));
+        }
+
+        [Test]
+        public void MissingInstructionSets_LoadAsNone()
+        {
+            JObject json = JObject.Parse(ProjectSerializer.ToJson(BuildDocument(BuildRoot())));
+            Assume.That(json.ContainsKey("instructionSets"), Is.True);
+            json.Remove("instructionSets");
+            json.Remove("programBindings");
+
+            ProjectLoadResult result = new ProjectDeserializer().Read(json.ToString());
+
+            Assert.That(result.Document.InstructionSets, Is.Empty);
+            Assert.That(result.Document.ProgramBindings, Is.Empty);
+        }
+
+        [Test]
         public void MissingSimulationSettings_AreNormalizedToDefaults()
         {
             JObject json = JObject.Parse(ProjectSerializer.ToJson(BuildDocument(BuildRoot())));

@@ -9,6 +9,7 @@ using DigitalLogicSandbox.CircuitEditor.Placement;
 using DigitalLogicSandbox.CircuitEditor.Selection;
 using DigitalLogicSandbox.Commands.Circuit;
 using DigitalLogicSandbox.Commands.Library;
+using DigitalLogicSandbox.Commands.Programs;
 using DigitalLogicSandbox.Commands.UndoRedo;
 using DigitalLogicSandbox.Components.Abstractions;
 using DigitalLogicSandbox.Core.Circuit;
@@ -20,6 +21,7 @@ using DigitalLogicSandbox.Core.Validation;
 using DigitalLogicSandbox.GateLibrary.Custom;
 using DigitalLogicSandbox.GateLibrary.Examples;
 using DigitalLogicSandbox.GateLibrary.Packaging;
+using DigitalLogicSandbox.GateLibrary.Programs;
 using DigitalLogicSandbox.Rendering;
 using DigitalLogicSandbox.Rendering.Gates;
 using DigitalLogicSandbox.Rendering.Wires;
@@ -49,6 +51,12 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
     {
         public const float DuplicateOffset = 1f;
         public const string DefaultCircuitName = "Main Circuit";
+
+        /// <summary>Narrowest constant that can be a program word.</summary>
+        public const int MinProgramWordWidth = 2;
+
+        /// <summary>Fewest constants that make a gate's inputs a program.</summary>
+        public const int MinProgramWords = 2;
 
         private readonly CommandHistory _readOnlyHistory = new CommandHistory();
         private readonly SelectionModel _selection = new SelectionModel();
@@ -180,6 +188,9 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
 
         /// <summary>Undo history of the shown level (an always-empty history for read-only levels).</summary>
         public CommandHistory History => _navigator?.Current?.History ?? _readOnlyHistory;
+
+        /// <summary>The project's instruction sets and which one each program gate assembles with.</summary>
+        public InstructionSetLibrary Programs { get; } = new InstructionSetLibrary();
 
         /// <summary>False while inspecting a custom gate: its internals cannot be changed outside edit mode.</summary>
         public bool IsEditable => CurrentLevel != null && CurrentLevel.IsEditable;
@@ -974,7 +985,9 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
 
         /// <summary>
         /// Sets a constant's fixed value (masked to its width) as one undoable step. Values outside the width are
-        /// refused with a notification rather than silently truncated.
+        /// refused with a notification rather than silently truncated. A program word whose label has the
+        /// "address: instruction" form keeps that label in step with the value, using the program gate's
+        /// instruction set.
         /// </summary>
         public bool ChangeConstantValue(NodeId node, int value)
         {
@@ -997,7 +1010,9 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             }
 
             ComponentRef changed = existing.Component.WithConstantValue(value);
-            if (!CpuAssembler.IsWordLabel(existing.Label, out int address) || existing.Component == changed)
+            Assembler assembler = TryGetProgramOwner(node, out NodeId owner) ? ProgramAssembler(owner) : null;
+            if (assembler == null || !assembler.IsWordLabel(existing.Label, out int address) ||
+                existing.Component == changed)
             {
                 return ChangeComponent(node, changed);
             }
@@ -1011,16 +1026,18 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             History.Execute(new CompositeCommand("Change constant", new ICommand[]
             {
                 new ChangeComponentCommand(Circuit, _catalog, node, changed, "Change constant"),
-                new SetNodeLabelCommand(Circuit, node, CpuAssembler.WordLabel(address, value)),
+                new SetNodeLabelCommand(Circuit, node, assembler.WordLabel(address, value)),
             }));
             _selection.Select(node);
             return true;
         }
 
         /// <summary>
-        /// Collects the program words of <paramref name="node"/>: the 8-bit constants that drive its input pins
-        /// directly, in the order of its inputs. Found by structure, never by gate name, so any ROM-like gate fed by
-        /// constants works. Returns false (and leaves <paramref name="words"/> empty) when there are none.
+        /// Collects the program words of <paramref name="node"/>: the constants that drive its input pins directly, in
+        /// the order of its inputs. All words share the width of the first one (2 to 8 bits); constants of other widths
+        /// are not part of the program. At least two words are needed. Found by structure, never by gate name, so any
+        /// ROM-like gate fed by constants works. Returns false (and leaves <paramref name="words"/> empty) when there
+        /// is no program.
         /// </summary>
         public bool TryGetProgramWords(NodeId node, List<NodeId> words)
         {
@@ -1030,59 +1047,71 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             }
 
             words.Clear();
-            CircuitDefinition circuit = Circuit;
-            if (circuit == null || !circuit.TryGetNode(node, out NodeDefinition target) ||
-                target.Component.Kind != ComponentKind.Custom ||
-                !_catalog.TryGetSignature(target.Component, out ComponentSignature signature))
-            {
-                return false;
-            }
+            return CollectProgramWords(node, words) > 0;
+        }
 
-            IReadOnlyList<PortDescriptor> inputs = signature.Inputs;
-            for (int i = 0; i < inputs.Count; i++)
-            {
-                if (circuit.TryGetConnectionTo(new PinRef(node, inputs[i].Id), out ConnectionDefinition connection) &&
-                    circuit.TryGetNode(connection.Source.Node, out NodeDefinition source) &&
-                    source.Component.Kind == ComponentKind.Constant && source.Component.Width == 8 &&
-                    !words.Contains(source.Id))
-                {
-                    words.Add(source.Id);
-                }
-            }
-
-            return words.Count > 0;
+        /// <summary>Width in bits of <paramref name="node"/>'s program words, or 0 when it has none.</summary>
+        public int ProgramWordWidth(NodeId node)
+        {
+            _scratchNodes.Clear();
+            int width = CollectProgramWords(node, _scratchNodes);
+            _scratchNodes.Clear();
+            return width;
         }
 
         /// <summary>True when <paramref name="node"/> has program words (see <see cref="TryGetProgramWords"/>).</summary>
         public bool HasProgram(NodeId node)
         {
-            _scratchNodes.Clear();
-            bool found = TryGetProgramWords(node, _scratchNodes);
-            _scratchNodes.Clear();
-            return found;
+            return ProgramWordWidth(node) > 0;
         }
 
         /// <summary>
-        /// The gate a program word feeds: for an 8-bit constant, the first custom gate it drives that has program
-        /// words. Lets the inspector offer "Edit program…" on the words themselves.
+        /// The instruction set <paramref name="node"/>'s program assembles with (its binding in
+        /// <see cref="Programs"/>, or the default for its word width). False when the node has no program.
+        /// </summary>
+        public bool TryGetProgramInstructionSet(NodeId node, out ResolvedInstructionSet set)
+        {
+            set = default;
+            int width = ProgramWordWidth(node);
+            if (width == 0)
+            {
+                return false;
+            }
+
+            set = Programs.Resolve(Circuit.GetNode(node).Component.Definition.Id, width);
+            return true;
+        }
+
+        /// <summary>An assembler for <paramref name="node"/>'s program, or null when it has none.</summary>
+        public Assembler ProgramAssembler(NodeId node)
+        {
+            int width = ProgramWordWidth(node);
+            return width == 0 ? null : Programs.AssemblerFor(Circuit.GetNode(node).Component.Definition.Id, width);
+        }
+
+        /// <summary>
+        /// The gate a program word feeds: for a constant, the first custom gate it drives that counts it among its
+        /// program words. Lets the inspector offer "Edit program…" on the words themselves.
         /// </summary>
         public bool TryGetProgramOwner(NodeId constant, out NodeId owner)
         {
             owner = NodeId.None;
             CircuitDefinition circuit = Circuit;
             if (circuit == null || !circuit.TryGetNode(constant, out NodeDefinition word) ||
-                word.Component.Kind != ComponentKind.Constant || word.Component.Width != 8)
+                word.Component.Kind != ComponentKind.Constant || word.Component.Width < MinProgramWordWidth)
             {
                 return false;
             }
 
             var connections = new List<ConnectionDefinition>();
             circuit.GetConnectionsFrom(constant, connections);
+            var words = new List<NodeId>();
             for (int i = 0; i < connections.Count; i++)
             {
                 NodeId candidate = connections[i].Destination.Node;
                 if (circuit.TryGetNode(candidate, out NodeDefinition target) &&
-                    target.Component.Kind == ComponentKind.Custom && HasProgram(candidate))
+                    target.Component.Kind == ComponentKind.Custom && TryGetProgramWords(candidate, words) &&
+                    words.Contains(constant))
                 {
                     owner = candidate;
                     return true;
@@ -1094,11 +1123,11 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
 
         /// <summary>
         /// Writes a whole program into the program words of <paramref name="node"/> (in input order) and rewrites
-        /// their labels to "address: instruction", as one undoable step. Extra words in <paramref name="program"/>
-        /// are refused; missing ones are left unchanged. Returns the number of words whose value changed, or -1
-        /// when refused.
+        /// their labels to "address: instruction" for the gate's instruction set, as one undoable step. Extra words in
+        /// <paramref name="program"/> are refused, as are values wider than the words; missing ones are left unchanged.
+        /// Returns the number of words whose value changed, or -1 when refused.
         /// </summary>
-        public int ApplyProgram(NodeId node, IReadOnlyList<byte> program)
+        public int ApplyProgram(NodeId node, IReadOnlyList<int> program)
         {
             if (program == null)
             {
@@ -1113,7 +1142,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             var words = new List<NodeId>();
             if (!TryGetProgramWords(node, words))
             {
-                Notify("This gate has no program words (8-bit constants wired to its inputs).");
+                Notify("This gate has no program words (constants wired to its inputs).");
                 return -1;
             }
 
@@ -1121,6 +1150,16 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             {
                 Notify("The program has " + program.Count + " words but the gate holds " + words.Count + ".");
                 return -1;
+            }
+
+            Assembler assembler = ProgramAssembler(node);
+            for (int i = 0; i < program.Count; i++)
+            {
+                if (program[i] < 0 || program[i] > assembler.MaxWord)
+                {
+                    Notify("Word " + i + " (" + program[i] + ") does not fit in " + assembler.WordWidth + " bits.");
+                    return -1;
+                }
             }
 
             var commands = new List<ICommand>();
@@ -1135,7 +1174,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
                     changedWords++;
                 }
 
-                string label = CpuAssembler.WordLabel(i, program[i]);
+                string label = assembler.WordLabel(i, program[i]);
                 if (!string.Equals(word.Label, label, StringComparison.Ordinal))
                 {
                     commands.Add(new SetNodeLabelCommand(Circuit, word.Id, label));
@@ -1153,6 +1192,194 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
                 ? "Program labels updated."
                 : "Program updated: " + changedWords + " word" + (changedWords == 1 ? "" : "s") + " changed.");
             return changedWords;
+        }
+
+        /// <summary>Byte overload of <see cref="ApplyProgram(NodeId, IReadOnlyList{int})"/>.</summary>
+        public int ApplyProgram(NodeId node, IReadOnlyList<byte> program)
+        {
+            if (program == null)
+            {
+                throw new ArgumentNullException(nameof(program));
+            }
+
+            var values = new int[program.Count];
+            for (int i = 0; i < values.Length; i++)
+            {
+                values[i] = program[i];
+            }
+
+            return ApplyProgram(node, values);
+        }
+
+        /// <summary>
+        /// Chooses the instruction set <paramref name="node"/>'s program gate uses (all instances and versions of its
+        /// definition), as one undoable step. <paramref name="setId"/> is a user set's id,
+        /// <see cref="InstructionSetLibrary.ExampleCpuId"/>, <see cref="InstructionSetLibrary.RawId"/> or null for the
+        /// default. Labels are not rewritten; applying a program from the editor does that.
+        /// </summary>
+        public bool BindInstructionSet(NodeId node, string setId)
+        {
+            if (Circuit == null || !CheckEditable())
+            {
+                return false;
+            }
+
+            if (!HasProgram(node))
+            {
+                Notify("This gate has no program words (constants wired to its inputs).");
+                return false;
+            }
+
+            DefinitionId owner = Circuit.GetNode(node).Component.Definition.Id;
+            if (Programs.BindingOf(owner) == setId)
+            {
+                return true;
+            }
+
+            History.Execute(new BindInstructionSetCommand(Programs, owner, setId, InstructionSetName(setId)));
+            return true;
+        }
+
+        /// <summary>
+        /// Adds a user instruction set (its spec must parse) and, when <paramref name="bindTo"/> has a program, binds
+        /// that gate to it, as one undoable step. Returns the new set's id, or null when refused.
+        /// </summary>
+        public string AddInstructionSet(string name, string source, NodeId bindTo)
+        {
+            if (!CheckEditable())
+            {
+                return null;
+            }
+
+            var entry = new InstructionSetEntry(InstructionSetLibrary.NewId(), name, source);
+            if (entry.Set == null)
+            {
+                Notify("The instruction set has errors: " + entry.Errors[0]);
+                return null;
+            }
+
+            var commands = new List<ICommand> { new AddInstructionSetCommand(Programs, entry) };
+            if (Circuit != null && HasProgram(bindTo))
+            {
+                commands.Add(new BindInstructionSetCommand(Programs, Circuit.GetNode(bindTo).Component.Definition.Id,
+                    entry.Id, entry.Name));
+            }
+
+            History.Execute(new CompositeCommand("Add instruction set " + entry.Name, commands));
+            return entry.Id;
+        }
+
+        /// <summary>Changes a user instruction set's name and spec (which must parse) as one undoable step.</summary>
+        public bool EditInstructionSet(string id, string name, string source)
+        {
+            if (!CheckEditable())
+            {
+                return false;
+            }
+
+            if (!Programs.TryGet(id, out InstructionSetEntry existing))
+            {
+                Notify("That instruction set no longer exists.");
+                return false;
+            }
+
+            var entry = new InstructionSetEntry(id, name, source);
+            if (entry.Set == null)
+            {
+                Notify("The instruction set has errors: " + entry.Errors[0]);
+                return false;
+            }
+
+            if (entry.Name == existing.Name && entry.Source == existing.Source)
+            {
+                return true;
+            }
+
+            History.Execute(new EditInstructionSetCommand(Programs, entry));
+            return true;
+        }
+
+        /// <summary>Deletes a user instruction set; gates bound to it fall back to their default. One undoable step.</summary>
+        public bool RemoveInstructionSet(string id)
+        {
+            if (!CheckEditable())
+            {
+                return false;
+            }
+
+            if (Programs.IndexOf(id) < 0)
+            {
+                Notify("That instruction set no longer exists.");
+                return false;
+            }
+
+            History.Execute(new RemoveInstructionSetCommand(Programs, id));
+            return true;
+        }
+
+        /// <summary>Display name of a set id (built-in, raw, user set or null = default).</summary>
+        public string InstructionSetName(string setId)
+        {
+            if (setId == null)
+            {
+                return "default";
+            }
+
+            if (setId == InstructionSetLibrary.ExampleCpuId)
+            {
+                return InstructionSetLibrary.ExampleCpuName;
+            }
+
+            if (setId == InstructionSetLibrary.RawId)
+            {
+                return InstructionSetLibrary.RawName;
+            }
+
+            return Programs.TryGet(setId, out InstructionSetEntry entry) ? entry.Name : setId;
+        }
+
+        /// <summary>Fills <paramref name="words"/> and returns the word width, or 0 (with no words) for no program.</summary>
+        private int CollectProgramWords(NodeId node, List<NodeId> words)
+        {
+            CircuitDefinition circuit = Circuit;
+            if (circuit == null || !circuit.TryGetNode(node, out NodeDefinition target) ||
+                target.Component.Kind != ComponentKind.Custom ||
+                !_catalog.TryGetSignature(target.Component, out ComponentSignature signature))
+            {
+                return 0;
+            }
+
+            int start = words.Count;
+            int width = 0;
+            IReadOnlyList<PortDescriptor> inputs = signature.Inputs;
+            for (int i = 0; i < inputs.Count; i++)
+            {
+                if (!circuit.TryGetConnectionTo(new PinRef(node, inputs[i].Id), out ConnectionDefinition connection) ||
+                    !circuit.TryGetNode(connection.Source.Node, out NodeDefinition source) ||
+                    source.Component.Kind != ComponentKind.Constant ||
+                    source.Component.Width < MinProgramWordWidth)
+                {
+                    continue;
+                }
+
+                if (width == 0)
+                {
+                    width = source.Component.Width;
+                }
+
+                if (source.Component.Width == width && words.IndexOf(source.Id, start) < 0)
+                {
+                    words.Add(source.Id);
+                }
+            }
+
+            if (words.Count - start < MinProgramWords)
+            {
+                words.RemoveRange(start, words.Count - start);
+                return 0;
+            }
+
+            return width;
         }
 
         /// <summary>Sets a node's free-text label (shown on constants, e.g. a mnemonic) as one undoable step.</summary>

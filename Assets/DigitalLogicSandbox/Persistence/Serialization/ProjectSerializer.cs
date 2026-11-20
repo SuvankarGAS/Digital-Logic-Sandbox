@@ -62,7 +62,27 @@ namespace DigitalLogicSandbox.Persistence.Serialization
                 RootCircuit = ToDto(document.RootCircuit, published: false),
                 Definitions = new List<CircuitDto>(document.Definitions.Count),
                 InputValues = new List<InputValueDto>(document.InputValues.Count),
+                InstructionSets = new List<InstructionSetData>(document.InstructionSets.Count),
+                ProgramBindings = new List<ProgramBindingData>(document.ProgramBindings.Count),
             };
+
+            for (int i = 0; i < document.InstructionSets.Count; i++)
+            {
+                InstructionSetData set = document.InstructionSets[i];
+                if (set != null && !string.IsNullOrEmpty(set.Id))
+                {
+                    dto.InstructionSets.Add(new InstructionSetData { Id = set.Id, Name = set.Name, Source = set.Source ?? string.Empty });
+                }
+            }
+
+            for (int i = 0; i < document.ProgramBindings.Count; i++)
+            {
+                ProgramBindingData binding = document.ProgramBindings[i];
+                if (binding != null && !string.IsNullOrEmpty(binding.DefinitionId) && !string.IsNullOrEmpty(binding.InstructionSetId))
+                {
+                    dto.ProgramBindings.Add(new ProgramBindingData { DefinitionId = binding.DefinitionId, InstructionSetId = binding.InstructionSetId });
+                }
+            }
 
             var written = new HashSet<DefinitionRef>();
             for (int i = 0; i < document.Definitions.Count; i++)

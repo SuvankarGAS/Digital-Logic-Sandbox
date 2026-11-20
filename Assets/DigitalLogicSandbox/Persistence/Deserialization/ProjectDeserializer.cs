@@ -159,6 +159,31 @@ namespace DigitalLogicSandbox.Persistence.Deserialization
                 }
             }
 
+            if (dto.InstructionSets != null)
+            {
+                var ids = new HashSet<string>(StringComparer.Ordinal);
+                for (int i = 0; i < dto.InstructionSets.Count; i++)
+                {
+                    InstructionSetData set = dto.InstructionSets[i];
+                    if (set != null && !string.IsNullOrEmpty(set.Id) && ids.Add(set.Id))
+                    {
+                        document.InstructionSets.Add(new InstructionSetData { Id = set.Id, Name = set.Name, Source = set.Source ?? string.Empty });
+                    }
+                }
+            }
+
+            if (dto.ProgramBindings != null)
+            {
+                for (int i = 0; i < dto.ProgramBindings.Count; i++)
+                {
+                    ProgramBindingData binding = dto.ProgramBindings[i];
+                    if (binding != null && !string.IsNullOrEmpty(binding.DefinitionId) && !string.IsNullOrEmpty(binding.InstructionSetId))
+                    {
+                        document.ProgramBindings.Add(new ProgramBindingData { DefinitionId = binding.DefinitionId, InstructionSetId = binding.InstructionSetId });
+                    }
+                }
+            }
+
             // Freeze library definitions last so binding could mutate them.
             for (int i = 0; i < document.Definitions.Count; i++)
             {

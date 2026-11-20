@@ -679,7 +679,7 @@ namespace DigitalLogicSandbox.UI.Inspector
         /// <summary>Parses a constant typed as decimal, <c>0x</c> hexadecimal or <c>0b</c> binary.</summary>
         public static bool TryParseConstant(string text, out int value)
         {
-            return DigitalLogicSandbox.GateLibrary.Examples.CpuAssembler.TryParseNumber(text, out value);
+            return DigitalLogicSandbox.GateLibrary.Programs.Assembler.TryParseNumber(text, out value);
         }
 
         /// <summary>One swatch per LED colour; the current one carries a check mark.</summary>
