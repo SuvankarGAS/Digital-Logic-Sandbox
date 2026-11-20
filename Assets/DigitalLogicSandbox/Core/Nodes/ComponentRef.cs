@@ -11,7 +11,7 @@ namespace DigitalLogicSandbox.Core.Nodes
     /// <para>
     /// Parameterised utilities carry their parameters here, so a component's signature is a pure function of its
     /// reference: <see cref="Width"/> (bits of a bus boundary, splitter, merger or bus join) and
-    /// <see cref="Arity"/> (number of drivers a bus join accepts). LED displays also carry a presentational
+    /// <see cref="Arity"/> (number of drivers a bus join accepts). Displays also carry a presentational
     /// <see cref="LedColor"/>, which never affects simulation. Clocks carry a <see cref="ClockDivider"/> (stored as
     /// its base-2 exponent): clocks with the same divider share one clock domain.
     /// </para>
@@ -60,8 +60,8 @@ namespace DigitalLogicSandbox.Core.Nodes
         /// <summary>What a <see cref="ComponentKind.Display"/> node shows (LED for every other kind).</summary>
         public DisplayStyle DisplayStyle => Kind == ComponentKind.Display ? (DisplayStyle)_arity : DisplayStyle.Led;
 
-        /// <summary>Colour of an LED display (see <see cref="LedColors"/>); 0 for everything else.</summary>
-        public int LedColor => Kind == ComponentKind.Display && DisplayStyle == DisplayStyle.Led ? _color : 0;
+        /// <summary>Lit colour of a display, any style (see <see cref="LedColors"/>); 0 for everything else.</summary>
+        public int LedColor => Kind == ComponentKind.Display ? _color : 0;
 
         /// <summary>Base-2 exponent of a clock's divider (0 = ÷1); 0 for every other kind.</summary>
         public int ClockExponent => Kind == ComponentKind.Clock ? _arity : 0;
@@ -144,12 +144,12 @@ namespace DigitalLogicSandbox.Core.Nodes
             return exponent;
         }
 
-        /// <summary>The same LED display lit in another colour.</summary>
+        /// <summary>The same display lit in another colour.</summary>
         public ComponentRef WithLedColor(int color)
         {
-            if (Kind != ComponentKind.Display || DisplayStyle != DisplayStyle.Led)
+            if (Kind != ComponentKind.Display)
             {
-                throw new InvalidOperationException("Only LED displays have a colour.");
+                throw new InvalidOperationException("Only displays have a colour.");
             }
 
             if (!LedColors.IsValid(color))
@@ -287,8 +287,8 @@ namespace DigitalLogicSandbox.Core.Nodes
                 {
                     DisplayStyle style = arity >= 0 && arity <= (int)DisplayStyles.Last ? (DisplayStyle)arity : DisplayStyle.Led;
                     int clamped = Math.Max(DisplayStyles.MinWidth(style), Math.Min(DisplayStyles.MaxWidth(style), width));
-                    return new ComponentRef(kind, null, default, clamped, (int)style,
-                        style == DisplayStyle.Led ? color : 0);
+                    // Every display style keeps its colour.
+                    return new ComponentRef(kind, null, default, clamped, (int)style, color);
                 }
                 case ComponentKind.Constant:
                 {

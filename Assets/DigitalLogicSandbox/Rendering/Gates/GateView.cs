@@ -88,8 +88,8 @@ namespace DigitalLogicSandbox.Rendering.Gates
             view._outline.drawMode = SpriteDrawMode.Sliced;
             view._fill.drawMode = SpriteDrawMode.Sliced;
             view._stateGlow = CreateSprite(go.transform, "StateGlow", RenderAssets.Glow, theme, SortingOrders.GateState);
-            view._stateRing = CreateSprite(go.transform, "StateRing", RenderAssets.Circle, theme, SortingOrders.GateState + 1);
-            view._state = CreateSprite(go.transform, "State", RenderAssets.Circle, theme, SortingOrders.GateState + 2);
+            view._stateRing = CreateSprite(go.transform, "StateRing", RenderAssets.Circle, theme, SortingOrders.GateStateGlow);
+            view._state = CreateSprite(go.transform, "State", RenderAssets.Circle, theme, SortingOrders.GateStateLit);
             view._title = CreateText(go.transform, "Title", 3.4f, theme, FontWeight.SemiBold);
             view._title.characterSpacing = 4f;
             view._subtitle = CreateText(go.transform, "Subtitle", 2.1f, theme, FontWeight.Regular);
@@ -292,8 +292,8 @@ namespace DigitalLogicSandbox.Rendering.Gates
             _outline.sortingOrder = SortingOrders.GateOutline + offset;
             _fill.sortingOrder = SortingOrders.GateFill + offset;
             _stateGlow.sortingOrder = SortingOrders.GateState + offset;
-            _stateRing.sortingOrder = SortingOrders.GateState + 1 + offset;
-            _state.sortingOrder = SortingOrders.GateState + 2 + offset;
+            _stateRing.sortingOrder = SortingOrders.GateStateGlow + offset;
+            _state.sortingOrder = SortingOrders.GateStateLit + offset;
             _title.sortingOrder = SortingOrders.Text + offset;
             _subtitle.sortingOrder = SortingOrders.Text + offset;
             _caption.sortingOrder = SortingOrders.Text + offset;
@@ -404,6 +404,15 @@ namespace DigitalLogicSandbox.Rendering.Gates
         {
             return _display.GetDigit(index);
         }
+
+        /// <summary>World bounds of a display lamp's glow while it is lit; false when it is off or not a lamp.</summary>
+        public bool TryGetDisplayLampGlow(int index, out Bounds bounds)
+        {
+            return _display.TryGetLampGlow(index, out bounds);
+        }
+
+        /// <summary>World bounds of the gate body (its fill).</summary>
+        public Bounds BodyBounds => _fill.bounds;
 
         /// <summary>The readout shown on a bus boundary, e.g. "A = 10" or "A = ?" when a bit is not binary.</summary>
         public string BusText => _title.text;

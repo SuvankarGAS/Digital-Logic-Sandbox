@@ -200,13 +200,20 @@ namespace DigitalLogicSandbox.Tests.PlayMode
             yield return null;
             Assert.That(View(led).DisplayText, Is.EqualTo("OFF"));
             Assert.That(View(seg).DisplayText, Is.EqualTo("blank"));
+            Assert.That(View(led).TryGetDisplayLampGlow(0, out _), Is.False, "An unlit LED has no glow.");
 
             _workspace.ToggleInput(x);
             _workspace.ToggleInput(y);
             _workspace.Sync();
             yield return null;
             Assert.That(View(led).DisplayText, Is.EqualTo("ON"));
-            Assert.That(View(seg).DisplayText, Is.EqualTo("b c"));
+            Assert.That(View(led).TryGetDisplayLampGlow(0, out Bounds glow), Is.True, "A lit LED glows.");
+            Bounds body = View(led).BodyBounds;
+            Assert.That(glow.min.x, Is.GreaterThanOrEqualTo(body.min.x), "The glow stays inside the body (left, the pin).");
+            Assert.That(glow.max.x, Is.LessThanOrEqualTo(body.max.x), "The glow stays inside the body (right).");
+            Assert.That(glow.min.y, Is.GreaterThanOrEqualTo(body.min.y), "The glow stays inside the body (bottom).");
+            Assert.That(glow.max.y, Is.LessThanOrEqualTo(body.max.y), "The glow stays inside the body (top, the label).");
+            Assert.That(View(seg).DisplayText, Is.EqualTo("1 (b c)"), "The readout names the digit the segments form.");
             Assert.That(View(seg).GetDisplayDigit(0), Is.EqualTo(DisplayEncoding.Glyph(1)), "b and c draw a '1'.");
 
             // Unused segment inputs are not reported as problems.
@@ -293,6 +300,44 @@ namespace DigitalLogicSandbox.Tests.PlayMode
             Assert.That(_workspace.ChangeLedColor(led, 0), Is.True);
             Assert.That(_workspace.Undo(), Is.True);
             Assert.That(_workspace.Circuit.GetNode(led).Component.LedColor, Is.EqualTo(4));
+        }
+
+        [UnityTest]
+        public IEnumerator DigitDisplays_CanBeColoured_AndKeepTheColourAcrossStyles()
+        {
+            yield return LoadMain();
+            NodeId a = _workspace.PlaceNode(ComponentRef.InputBoundary, new Vector2(-8, 0));
+            NodeId seg = _workspace.PlaceNode(ComponentRef.Display(DisplayStyle.SevenSegment), new Vector2(0, 0));
+            Assert.That(_workspace.Connect(Pin(a), new PinRef(seg, BoundarySignatures.BitPin(6))), Is.EqualTo(ConnectionError.None)); // g
+            _workspace.SetInput(a, Signal.High);
+            _workspace.Sync();
+            yield return null;
+            Assert.That(View(seg).DisplayText, Is.EqualTo("g"));
+
+            _workspace.Selection.Select(seg);
+            _app.Shell.Inspector.Rebuild();
+            UnityEngine.UI.Button red = null;
+            foreach (UnityEngine.UI.Button button in _app.Shell.Inspector.GetComponentsInChildren<UnityEngine.UI.Button>(true))
+            {
+                if (button.name == "Colour " + LedColors.ToId(1))
+                {
+                    red = button;
+                }
+            }
+
+            Assert.That(red, Is.Not.Null, "Seven-segment displays offer colour swatches too.");
+            red.onClick.Invoke();
+            _workspace.Sync();
+            yield return null;
+            Assert.That(_workspace.Circuit.GetNode(seg).Component.LedColor, Is.EqualTo(1));
+            Assert.That(View(seg).Geometry.LedColor, Is.EqualTo(1));
+            Assert.That(View(seg).DisplayText, Is.EqualTo("g"), "Colour never changes the logic.");
+            Assert.That(_workspace.Circuit.IsDriven(new PinRef(seg, BoundarySignatures.BitPin(6))), Is.True);
+
+            // Switching to another display style keeps the colour.
+            Assert.That(_workspace.ChangeComponent(seg, 4, -1, (int)DisplayStyle.Hex), Is.True);
+            Assert.That(_workspace.Circuit.GetNode(seg).Component.DisplayStyle, Is.EqualTo(DisplayStyle.Hex));
+            Assert.That(_workspace.Circuit.GetNode(seg).Component.LedColor, Is.EqualTo(1));
         }
     }
 }

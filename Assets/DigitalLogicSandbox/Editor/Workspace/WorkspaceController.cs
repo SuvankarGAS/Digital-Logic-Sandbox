@@ -848,11 +848,8 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
                             width = Mathf.Clamp(width, DisplayStyles.MinWidth(newStyle), DisplayStyles.MaxWidth(newStyle));
                         }
 
-                        variant = ComponentRef.Display(newStyle, width);
-                        if (newStyle == DisplayStyle.Led && current.DisplayStyle == DisplayStyle.Led)
-                        {
-                            variant = variant.WithLedColor(current.LedColor);
-                        }
+                        // Every display style has a colour; switching style keeps it.
+                        variant = ComponentRef.Display(newStyle, width).WithLedColor(current.LedColor);
 
                         return true;
                     }
@@ -942,7 +939,7 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             return ChangeComponent(node, variant);
         }
 
-        /// <summary>Lights an LED display in another colour (see <see cref="LedColors"/>) as one undoable step.</summary>
+        /// <summary>Lights a display (any style) in another colour (see <see cref="LedColors"/>) as one undoable step.</summary>
         public bool ChangeLedColor(NodeId node, int color)
         {
             if (Circuit == null || !Circuit.TryGetNode(node, out NodeDefinition existing))
@@ -950,10 +947,9 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
                 return false;
             }
 
-            if (existing.Component.Kind != ComponentKind.Display || existing.Component.DisplayStyle != DisplayStyle.Led ||
-                !LedColors.IsValid(color))
+            if (existing.Component.Kind != ComponentKind.Display || !LedColors.IsValid(color))
             {
-                Notify("Only LED displays have a colour.");
+                Notify("Only displays have a colour.");
                 return false;
             }
 

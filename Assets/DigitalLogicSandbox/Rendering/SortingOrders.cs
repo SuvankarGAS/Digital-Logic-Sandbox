@@ -17,10 +17,23 @@ namespace DigitalLogicSandbox.Rendering
         // Parts inside a gate's sorting group.
         public const int GateOutline = 10;
         public const int GateFill = 11;
+        // State band: indicators and display contents, layered bottom to top, all below the pins and text.
+
+        /// <summary>Back of the state band: display screens, LED housings, glow under a boundary indicator.</summary>
         public const int GateState = 12;
-        public const int PinHighlight = 13;
-        public const int Pin = 14;
-        public const int Text = 15;
+
+        /// <summary>Halos of lit lamps and segments; the ring of a boundary indicator.</summary>
+        public const int GateStateGlow = 13;
+
+        /// <summary>Lamps, segments and the boundary indicator itself.</summary>
+        public const int GateStateLit = 14;
+
+        /// <summary>Highlights on top of lamps.</summary>
+        public const int GateStateTop = 15;
+
+        public const int PinHighlight = 16;
+        public const int Pin = 17;
+        public const int Text = 18;
 
         /// <summary>Extra order of ghost parts inside the ghost (kept for parts that read it; the group decides).</summary>
         public const int GhostOffset = 100;

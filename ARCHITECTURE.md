@@ -801,11 +801,40 @@ latches, and so on. The engine has no sequential primitive. What makes this well
   Simulation or TruthTable knows about display rendering.
 - **Decoding.** `DisplayEncoding` is pure: segment masks (bit 0 = a … bit 6 = g, bit 7 = dp), glyphs 0–F,
   decimal and signed digits, dashes when a bit is X or Z, and `FormatValue` for the inspector and tests.
+  `TryDecodeGlyph` reverses a glyph, so a raw seven-segment display reads as the digit its segments form, e.g.
+  "7 (a b c)", or "5. (…)" with the decimal point.
+- **Rendering.** `DisplayVisual` draws digits like a real LED display:
+  - Pointed hexagonal segments use `RenderAssets.Segment`, a 9-sliced sprite one unit thick whose ends are
+    half the thickness, so the 45° tips survive any length. The segments meet along the corner diagonals with
+    an even gap.
+  - Digits lean about 7°: centres are offset by `y · tan`, and vertical bars are tilted by the same angle.
+  - Unlit segments are faint (the screen colour 11% toward the lit colour).
+  - Lit segments and lamps get a soft halo (`RenderAssets.SegmentGlow` or `Glow`), which is hidden in the
+    placement ghost.
+  - The screen is a dark inset window with a hairline bezel. On a single seven-segment digit it fills the
+    display area.
+  - Lamps (LED and binary) look like indicator LEDs:
+    - a dark housing ring;
+    - a lens that keeps a dim tint (24%) of its colour while off;
+    - a small highlight, so the lamp state doesn't rely on colour alone;
+    - a halo clamped by `PlaceDot` to stay inside the gate body (and, on an LED, clear of its label). It never
+      covers the pin, the label or a neighbouring gate.
+  - Order inside the gate's sorting group uses the state band of `SortingOrders`:
+    - `GateState`: screen, lamp housings;
+    - `GateStateGlow`: halos, bezel;
+    - `GateStateLit`: segments, lenses;
+    - `GateStateTop`: lamp highlights.
+    The band sits below `PinHighlight`, `Pin` and `Text`, so no display part shares an order with a pin. The
+    boundary state indicator uses the same band.
+  - Recolouring stays allocation-free, and sprites are pooled per display.
 - **Layout.** `GateLayout.DisplaySize` gives each style's body and content area; content is drawn upright and
-  scaled into the rotated `GateGeometry.DisplayArea`.
+  scaled into the rotated `GateGeometry.DisplayArea`. An LED is a 1.6 square. A labelled LED (the label replaces
+  the caption and is drawn upright along the top) is a 2×2 square (`LabelledLedSize`), with the lamp fixed below
+  the label (`LabelledLedLamp`) at every rotation.
 - **Persistence (schema v4).** `{ "kind": "display", "style": "hex", "width": 8 }`.
-- **LED colour (schema v5).** `ComponentRef.LedColor` is an index into `LedColors` (signal, red, orange, green,
-  blue, pink). It is part of the reference (equality and hash) but has no effect on signatures or
+- **Display colour (schema v5).** `ComponentRef.LedColor` is an index into `LedColors` (signal, red, orange,
+  green, blue, pink), available for every display style (LED, seven-segment, binary, hex and decimal); switching
+  style keeps it. It is part of the reference (equality and hash) but has no effect on signatures or
   simulation. `VisualTheme.LedColor(i)` supplies the colours, and index 0 is the HIGH signal colour. It is
   saved as `"color": "green"` only when it is not the default. Unknown ids load as the default. In the
   inspector, a swatch row marks the current colour with a check, so the choice is never shown by colour

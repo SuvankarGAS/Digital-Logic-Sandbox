@@ -42,6 +42,93 @@ namespace DigitalLogicSandbox.Rendering
         /// <summary>Plain white square, 1×1 unit.</summary>
         public static Sprite Square => _square != null ? _square : _square = CreateSquare();
 
+        /// <summary>
+        /// Seven-segment bar: an elongated hexagon with 45° pointed ends, 1 unit thick. 9-sliced with end borders of
+        /// half the thickness, so a sliced renderer of size (length / thickness, 1) keeps true 45° tips at any length.
+        /// </summary>
+        public static Sprite Segment => _segment != null ? _segment : _segment = CreateSegment();
+
+        /// <summary>
+        /// Soft halo for a lit segment: a blurred capsule 1 unit thick whose ends are 9-sliced like <see cref="Segment"/>.
+        /// </summary>
+        public static Sprite SegmentGlow => _segmentGlow != null ? _segmentGlow : _segmentGlow = CreateSegmentGlow();
+
+        private static Sprite _segment;
+        private static Sprite _segmentGlow;
+
+        private static Sprite CreateSegment()
+        {
+            const int width = 128;
+            const int height = 32;
+            const float half = height * 0.5f;
+            const float inset = 1f; // keeps the anti-aliased edge inside the texture
+            float flat = width * 0.5f - half; // where the pointed tip starts
+            Texture2D texture = CreateTexture("DLS Segment", width, height);
+            var pixels = new Color32[width * height];
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    float px = Mathf.Abs(x + 0.5f - width * 0.5f);
+                    float py = Mathf.Abs(y + 0.5f - half);
+                    // Distance to the hexagon: the flat sides, and the 45° tips (normalised by √2).
+                    float sides = py - (half - inset);
+                    float tips = (px - flat + py - (half - inset)) * 0.70710678f;
+                    float alpha = Mathf.Clamp01(0.5f - Mathf.Max(sides, tips));
+                    pixels[y * width + x] = new Color32(255, 255, 255, (byte)(alpha * 255f));
+                }
+            }
+
+            // The tip region (half the height) on each end is the 9-slice border; the body stretches.
+            return Finish(texture, pixels, "DLS Segment", width, height, height, new Vector4(half, 0f, half, 0f));
+        }
+
+        private static Sprite CreateSegmentGlow()
+        {
+            const int width = 128;
+            const int height = 64;
+            const float half = height * 0.5f;
+            float core = width * 0.5f - half; // capsule centre line half-length
+            Texture2D texture = CreateTexture("DLS SegmentGlow", width, height);
+            var pixels = new Color32[width * height];
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    float px = Mathf.Max(0f, Mathf.Abs(x + 0.5f - width * 0.5f) - core);
+                    float py = y + 0.5f - half;
+                    float t = Mathf.Clamp01(1f - Mathf.Sqrt(px * px + py * py) / half);
+                    float alpha = t * t * (3f - 2f * t) * t; // smooth, concentrated near the bar
+                    pixels[y * width + x] = new Color32(255, 255, 255, (byte)(alpha * 255f));
+                }
+            }
+
+            return Finish(texture, pixels, "DLS SegmentGlow", width, height, height, new Vector4(half, 0f, half, 0f));
+        }
+
+        private static Sprite Finish(Texture2D texture, Color32[] pixels, string name, int width, int height,
+            float pixelsPerUnit, Vector4 border)
+        {
+            texture.SetPixels32(pixels);
+            texture.Apply(false, true);
+            Sprite sprite = Sprite.Create(texture, new Rect(0, 0, width, height), new Vector2(0.5f, 0.5f),
+                pixelsPerUnit, 0, SpriteMeshType.FullRect, border);
+            sprite.name = name;
+            sprite.hideFlags = HideFlags.DontSave;
+            return sprite;
+        }
+
+        private static Texture2D CreateTexture(string name, int width, int height)
+        {
+            return new Texture2D(width, height, TextureFormat.RGBA32, false)
+            {
+                name = name,
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp,
+                hideFlags = HideFlags.DontSave,
+            };
+        }
+
         private static Sprite CreateSquare()
         {
             var texture = new Texture2D(4, 4, TextureFormat.RGBA32, false)

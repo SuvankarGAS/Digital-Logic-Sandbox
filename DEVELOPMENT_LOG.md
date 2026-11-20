@@ -2394,3 +2394,80 @@ being dragged were sorted strangely.
 - PlayMode: 135 / 135. New tests cover timeline edits rewriting patterns, the stepper, presets, the
   readout, view switching, power-on sync and clock lanes. The existing limit / virtualisation / TMP budget
   test still passes.
+
+## Seven-segment display polish (2026-11-20)
+
+### Implemented
+- **Real LED-style digits** (`Rendering/Gates/DisplayVisual.cs`, `Rendering/RenderAssets.cs`).
+  - Pointed hexagonal segments come from a new 9-sliced `RenderAssets.Segment` sprite, so the tips keep 45° at
+    any length. They meet along the corner diagonals with an even gap.
+  - Digits have a slight 7° forward lean.
+  - Unlit segments are faint, so the digit's shape is visible.
+  - Lit segments get a soft glow from a new `RenderAssets.SegmentGlow` capsule halo.
+  - Digits sit in a dark inset screen with a hairline bezel.
+  - The decimal point is round and follows the lean.
+- **A bigger single digit with the same footprint.** The 4×8 body and pin positions are unchanged. The
+  seven-segment content area grew from 2.4 to 2.9 wide, and its screen now fills the display area like a
+  display module.
+- **Every number display benefits.** Hex, Decimal and Signed decimal use the same renderer; LED and Binary lamps
+  get the glow and the colour.
+- **Colour for every display** (`ComponentRef.LedColor` / `WithLedColor`, `WorkspaceController.ChangeLedColor`,
+  inspector swatches): seven-segment, hex, decimal and binary displays can light red, orange, green, blue or
+  pink, like LEDs. Switching display style keeps the colour.
+- **Readable readout:** a raw seven-segment display reads as the digit its segments form ("1 (b c)",
+  "7 (a b c)", "8. (a b c d e f g dp)"). `DisplayEncoding.TryDecodeGlyph` is new.
+
+### Fixes found while testing
+- `ComponentRef.Utility` (used when loading projects) kept the colour only for LED displays. A coloured
+  seven-segment or hex display lost its colour on reopen. It now keeps it for every style; a new round-trip test
+  covers it.
+
+### Test results
+- EditMode: 528 / 528. New and updated display tests cover:
+  - Glyph decoding round-trips 0–F.
+  - Readout wording.
+  - Colour on every style, with non-displays rejected.
+  - Seven-segment and hex colour round-trips.
+  - The seven-segment area grows while the footprint and on-grid pins stay the same.
+- PlayMode: 136 / 136, including a new test for colouring a seven-segment display from the inspector and
+  keeping the colour across a style switch.
+- Visual check through Game-view captures:
+  - Single digits "5.", "2" and "1" in signal, red and blue.
+  - A green hex display and an orange decimal display.
+  - A hex display rotated 90°.
+
+
+## LED display fix and polish (2026-11-20)
+
+### Fixed
+- **The LED's label, lamp and glow overlapped.** There were three causes:
+  - The halo was 2.4 × the lamp (about 1.9 units) on a 1.6 × 1.2 body, so it spilled over the pin, the label and
+    neighbouring gates.
+  - A display label is drawn inside the body along the top edge, right on top of the lamp.
+  - Display and boundary-indicator parts used `GateState + 1 / + 2`, which equalled `PinHighlight` / `Pin`. Same
+    sorting orders have no defined draw order.
+- **Layout** (`GateLayout`):
+  - An LED body is now 1.6 × 1.6, with the lamp clear of the pin.
+  - A labelled LED is 2 × 2, with the lamp fixed below the label at every rotation (`LabelledLedSize`,
+    `LabelledLedLamp`).
+- **Halo clamp** (`DisplayVisual.PlaceDot`): every lamp halo stays inside the gate body with a margin. An LED's
+  halo also stays below the label, and binary lamps are capped near their pitch.
+- **Sorting** (`SortingOrders`): the state band is now four slots, `GateState` / `GateStateGlow` /
+  `GateStateLit` / `GateStateTop`, below `PinHighlight` (16), `Pin` (17) and `Text` (18). `GateView` and
+  `DisplayVisual` use the names, so nothing depends on literal offsets.
+
+### Improved
+- LED and binary lamps now look like indicator LEDs:
+  - a dark housing ring;
+  - a lens that shows a dim tint of its colour while off, so you can tell which colour it will light;
+  - a small highlight, so the state doesn't rely on colour alone;
+  - the coloured glow when lit.
+- New test accessors: `GateView.TryGetDisplayLampGlow` and `GateView.BodyBounds`.
+
+### Test results
+- EditMode: 529 / 529. A new test checks that the LED lamp sits inside its body, clear of the pin and below a
+  label, at all four rotations.
+- PlayMode: 136 / 136. `LedAndSevenSegment_FollowSingleBitInputs` now also checks that the glow appears only
+  while HIGH and that it stays inside the body bounds.
+- Visual check through Game-view captures: LEDs in every colour, lit and unlit, with and without labels and
+  rotated 90° and 180°, plus an 8-bit binary display.

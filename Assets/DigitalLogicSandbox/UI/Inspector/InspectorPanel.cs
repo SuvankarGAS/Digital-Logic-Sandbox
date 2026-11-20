@@ -596,10 +596,7 @@ namespace DigitalLogicSandbox.UI.Inspector
                     _ui.AddTooltip(button.gameObject, DisplayStyles.DisplayName(style));
                 }
 
-                if (component.DisplayStyle == DisplayStyle.Led)
-                {
-                    BuildLedColors(id, component.LedColor);
-                }
+                BuildLedColors(id, component.LedColor);
 
                 BuildLabelField(node);
             }

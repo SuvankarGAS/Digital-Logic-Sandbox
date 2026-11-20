@@ -34,6 +34,12 @@ namespace DigitalLogicSandbox.Rendering.Gates
         /// <summary>Distance between the lamps of a binary display.</summary>
         public const float LampPitch = 0.5f;
 
+        /// <summary>Body of an LED with a label: square, with the label along the top and the lamp below it.</summary>
+        public static readonly Vector2 LabelledLedSize = new Vector2(2f, 2f);
+
+        /// <summary>Lamp centre of a labelled LED (node-local, any rotation): below the label band.</summary>
+        public static readonly Vector2 LabelledLedLamp = new Vector2(0f, -0.2f);
+
         /// <param name="icon">Optional short user icon of a custom gate, shown before the pin summary.</param>
         public static GateGeometry Compute(ComponentKind kind, ComponentSignature signature, Rotation rotation,
             string title, string icon = null, DisplayStyle display = DisplayStyle.Led, int ledColor = 0)
@@ -83,6 +89,12 @@ namespace DigitalLogicSandbox.Rendering.Gates
             {
                 // Inputs on the left (labelled a–g, dp on a seven-segment display); lamps or digits fill the body.
                 size = DisplaySize(display, busWidth, out displayArea);
+                if (display == DisplayStyle.Led && !string.IsNullOrWhiteSpace(title))
+                {
+                    // A labelled LED: a larger square body, label along the top, lamp below it (see below).
+                    size = LabelledLedSize;
+                }
+
                 PlacePins(inputPins, -size.x * 0.5f);
             }
             else if (boundary || kind == ComponentKind.Clock || kind == ComponentKind.Constant)
@@ -157,6 +169,12 @@ namespace DigitalLogicSandbox.Rendering.Gates
                     : displayArea.size;
                 Vector2 areaCenter = Rotate(displayArea.center, rotation);
                 displayArea = new Rect(areaCenter - areaSize * 0.5f, areaSize);
+                if (display == DisplayStyle.Led && !string.IsNullOrWhiteSpace(title))
+                {
+                    // The label is drawn upright along the top whatever the rotation, so the lamp always sits
+                    // centred below it (the body is square, so rotation does not change its size).
+                    displayArea = new Rect(LabelledLedLamp - displayArea.size * 0.5f, displayArea.size);
+                }
             }
 
             var inputPorts = new PortId[inputs.Count];
@@ -221,14 +239,16 @@ namespace DigitalLogicSandbox.Rendering.Gates
             switch (style)
             {
                 case DisplayStyle.Led:
-                    size = new Vector2(1.6f, 1.2f);
-                    center = new Vector2(0.15f, 0f);
-                    content = new Vector2(0.8f, 0.8f);
+                    // Square body: the lamp, its housing and its glow fit inside with a margin, clear of the pin.
+                    size = new Vector2(1.6f, 1.6f);
+                    center = new Vector2(0.1f, 0f);
+                    content = new Vector2(0.9f, 0.9f);
                     break;
                 case DisplayStyle.SevenSegment:
+                    // The digit is limited by the width: use as much of it as the a–g / dp labels allow.
                     size = new Vector2(4f, 8f * PinSpacing);
-                    center = new Vector2(0.35f, 0f);
-                    content = new Vector2(2.4f, 6.4f);
+                    center = new Vector2(0.3f, 0f);
+                    content = new Vector2(2.9f, 6.4f);
                     break;
                 case DisplayStyle.Binary:
                     content = new Vector2(width * LampPitch, LampPitch);

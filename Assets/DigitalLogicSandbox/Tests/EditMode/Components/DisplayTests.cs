@@ -14,6 +14,7 @@ using DigitalLogicSandbox.Simulation.Context;
 using DigitalLogicSandbox.Tests.EditMode.Support;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
+using UnityEngine;
 using static DigitalLogicSandbox.Tests.EditMode.Support.SimulationTestUtil;
 using static DigitalLogicSandbox.Tests.EditMode.Support.TestCircuits;
 
@@ -133,7 +134,15 @@ namespace DigitalLogicSandbox.Tests.EditMode.Components
             Assert.That(DisplayEncoding.FormatValue(DisplayStyle.Led, 1, 1, 0), Is.EqualTo("ON"));
             Assert.That(DisplayEncoding.FormatValue(DisplayStyle.Led, 1, 0, 0), Is.EqualTo("OFF"));
             Assert.That(DisplayEncoding.FormatValue(DisplayStyle.Led, 1, 0, 1), Is.EqualTo("?"));
-            Assert.That(DisplayEncoding.FormatValue(DisplayStyle.SevenSegment, 1, 0b0000_0110, 0), Is.EqualTo("b c"));
+            // Segments that form a digit are read as that digit; anything else as the list of lit segments.
+            Assert.That(DisplayEncoding.FormatValue(DisplayStyle.SevenSegment, 1, 0b0000_0110, 0), Is.EqualTo("1 (b c)"));
+            Assert.That(DisplayEncoding.FormatValue(DisplayStyle.SevenSegment, 1, 0x07, 0), Is.EqualTo("7 (a b c)"));
+            Assert.That(DisplayEncoding.FormatValue(DisplayStyle.SevenSegment, 1, 0xFF, 0),
+                Is.EqualTo("8. (a b c d e f g dp)"));
+            Assert.That(DisplayEncoding.FormatValue(DisplayStyle.SevenSegment, 1, 0b0000_0011, 0), Is.EqualTo("a b"));
+            Assert.That(DisplayEncoding.FormatValue(DisplayStyle.SevenSegment, 1, 0b1000_0000, 0), Is.EqualTo("dp"));
+            Assert.That(DisplayEncoding.FormatValue(DisplayStyle.SevenSegment, 1, 0b0000_0110, 0b0000_0001),
+                Is.EqualTo("a? b c"), "An unknown segment is never read as a digit.");
             Assert.That(DisplayEncoding.FormatValue(DisplayStyle.SevenSegment, 1, 0, 0), Is.EqualTo("blank"));
             Assert.That(DisplayEncoding.FormatValue(DisplayStyle.Binary, 4, 0b1010, 0b0001), Is.EqualTo("101X"));
             Assert.That(DisplayEncoding.FormatValue(DisplayStyle.Hex, 12, 0xA5, 0), Is.EqualTo("0A5"));
@@ -141,6 +150,21 @@ namespace DigitalLogicSandbox.Tests.EditMode.Components
             Assert.That(DisplayEncoding.FormatValue(DisplayStyle.SignedDecimal, 8, 0xA5, 0), Is.EqualTo("-91"));
             Assert.That(DisplayEncoding.FormatValue(DisplayStyle.SignedDecimal, 4, 0x7, 0), Is.EqualTo("7"));
             Assert.That(DisplayEncoding.FormatValue(DisplayStyle.Decimal, 8, 0, 0x80), Is.EqualTo("?"));
+        }
+
+        [Test]
+        public void TryDecodeGlyph_IsTheReverseOfGlyph()
+        {
+            for (int digit = 0; digit < 16; digit++)
+            {
+                Assert.That(DisplayEncoding.TryDecodeGlyph(DisplayEncoding.Glyph(digit), out int decoded), Is.True);
+                Assert.That(decoded, Is.EqualTo(digit));
+                Assert.That(DisplayEncoding.TryDecodeGlyph((byte)(DisplayEncoding.Glyph(digit) | DisplayEncoding.SegmentDp),
+                    out decoded), Is.True, "The decimal point does not change the digit.");
+            }
+
+            Assert.That(DisplayEncoding.TryDecodeGlyph(0, out _), Is.False);
+            Assert.That(DisplayEncoding.TryDecodeGlyph(DisplayEncoding.SegmentA | DisplayEncoding.SegmentB, out _), Is.False);
         }
 
         [Test]
@@ -153,6 +177,13 @@ namespace DigitalLogicSandbox.Tests.EditMode.Components
             Assert.That(geometry.InputPins.Length, Is.EqualTo(8));
             Assert.That(geometry.InputNames[6], Is.EqualTo("g"));
             Assert.That(geometry.OutputPins.Length, Is.Zero);
+            Assert.That(geometry.Size, Is.EqualTo(new Vector2(4f, 8f * GateLayout.PinSpacing)), "Footprint unchanged.");
+            Assert.That(geometry.DisplayArea.width, Is.GreaterThanOrEqualTo(2.8f), "A large digit.");
+            Assert.That(geometry.DisplayArea.xMax, Is.LessThan(geometry.Size.x * 0.5f - 0.15f), "Room for the screen edge.");
+            for (int i = 0; i < geometry.InputPins.Length; i++)
+            {
+                Assert.That(Mathf.Repeat(geometry.InputPins[i].x, 1f), Is.EqualTo(0f).Within(1e-4f), "Pins stay on the grid.");
+            }
 
             _env.Catalog.TryGetSignature(ComponentRef.Display(DisplayStyle.Hex, 16), out ComponentSignature hex);
             GateGeometry wide = GateLayout.Compute(ComponentKind.Display, hex, Rotation.R0, "HEX", null, DisplayStyle.Hex);
@@ -161,6 +192,46 @@ namespace DigitalLogicSandbox.Tests.EditMode.Components
 
             GateGeometry rotated = GateLayout.Compute(ComponentKind.Display, hex, Rotation.R90, "HEX", null, DisplayStyle.Hex);
             Assert.That(rotated.DisplayArea.height, Is.EqualTo(wide.DisplayArea.width).Within(1e-4f));
+        }
+
+        [Test]
+        public void Layout_LedLampSitsInsideItsBody_ClearOfThePin_AtEveryRotation()
+        {
+            _env.Catalog.TryGetSignature(ComponentRef.Display(DisplayStyle.Led), out ComponentSignature led);
+            for (Rotation rotation = Rotation.R0; rotation <= Rotation.R270; rotation++)
+            {
+                GateGeometry geometry = GateLayout.Compute(ComponentKind.Display, led, rotation, string.Empty, null,
+                    DisplayStyle.Led);
+                Rect area = geometry.DisplayArea;
+                Vector2 half = geometry.Size * 0.5f;
+                string at = rotation.ToString();
+                Assert.That(geometry.Size.x, Is.EqualTo(geometry.Size.y).Within(1e-4f), at + ": a square body.");
+                Assert.That(area.width, Is.EqualTo(area.height).Within(1e-4f), at + ": a round lamp.");
+
+                // Room on every side for the housing and a halo, so neither reaches the body edge or the label above.
+                Assert.That(area.xMin, Is.GreaterThanOrEqualTo(-half.x + 0.25f), at);
+                Assert.That(area.xMax, Is.LessThanOrEqualTo(half.x - 0.25f), at);
+                Assert.That(area.yMin, Is.GreaterThanOrEqualTo(-half.y + 0.25f), at);
+                Assert.That(area.yMax, Is.LessThanOrEqualTo(half.y - 0.25f), at);
+
+                Vector2 pin = geometry.InputPins[0];
+                Assert.That(Mathf.Max(Mathf.Abs(pin.x), Mathf.Abs(pin.y)), Is.EqualTo(half.x).Within(1e-4f), at + ": pin on the edge.");
+                Assert.That(Vector2.Distance(pin, area.center), Is.GreaterThanOrEqualTo(area.width * 0.5f + 0.35f),
+                    at + ": the lamp keeps clear of the pin.");
+
+                // A label is drawn upright along the top of the body (0.3 below the edge, 0.5 tall): the lamp of a
+                // labelled LED sits below that band at every rotation.
+                GateGeometry labelled = GateLayout.Compute(ComponentKind.Display, led, rotation, "HALT", null,
+                    DisplayStyle.Led);
+                Rect lamp = labelled.DisplayArea;
+                Vector2 labelledHalf = labelled.Size * 0.5f;
+                Assert.That(labelled.Size, Is.EqualTo(GateLayout.LabelledLedSize), at + ": labelled body.");
+                Assert.That(lamp.width, Is.EqualTo(area.width).Within(1e-4f), at + ": same lamp size.");
+                Assert.That(lamp.yMax, Is.LessThanOrEqualTo(labelledHalf.y - 0.55f - 0.15f), at + ": below the label.");
+                Assert.That(lamp.yMin, Is.GreaterThanOrEqualTo(-labelledHalf.y + 0.25f), at);
+                Assert.That(lamp.xMin, Is.GreaterThanOrEqualTo(-labelledHalf.x + 0.25f), at);
+                Assert.That(lamp.xMax, Is.LessThanOrEqualTo(labelledHalf.x - 0.25f), at);
+            }
         }
 
         [Test]
@@ -230,7 +301,17 @@ namespace DigitalLogicSandbox.Tests.EditMode.Components
             Assert.That(red.LedColor, Is.EqualTo(1));
             Assert.That(red, Is.Not.EqualTo(plain), "The colour is part of the component reference.");
             Assert.That(red.WithLedColor(0), Is.EqualTo(plain));
-            Assert.Throws<InvalidOperationException>(() => ComponentRef.Display(DisplayStyle.Hex, 4).WithLedColor(1));
+            Assert.Throws<InvalidOperationException>(() => ComponentRef.Clock.WithLedColor(1), "Only displays have a colour.");
+
+            // Every display style can be coloured (seven-segment, number and binary displays too).
+            for (DisplayStyle style = DisplayStyle.Led; style <= DisplayStyles.Last; style++)
+            {
+                int width = DisplayStyles.MinWidth(style) + (DisplayStyles.IsBus(style) ? 3 : 0);
+                ComponentRef display = ComponentRef.Display(style, width).WithLedColor(2);
+                Assert.That(display.LedColor, Is.EqualTo(2), style.ToString());
+                Assert.That(display.DisplayStyle, Is.EqualTo(style));
+                Assert.That(display.Width, Is.EqualTo(width));
+            }
             Assert.Throws<ArgumentOutOfRangeException>(() => plain.WithLedColor(LedColors.Count));
 
             // Same pins, so colour can never change simulation.
@@ -250,6 +331,10 @@ namespace DigitalLogicSandbox.Tests.EditMode.Components
             var circuit = new CircuitDefinition(DefinitionId.New(), "Leds");
             NodeDefinition green = circuit.AddNode(ComponentRef.Display(DisplayStyle.Led).WithLedColor(3), CircuitPoint.Zero);
             NodeDefinition plain = circuit.AddNode(ComponentRef.Display(DisplayStyle.Led), new CircuitPoint(0, 3));
+            NodeDefinition redDigit = circuit.AddNode(ComponentRef.Display(DisplayStyle.SevenSegment).WithLedColor(1),
+                new CircuitPoint(6, 0));
+            NodeDefinition orangeHex = circuit.AddNode(ComponentRef.Display(DisplayStyle.Hex, 8).WithLedColor(2),
+                new CircuitPoint(12, 0));
             string json = ProjectSerializer.ToJson(new ProjectDocument { Name = "Leds", RootCircuit = circuit });
 
             JObject parsed = JObject.Parse(json);
@@ -261,6 +346,10 @@ namespace DigitalLogicSandbox.Tests.EditMode.Components
             ProjectDocument loaded = deserializer.Read(json).Document;
             Assert.That(loaded.RootCircuit.GetNode(green.Id).Component.LedColor, Is.EqualTo(3));
             Assert.That(loaded.RootCircuit.GetNode(plain.Id).Component.LedColor, Is.EqualTo(LedColors.Signal));
+            Assert.That((string)nodes[2]["color"], Is.EqualTo("red"));
+            Assert.That(loaded.RootCircuit.GetNode(redDigit.Id).Component, Is.EqualTo(redDigit.Component));
+            Assert.That(loaded.RootCircuit.GetNode(orangeHex.Id).Component.LedColor, Is.EqualTo(2));
+            Assert.That(loaded.RootCircuit.GetNode(orangeHex.Id).Component.Width, Is.EqualTo(8));
 
             // A version 4 file (before LED colours) migrates and loads with the default colour.
             nodes[0].Value<JObject>().Remove("color");

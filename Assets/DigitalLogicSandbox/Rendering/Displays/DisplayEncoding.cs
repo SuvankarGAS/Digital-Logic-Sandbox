@@ -40,6 +40,26 @@ namespace DigitalLogicSandbox.Rendering.Displays
             return HexGlyphs[digit & 0xF];
         }
 
+        /// <summary>
+        /// The hexadecimal digit whose glyph is exactly the segments a–g of <paramref name="mask"/> (the decimal point
+        /// is ignored), or false when those segments form no digit.
+        /// </summary>
+        public static bool TryDecodeGlyph(byte mask, out int digit)
+        {
+            int segments = mask & 0x7F;
+            for (int i = 0; i < HexGlyphs.Length; i++)
+            {
+                if (HexGlyphs[i] == segments)
+                {
+                    digit = i;
+                    return true;
+                }
+            }
+
+            digit = -1;
+            return false;
+        }
+
         /// <summary>Number of input bits a display reads: 8 for seven-segment (a–g, dp), otherwise its width.</summary>
         public static int InputCount(DisplayStyle style, int width)
         {
@@ -124,8 +144,9 @@ namespace DigitalLogicSandbox.Rendering.Displays
         }
 
         /// <summary>
-        /// The reading as text: "ON"/"OFF" for an LED, lit segment names for seven-segment ("a b c" or "blank"),
-        /// bits most significant first for binary, and the number for hex/decimal; "?" when a bus bit is unreadable.
+        /// The reading as text: "ON"/"OFF" for an LED; for seven-segment the lit segment names, prefixed by the digit
+        /// they form when they form one ("7 (a b c)", "5. (a c d f g dp)", "a b", "blank"); bits most significant first
+        /// for binary, and the number for hex/decimal; "?" when a bus bit is unreadable.
         /// </summary>
         public static string FormatValue(DisplayStyle style, int width, ulong high, ulong unknown)
         {
@@ -148,7 +169,18 @@ namespace DigitalLogicSandbox.Rendering.Displays
                         }
                     }
 
-                    return text.Length > 0 ? text.ToString() : "blank";
+                    if (text.Length == 0)
+                    {
+                        return "blank";
+                    }
+
+                    if ((unknown & 0xFF) == 0 && TryDecodeGlyph((byte)high, out int digit))
+                    {
+                        string glyph = digit.ToString("X", CultureInfo.InvariantCulture) + ((high & SegmentDp) != 0 ? "." : string.Empty);
+                        return glyph + " (" + text + ")";
+                    }
+
+                    return text.ToString();
                 }
             }
 
