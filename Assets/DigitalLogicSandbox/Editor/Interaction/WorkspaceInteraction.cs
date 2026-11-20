@@ -214,8 +214,10 @@ namespace DigitalLogicSandbox.CircuitEditor.Interaction
             {
                 _workspace.RotateSelection();
             }
-            else if (_controls.Frame.WasPressedThisFrame())
+            else if (_controls.Frame.WasPressedThisFrame() &&
+                !(Keyboard.current != null && Keyboard.current.ctrlKey.isPressed))
             {
+                // Ctrl+F belongs to the library search.
                 _workspace.FrameContent();
             }
         }

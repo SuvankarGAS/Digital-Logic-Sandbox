@@ -90,6 +90,9 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
         /// <summary>Raised when placement mode starts or ends.</summary>
         public event Action PlacementChanged;
 
+        /// <summary>Raised after a pending placement put a node into the circuit (library recents).</summary>
+        public event Action<PlacementRequest> PlacementCommitted;
+
         /// <summary>Raised after the shown circuit level changed (open, back, edit, save, discard, load).</summary>
         public event Action NavigationChanged;
 
@@ -1606,6 +1609,172 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
             MarkStatusDirty();
         }
 
+        /// <summary>
+        /// Changes a custom gate's name, description, category and icon in the library (all versions; metadata only).
+        /// Null keeps a field. Recorded in the main circuit's history. Returns false when nothing changed or the name
+        /// is empty.
+        /// </summary>
+        public bool SetCustomGateDetails(DefinitionId id, string name, string description, string category, string icon)
+        {
+            EnsureInitialized();
+            if (!_library.TryGetLatest(id, out CircuitDefinition latest))
+            {
+                return false;
+            }
+
+            if (name != null && string.IsNullOrWhiteSpace(name))
+            {
+                PostNotification("A gate name cannot be empty.");
+                return false;
+            }
+
+            if (Same(name, latest.Name) && Same(description, latest.Description) && Same(category, latest.Category) &&
+                Same(icon, latest.Icon))
+            {
+                return false;
+            }
+
+            _navigator.RootHistory.Execute(new SetCustomGateMetadataCommand(_library, id, name, description, category,
+                icon, "Edit gate '" + latest.Name + "'"));
+            return true;
+
+            static bool Same(string value, string current)
+            {
+                return value == null || string.Equals(value.Trim(), current ?? string.Empty, StringComparison.Ordinal);
+            }
+        }
+
+        /// <summary>Moves several custom gates to <paramref name="category"/> as one undoable step (category rename).</summary>
+        public bool SetCustomGateCategory(IReadOnlyList<DefinitionId> ids, string category)
+        {
+            EnsureInitialized();
+            category = category?.Trim() ?? string.Empty;
+            var commands = new List<ICommand>();
+            for (int i = 0; i < ids.Count; i++)
+            {
+                if (_library.TryGetLatest(ids[i], out CircuitDefinition latest) &&
+                    !string.Equals(latest.Category ?? string.Empty, category, StringComparison.Ordinal))
+                {
+                    commands.Add(new SetCustomGateMetadataCommand(_library, ids[i], null, null, category, null));
+                }
+            }
+
+            if (commands.Count == 0)
+            {
+                return false;
+            }
+
+            _navigator.RootHistory.Execute(new CompositeCommand(
+                category.Length > 0 ? "Move gates to '" + category + "'" : "Clear gate category", commands));
+            return true;
+        }
+
+        /// <summary>
+        /// Publishes a copy of the latest version of a custom gate as a new, independent gate (version 1) with a unique
+        /// name, keeping its program instruction set binding. Undoable. Returns the copy, or null.
+        /// </summary>
+        public CircuitDefinition DuplicateCustomGate(DefinitionId id)
+        {
+            EnsureInitialized();
+            if (!_library.TryGetLatest(id, out CircuitDefinition source))
+            {
+                return null;
+            }
+
+            CircuitDefinition copy = source.Clone(DefinitionId.New(), 1);
+            copy.UpdateMetadata(DefinitionUsage.UniqueName(_library, source.Name + " copy"), source.Description,
+                source.Category, source.Icon);
+            var commands = new List<ICommand> { new PublishDefinitionCommand(_library, copy) };
+            string binding = Programs.BindingOf(id);
+            if (binding != null)
+            {
+                commands.Add(new BindInstructionSetCommand(Programs, copy.Id, binding, InstructionSetName(binding)));
+            }
+
+            _navigator.RootHistory.Execute(new CompositeCommand("Duplicate gate '" + source.Name + "'", commands));
+            PostNotification("Created '" + copy.Name + "'.");
+            return copy;
+        }
+
+        /// <summary>
+        /// Whether a custom gate can be deleted: only from the main circuit, and only while no instance of any of its
+        /// versions remains in the main circuit or inside another gate. <paramref name="reason"/> explains a refusal.
+        /// </summary>
+        public bool CanDeleteCustomGate(DefinitionId id, out string reason)
+        {
+            EnsureInitialized();
+            reason = null;
+            if (!_library.TryGetLatest(id, out CircuitDefinition latest))
+            {
+                reason = "That gate is no longer in the library.";
+                return false;
+            }
+
+            if (_navigator.CurrentIndex > 0)
+            {
+                reason = "Return to the main circuit to delete a gate.";
+                return false;
+            }
+
+            var users = new List<string>();
+            int total = DefinitionUsage.CountUsages(_library, RootCircuit, id, out int rootInstances, users);
+            if (total == 0)
+            {
+                return true;
+            }
+
+            var text = new System.Text.StringBuilder();
+            text.Append('\'').Append(latest.Name).Append("' is still used");
+            if (rootInstances > 0)
+            {
+                text.Append(rootInstances == 1 ? " once in the main circuit" : " " + rootInstances + " times in the main circuit");
+            }
+
+            if (users.Count > 0)
+            {
+                text.Append(rootInstances > 0 ? " and" : string.Empty).Append(" inside ");
+                for (int i = 0; i < users.Count && i < 3; i++)
+                {
+                    text.Append(i > 0 ? ", '" : "'").Append(users[i]).Append('\'');
+                }
+
+                if (users.Count > 3)
+                {
+                    text.Append(" and ").Append(users.Count - 3).Append(" more");
+                }
+            }
+
+            text.Append(". Remove those instances first.");
+            reason = text.ToString();
+            return false;
+        }
+
+        /// <summary>
+        /// Deletes a custom gate (all versions) from the library when <see cref="CanDeleteCustomGate"/> allows it,
+        /// clearing its instruction set binding. Undo restores both. A refusal is posted as a notification.
+        /// </summary>
+        public bool DeleteCustomGate(DefinitionId id)
+        {
+            if (!CanDeleteCustomGate(id, out string reason))
+            {
+                PostNotification(reason);
+                return false;
+            }
+
+            _library.TryGetLatest(id, out CircuitDefinition latest);
+            string name = latest.Name;
+            var commands = new List<ICommand>();
+            if (Programs.BindingOf(id) != null)
+            {
+                commands.Add(new BindInstructionSetCommand(Programs, id, null, null));
+            }
+
+            commands.Add(new DeleteCustomGateCommand(_library, id, name));
+            _navigator.RootHistory.Execute(new CompositeCommand("Delete gate '" + name + "'", commands));
+            PostNotification("Deleted '" + name + "'. Undo brings it back.");
+            return true;
+        }
+
         // ------------------------------------------------------------------------------------------------
         // Custom gate packaging
         // ------------------------------------------------------------------------------------------------
@@ -2018,6 +2187,11 @@ namespace DigitalLogicSandbox.CircuitEditor.Workspace
 
             PlacementRequest request = _placement.Value;
             NodeId node = PlaceNode(request.Component, world, request.DisplayName);
+            if (node != NodeId.None)
+            {
+                PlacementCommitted?.Invoke(request);
+            }
+
             if (keepPlacing)
             {
                 // Refresh boundary names (A → B) for the next ghost.

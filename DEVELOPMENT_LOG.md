@@ -2085,3 +2085,150 @@ dialogs, and a pinned tool package.
   Check them by hand in the built .exe.
 - Only Windows has native dialogs; other platforms use the in-app picker.
 - The player is not code-signed, so Windows SmartScreen may warn on first run.
+
+## Library panel overhaul (2026-11-20)
+
+The user asked for a much better, more polished gate library. They chose: visual polish, keyboard and search flow,
+pinned and recent entries, custom gate management, collapsible custom gate categories, a collapsible and
+resizable panel, and a rich hover preview card.
+
+### Implemented
+- **Rows:**
+  - Each row has a mini gate tile with input and output pin dots, and a pin-count pill for custom gates.
+  - A star appears on hover and stays on pinned entries.
+  - Hover, press, keyboard highlight and armed state are animated. The entry being placed keeps an accent bar
+    until placement ends.
+- **Sections:**
+  - Rotating chevrons, count pills and hover tints.
+  - Custom gates are grouped in nested, collapsible categories.
+  - Open or closed state is remembered per section and per category.
+- **Search:**
+  - A clear (x) button, highlighted matching text, and a "No parts match" state with a Clear search button.
+  - Ranked results; matches also include pin names and categories.
+  - Ctrl+F focuses the search. Up/Down move the highlight (the preview card follows it), Enter arms placement,
+    and Escape clears, then leaves the field. A key hint shows below the list while the search has focus.
+- **Pinned and Recent sections** at the top:
+  - Pin from the star or the right-click menu.
+  - Recent holds the last 6 placed parts and has a clear button.
+- **Collapse and resize:**
+  - The panel collapses to an icon rail; clicking a section icon expands the panel and scrolls to that section.
+  - Drag the right edge to resize (220-420 px); double-click resets it.
+  - The empty-canvas hint now centres on the visible workspace.
+- **Preview card** on hover:
+  - The gate drawn with named pins, version badge, category, description, inputs/outputs and the usage count.
+  - A live truth table for parts with 4 or fewer input bits, with HIGH outputs highlighted. Larger or
+    sequential parts show a one-line reason instead.
+- **Managing custom gates** from the library, all undoable:
+  - Rename / Edit details (name, icon text, category with chips for existing categories, description).
+  - Duplicate (copies the instruction set binding).
+  - Delete, refused with an explanation while the gate is used in the main circuit or inside another gate.
+  - Rename category, which moves every gate in it as one step.
+- **Per-user `UiPreferences`:** width, collapse, section state, pins and recents. Saved with PlayerPrefs in
+  builds; in the editor only when `AppBootstrap` > *Remember UI layout in editor* is ticked, so play-mode tests
+  start fresh.
+
+### Decisions
+- **Pinned and Recent rows are copies, kept out of `LibraryPanel.Items`.** Existing tests and callers rely on
+  one entry per component.
+- **Keys:**
+  - Custom gates are keyed by definition id, so pins survive renames and new versions.
+  - Bus entries are keyed by title, so they survive bus width changes.
+  - A pinned gate that is deleted and then restored by undo comes back pinned.
+- **Card placement:** the hover card is a separate shell-level view, not the text tooltip. It needs structured
+  content, and it must stay out of the library hierarchy, which tests scan for TMP text.
+- **Animation:** DOTween, which the UI assembly was already allowed to use, instead of per-row `Update` loops.
+- **Delete scope:** deleting is only possible from the main circuit level. That avoids removing a definition an
+  open level or draft depends on.
+
+### Fixes found during verification
+- The first search highlight went to the first visible row ("in" matched AND via "built-in") instead of the best
+  match. It now picks the best rank.
+- Preview card pin labels and subtitle were invisible: a TMP line taller than its rect, with ellipsis overflow,
+  draws nothing. The labels now overflow, and the small lines got taller rects.
+
+### Test results
+- EditMode: **519/519** passed. 11 new tests in `LibraryManagementTests`:
+  - metadata command on all versions with undo and redo;
+  - delete and undo, and refusal while in use;
+  - usage counting, including older versions;
+  - unique names;
+  - stable keys;
+  - preferences round-trip, bounds and corrupt data.
+- PlayMode: **113/113** passed. 11 new tests in `LibraryPanelTests`:
+  - ranked search, highlighting and clearing;
+  - pin-name search;
+  - keyboard highlight and Enter placement;
+  - pins;
+  - recents;
+  - category collapse versus search;
+  - collapse and resize versus workspace area;
+  - Ctrl+F expanding the rail;
+  - preview card pins and tables;
+  - rename / duplicate / delete with undo;
+  - the entry menu and the details dialog.
+- Manual (play mode screenshots): default panel with pins, search with highlighted matches and the Full Adder
+  card (8-row table), the collapsed rail, and the custom gate menu.
+
+### Known issues / deferred
+- No resize cursor: Unity UI has no built-in cursor change, so the handle shows an accent line on hover instead.
+- The category field offers existing categories as chips (up to 6), not a dropdown.
+- In this small editor game view, the capital "I" in "Input" can drop out at low resolution. The empty-state text
+  shows the same thing, so it is a font rendering limit, not new.
+
+## Library panel fixes: indentation, wheel scrolling, preview card, tabs (2026-11-20)
+
+The user reported four problems after the overhaul:
+- inconsistent indentation;
+- jumpy mouse-wheel scrolling;
+- preview card layout problems, with big truth tables overflowing the card;
+- Pinned and Recent at the top of the list looking cumbersome.
+
+### Implemented
+- **Tree indentation:**
+  - Row tiles now start exactly under their section title (x 22). Category rows sit one level deeper (x 38),
+    under the category title, and chevrons sit to the left of the titles.
+  - The bus settings and the "My Gates" empty state line up with the rows.
+- **Wheel scrolling** (root cause and fix):
+  - The runtime Input System UI module reports 6 scroll units per notch. The list's `ScrollRect` multiplied that
+    by sensitivity 28, so each notch jumped about 168 px (five rows) instantly.
+  - New `SmoothScrollRect` (opt-in through `UiFactory.ScrollView(..., smooth: true)`) moves one 68 px step per
+    notch, proportionally for touchpads, and glides there.
+  - Dragging, or setting the position from code, cancels the glide.
+  - New `ScrollForwarder` stops the bus width / join input fields from swallowing the wheel.
+  - Scrolling hides the hover card.
+- **Preview card:**
+  - **Readable truth tables:**
+    - Bus bits are packed per port (`A 0101`). Many single-bit outputs become one bit string (`Y0-15`), so the
+      4-to-16 decoder table is readable instead of a 7 pt grid.
+    - Tall tables are split into two side-by-side blocks when they fit.
+    - The font shrinks to the card width; outputs that still don't fit become "+N".
+  - The card never extends past the screen: the description is dropped first, then the table becomes a 4-row
+    excerpt.
+  - The footer is one short line, and the title truncates instead of pushing the version badge out.
+- **Tabs:**
+  - All · ★ Favorites · ⟲ Recent sit under the search field. Favorites and Recent no longer clutter the top of
+    the main list.
+  - Favorites and Recent have empty states, Recent has a Clear bar, and search works inside each tab.
+  - The rail gains Favorites and Recent buttons. The tab is remembered.
+  - "Pin to top / Unpin" is now "Add to favorites / Remove from favorites".
+- **Pill width:** measured from font glyph advances. Rows built inside a hidden tab are inactive, and TMP reports
+  no size for them, which had clipped "3 → 2" to "3…".
+
+### Test results
+- EditMode: **519/519** passed. The preferences round-trip now includes the tab.
+- PlayMode: **118/118** passed. New or reworked tests in `LibraryPanelTests`:
+  - Favorites tab, including searching inside it and the empty state;
+  - Recent tab and its Clear button;
+  - tree indentation (row tile x equals section title x, categories deeper, tab lists flush);
+  - wheel: one notch equals one step, the glide reaches the target, scrolling clamps at the top;
+  - wheel over the bus fields still scrolls the list;
+  - a 16-row table fits the card and the card stays within the canvas.
+- Manual (play mode, 2× screenshots): All and Favorites tabs, and the 4-to-16 decoder card showing a packed
+  16-row table on screen.
+
+## Library panel: Escape, glyph warning, wheel distance (2026-11-20)
+
+- **Escape now hides the preview card the keyboard opened.** The card belongs to the arrow-key highlight (`_keyboardPreview`). Clearing the search used to drop the highlight first, which left the card behind. `HandleEscape()` now hides it on the first and second Escape, and losing focus hides it too.
+- **Removed the TMP warning for U+2605 (★)**, which the Nunito font lacks. The Favorites empty state now uses the Lucide star glyph through the icon-font fallback.
+- **Gentler wheel scrolling:** 40 px per notch instead of 68, at most 3 notches per event, and a slightly snappier glide. Checked in play mode that the UI module sends 6 units per notch, which the scaling assumes.
+- **Tests:** EditMode **519/519** and PlayMode **119/119** passed. New `Escape_HidesKeyboardPreview`; the wheel test now also covers the per-event clamp.

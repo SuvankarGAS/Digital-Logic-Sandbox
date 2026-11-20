@@ -63,5 +63,15 @@ namespace DigitalLogicSandbox.UI
         public const string Boxes = "";
         public const string Move = "";
         public const string Eye = "";
+        public const string Star = "";
+        public const string Pin = "";
+        public const string PinOff = "";
+        public const string History = "";
+        public const string ChevronLeft = "";
+        public const string GripVertical = "";
+        public const string PanelLeftClose = "";
+        public const string PanelLeftOpen = "";
+        public const string Folder = "";
+        public const string EnterKey = "";
     }
 }

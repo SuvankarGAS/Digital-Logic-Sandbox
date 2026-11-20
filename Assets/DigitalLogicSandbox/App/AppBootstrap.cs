@@ -44,6 +44,10 @@ namespace DigitalLogicSandbox.App
                  "defaults to the in-app picker so play-mode tests never wait on a modal window.")]
         [SerializeField] private bool _nativeFileDialogsInEditor;
 
+        [Tooltip("Editor only: remember the library width, open sections, pinned and recent parts between play sessions. " +
+                 "Builds always do; the editor defaults to a fresh layout so play-mode tests are not affected.")]
+        [SerializeField] private bool _rememberUiLayoutInEditor;
+
         private WorkspaceControls _controls;
 
         public static AppBootstrap Instance { get; private set; }
@@ -116,7 +120,10 @@ namespace DigitalLogicSandbox.App
 
             Projects.Initialize(Workspace, Library, Catalog.Primitives, Workspace.AnimationSettings, _truthTableLimits);
 
-            Shell = AppShell.Create(_theme, Workspace, Catalog, Library, _truthTableLimits, Projects);
+            bool rememberUi = smokeFolder == null && (!Application.isEditor || _rememberUiLayoutInEditor);
+            IPreferenceStore uiStore = rememberUi ? new PlayerPrefsStore() : new MemoryPreferenceStore();
+            Shell = AppShell.Create(_theme, Workspace, Catalog, Library, _truthTableLimits, Projects,
+                new UiPreferences(uiStore));
             if (Application.isEditor && _nativeFileDialogsInEditor)
             {
                 Shell.UseNativeFileDialogs = true;

@@ -979,3 +979,78 @@ the workspace views (`GateView`, `WireView`, `GridView`).
   to `NativeFileDialog.DefaultEnabled` (Windows player builds). CSV exports take an optional
   `PickExportPath(folder, suggestedName)`.
 - **Packages:** `com.coplaydev.unity-mcp` is development tooling, pinned to a commit in `Packages/manifest.json`.
+
+## 22. Gate library panel *(library overhaul, 2026-11-20)*
+
+- **Rows** (`UI/Panels/LibraryItemView`) are built from a `LibraryEntrySpec`: request, stable key, title, detail,
+  description, category, tile, pin counts and search text. The tile is a small gate with up to four pin dots on
+  each side. Hover, press, keyboard highlight and the armed state (the entry being placed, from
+  `WorkspaceController.PlacementChanged`) are DOTween colour tweens on unscaled time. Rows have no update loop.
+- **Tabs:**
+  - A segmented control under the search field switches between All, Favorites and Recent (`LibraryTab`,
+    stored as `UiPreferences.LibraryTab`).
+  - Each `Section` belongs to a tab and hides on the others. The Favorites and Recent lists are header-less
+    sections with empty states; Recent also has a "Clear" bar.
+  - Search applies to the shown tab.
+- **Sections (All tab):**
+  - The order is Gates, Inputs & Outputs, My Gates, Timing, Buses, Displays.
+  - When gates have more than one category, My Gates has one nested, collapsible section per category.
+  - Sections are collapsible and their state is stored per user. Searching temporarily expands sections with
+    matches.
+- **Tree grid:**
+  - Row tiles start under their section title: x = `RowPadding` (8) + `Section.RowIndent`, which is 14 for
+    sections, 30 for categories and 0 in tab lists.
+  - The chevron sits left of the title. Settings and empty states use the same left padding (22).
+- **Scrolling:**
+  - The list uses `SmoothScrollRect`. It turns `scrollDelta` into notches (divided by
+    `InputSystemUIInputModule.scrollDeltaPerTick`, which is 6 by default) and glides each notch 68 px.
+  - The old `ScrollRect` applied 6 × sensitivity 28 = 168 px per notch, instantly.
+  - `ScrollForwarder` passes the wheel on from input fields inside the list, and scrolling hides the hover card.
+- **Search:**
+  - Ranks: name prefix 0, word start 1, substring 2, other text 3. Other text covers category, description and
+    pin names.
+  - Matches are reordered within their section with `SetSiblingIndex`. Clearing the search restores the home
+    order.
+  - The keyboard highlight starts on the best-ranked match. Up/Down move it, Enter (`onSubmit`) arms placement,
+    and Escape clears the search, then leaves the field.
+  - Ctrl+F (`AppShell.Update`) focuses the search. The workspace's F (Frame) shortcut ignores Ctrl.
+- **Favorites and Recent rows:**
+  - Rows are copies of main entries built from preferences keys (`LibraryPanel.KeyOf`): `p:<primitive>`,
+    `c:<definition id>` (stable across versions and renames), `u:<title>` (stable across bus width).
+  - They are not in `Items`, so each component still has exactly one entry there.
+  - A placement is recorded in Recent through `WorkspaceController.PlacementCommitted`.
+- **Collapse and resize:**
+  - Collapsing gives a 52 px icon rail: expand, search, Favorites, Recent, and one button per section.
+  - The right-edge `LibraryResizeHandle` resizes the panel within 220-420 px; double-click resets it to 248 px.
+  - Width changes animate through `DOTween.To`. `AppShell.GetWorkspaceScreenRect` measures the panel live, so
+    camera framing and the re-centred empty-state hint follow the width.
+- **Preferences** (`UI/UiPreferences`):
+  - Per-user state behind `IPreferenceStore`: `PlayerPrefsStore` in builds, `MemoryPreferenceStore` in the
+    editor unless `AppBootstrap._rememberUiLayoutInEditor` is set, and in tests.
+  - Never project data: it does not mark a project changed.
+- **Preview card** (`UI/Panels/GatePreviewCard`):
+  - One shared card shown 0.45 s after hovering a row, to the right of the panel.
+  - It draws the gate from `CircuitGeometry.ComputeDetached`, with pins labelled from the signature.
+  - It shows the description and the usage count from `DefinitionUsage`.
+  - For 4 or fewer input bits it shows a truth table from `TruthTableTargets` and the truth table dialog's
+    `TruthTableGenerator`, which runs in an isolated context. Tables are cached per `ComponentRef` (custom gates
+    per version) and cleared on library events.
+  - **Fitting the table:**
+    - Bus bits are packed into one column per port. Many single-bit outputs are packed into one bit string
+      (`Y0-15`).
+    - Tall tables are drawn as two side-by-side blocks when they fit.
+    - The font shrinks to the inner width (11.5 → 7.5 pt). Output ports that still don't fit are summarised as
+      "+N".
+    - If the card would be taller than the screen, the description is dropped first, then only a 4-row excerpt
+      is shown.
+  - Pins, labels and table text are pooled.
+- **Managing custom gates:**
+  - The right-click menu built by `AppShell.ShowLibraryEntryMenu` offers pin/unpin, Rename, Edit details
+    (`GateDetailsDialog`), Duplicate and Delete. Category headers offer Rename category (`TextPromptDialog`).
+  - The commands run on the main circuit's history:
+    - `SetCustomGateMetadataCommand`: metadata of every version.
+    - `DeleteCustomGateCommand`: every version, newest first; undo re-adds the same objects.
+    - `PublishDefinitionCommand`: for duplicates (`Clone(DefinitionId.New(), 1)` with a unique name).
+    - `BindInstructionSetCommand`: keeps or clears a program gate's instruction set binding.
+  - `WorkspaceController.CanDeleteCustomGate` allows deletion only at the main level, and only while no version
+    has an instance in the main circuit or in another gate.

@@ -24,6 +24,7 @@ namespace DigitalLogicSandbox.UI.ContextMenus
 
         private readonly List<string> _labels = new List<string>();
         private readonly List<Button> _buttons = new List<Button>();
+        private readonly List<GameObject> _separators = new List<GameObject>();
 
         private UiFactory _ui;
         private WorkspaceController _workspace;
@@ -146,8 +147,11 @@ namespace DigitalLogicSandbox.UI.ContextMenus
             Position(request.Screen);
         }
 
-        /// <summary>Menu for a gate library entry: place it, or show its truth table.</summary>
-        public void ShowForLibraryEntry(Vector2 screen, PlacementRequest request)
+        /// <summary>
+        /// Menu for a gate library entry: place it, show its truth table or open it, followed by
+        /// <paramref name="extra"/> items (pinning, managing custom gates) after a separator.
+        /// </summary>
+        public void ShowForLibraryEntry(Vector2 screen, PlacementRequest request, IReadOnlyList<MenuItem> extra = null)
         {
             ClearItems();
             bool canPlace = _workspace.Circuit != null && _workspace.IsEditable;
@@ -162,6 +166,12 @@ namespace DigitalLogicSandbox.UI.ContextMenus
                     Add("Open internal circuit", () => _workspace.OpenDefinition(component.Definition),
                         _workspace.CanOpenDefinition(component.Definition));
                 }
+            }
+
+            if (extra != null && extra.Count > 0)
+            {
+                AddSeparator();
+                AddItems(extra);
             }
 
             gameObject.SetActive(true);
@@ -181,10 +191,7 @@ namespace DigitalLogicSandbox.UI.ContextMenus
             }
 
             ClearItems();
-            for (int i = 0; i < items.Count; i++)
-            {
-                Add(items[i].Label, items[i].Action, items[i].Enabled && items[i].Action != null);
-            }
+            AddItems(items);
 
             gameObject.SetActive(true);
             transform.SetAsLastSibling();
@@ -242,6 +249,44 @@ namespace DigitalLogicSandbox.UI.ContextMenus
 
             _buttons.Clear();
             _labels.Clear();
+            for (int i = 0; i < _separators.Count; i++)
+            {
+                _separators[i].SetActive(false);
+                Destroy(_separators[i]);
+            }
+
+            _separators.Clear();
+        }
+
+        private void AddItems(IReadOnlyList<MenuItem> items)
+        {
+            for (int i = 0; i < items.Count; i++)
+            {
+                if (items[i].IsSeparator)
+                {
+                    if (_buttons.Count > 0)
+                    {
+                        AddSeparator();
+                    }
+
+                    continue;
+                }
+
+                Add(items[i].Label, items[i].Action, items[i].Enabled && items[i].Action != null);
+            }
+        }
+
+        private void AddSeparator()
+        {
+            RectTransform holder = UiFactory.CreateRect("Separator", _menu);
+            holder.gameObject.AddComponent<LayoutElement>().preferredHeight = 9f;
+            Image line = _ui.Panel("Line", holder, _ui.Theme.PanelBorder);
+            line.raycastTarget = false;
+            RectTransform rect = line.rectTransform;
+            rect.anchorMin = new Vector2(0f, 0.5f);
+            rect.anchorMax = new Vector2(1f, 0.5f);
+            rect.sizeDelta = new Vector2(-12f, 1f);
+            _separators.Add(holder.gameObject);
         }
 
         private void Add(string label, Action action, bool enabled)
@@ -270,7 +315,7 @@ namespace DigitalLogicSandbox.UI.ContextMenus
             RectTransformUtility.ScreenPointToLocalPointInRectangle(_root, screen, null, out Vector2 local);
             Vector2 size = _root.rect.size;
             Vector2 fromCorner = local + size * _root.pivot;
-            float height = _labels.Count * 33f + 12f;
+            float height = _labels.Count * 33f + _separators.Count * 10f + 12f;
             float x = Mathf.Clamp(fromCorner.x, 0f, Mathf.Max(0f, size.x - ItemWidth - 8f));
             float y = Mathf.Clamp(fromCorner.y, height, size.y);
             _menu.anchoredPosition = new Vector2(x, y);
@@ -301,5 +346,10 @@ namespace DigitalLogicSandbox.UI.ContextMenus
         public Action Action { get; }
 
         public bool Enabled { get; }
+
+        /// <summary>A divider line between groups of items.</summary>
+        public bool IsSeparator => Label.Length == 0 && Action == null;
+
+        public static MenuItem Separator => new MenuItem(string.Empty, null, false);
     }
 }

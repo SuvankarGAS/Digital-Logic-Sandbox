@@ -89,6 +89,32 @@ namespace DigitalLogicSandbox.UI.Panels
             {
                 _group.alpha = Mathf.MoveTowards(_group.alpha, target, Time.unscaledDeltaTime * FadeSpeed);
             }
+
+            if (_group.alpha > 0f)
+            {
+                Center();
+            }
+        }
+
+        /// <summary>Centres the hint on the visible workspace (between the library and the properties card).</summary>
+        private void Center()
+        {
+            if (_workspace == null || _workspace.VisibleScreenArea == null || !(transform.parent is RectTransform parent))
+            {
+                return;
+            }
+
+            Rect area = _workspace.VisibleScreenArea();
+            if (area.width <= 0f || area.height <= 0f)
+            {
+                return;
+            }
+
+            if (RectTransformUtility.ScreenPointToLocalPointInRectangle(parent, area.center, null, out Vector2 local))
+            {
+                Vector2 offset = parent.rect.center;
+                ((RectTransform)transform).anchoredPosition = local - offset + new Vector2(0f, 20f);
+            }
         }
 
         private void OnDestroy()

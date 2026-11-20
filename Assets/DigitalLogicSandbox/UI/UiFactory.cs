@@ -421,11 +421,14 @@ namespace DigitalLogicSandbox.UI
             return field;
         }
 
-        /// <summary>Vertical scroll view; returns the content transform (with a vertical layout) to fill.</summary>
-        public RectTransform ScrollView(string name, Transform parent, out ScrollRect scrollRect)
+        /// <summary>
+        /// Vertical scroll view; returns the content transform (with a vertical layout) to fill. With
+        /// <paramref name="smooth"/>, a <see cref="SmoothScrollRect"/> gives eased, notch-sized wheel steps.
+        /// </summary>
+        public RectTransform ScrollView(string name, Transform parent, out ScrollRect scrollRect, bool smooth = false)
         {
             RectTransform root = CreateRect(name, parent);
-            scrollRect = root.gameObject.AddComponent<ScrollRect>();
+            scrollRect = smooth ? root.gameObject.AddComponent<SmoothScrollRect>() : root.gameObject.AddComponent<ScrollRect>();
             scrollRect.horizontal = false;
             scrollRect.movementType = ScrollRect.MovementType.Clamped;
             scrollRect.scrollSensitivity = 28f;

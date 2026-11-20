@@ -1,5 +1,9 @@
+using System.Collections.Generic;
+using DigitalLogicSandbox.CircuitEditor.Placement;
 using DigitalLogicSandbox.CircuitEditor.Workspace;
 using DigitalLogicSandbox.Components.Abstractions;
+using DigitalLogicSandbox.Core.Circuit;
+using DigitalLogicSandbox.Core.Nodes;
 using DigitalLogicSandbox.GateLibrary.Custom;
 using DigitalLogicSandbox.Rendering;
 using DigitalLogicSandbox.TruthTable.Generation;
@@ -64,6 +68,18 @@ namespace DigitalLogicSandbox.UI
 
         public TruthTableDialog TruthTable { get; private set; }
 
+        /// <summary>Hover card beside the gate library (gate drawing, pins, small truth table).</summary>
+        public GatePreviewCard GatePreview { get; private set; }
+
+        /// <summary>Edits a custom gate's name, icon, category and description from the library.</summary>
+        public GateDetailsDialog GateDetails { get; private set; }
+
+        /// <summary>One-line text prompt (e.g. renaming a gate category).</summary>
+        public TextPromptDialog Prompt { get; private set; }
+
+        /// <summary>Per-user interface state (library width, sections, pinned and recent entries).</summary>
+        public UiPreferences Preferences { get; private set; }
+
         /// <summary>Input/clock sequences for sequential circuits.</summary>
         public SequenceAnalysisDialog SequenceAnalysis { get; private set; }
 
@@ -99,7 +115,8 @@ namespace DigitalLogicSandbox.UI
         public Canvas Canvas => _canvas;
 
         public static AppShell Create(VisualTheme theme, WorkspaceController workspace, ComponentCatalog catalog,
-            DefinitionLibrary library, TruthTableLimits truthTableLimits = null, IProjectService projects = null)
+            DefinitionLibrary library, TruthTableLimits truthTableLimits = null, IProjectService projects = null,
+            UiPreferences preferences = null)
         {
             var go = new GameObject("UI", typeof(RectTransform));
             go.layer = 5;
@@ -115,7 +132,8 @@ namespace DigitalLogicSandbox.UI
 
             shell.Factory = new UiFactory(theme);
             shell.EmptyState = EmptyStateView.Create(go.transform, shell.Factory, workspace);
-            shell.Library = LibraryPanel.Create(go.transform, shell.Factory, workspace, catalog, library);
+            shell.Preferences = preferences ?? new UiPreferences(new MemoryPreferenceStore());
+            shell.Library = LibraryPanel.Create(go.transform, shell.Factory, workspace, catalog, library, shell.Preferences);
             shell.Toolbar = ToolbarView.Create(go.transform, shell.Factory, workspace);
             shell.StatusBar = StatusBarView.Create(go.transform, shell.Factory, workspace);
             shell.Inspector = InspectorPanel.Create(go.transform, shell.Factory, workspace);
@@ -131,12 +149,17 @@ namespace DigitalLogicSandbox.UI
             shell.InstructionSetEditor = InstructionSetDialog.Create(go.transform, shell.Factory, workspace,
                 null);
             shell.Confirm = ConfirmDialog.Create(go.transform, shell.Factory, workspace);
+            shell.GateDetails = GateDetailsDialog.Create(go.transform, shell.Factory, workspace);
+            shell.Prompt = TextPromptDialog.Create(go.transform, shell.Factory, workspace);
             shell.InstructionSetEditor.AttachConfirm(shell.Confirm);
             shell.ProgramEditor.Attach(shell.ContextMenu, shell.InstructionSetEditor);
             shell._workspace = workspace;
             workspace.VisibleScreenArea = shell.GetWorkspaceScreenRect;
             shell.AttachProjects(projects);
             shell.UseNativeFileDialogs = NativeFileDialog.DefaultEnabled;
+            shell.GatePreview = GatePreviewCard.Create(go.transform, shell.Factory, workspace,
+                () => shell.TruthTable != null ? shell.TruthTable.Generator : null);
+            shell.Library.AttachPreview(shell.GatePreview);
             shell.Tooltip = TooltipView.Create(go.transform, shell.Factory);
             shell.Factory.Tooltip = shell.Tooltip;
 
@@ -160,7 +183,8 @@ namespace DigitalLogicSandbox.UI
             shell.Inspector.ProgramEditRequested += node => shell.ProgramEditor.Open(node);
             shell.TruthTable.SequenceAnalysisRequested += shell.SequenceAnalysis.Open;
             shell.Inspector.SequenceAnalysisRequested += shell.SequenceAnalysis.OpenForCurrentCircuit;
-            shell.Library.ItemContextRequested += (request, screen) => shell.ContextMenu.ShowForLibraryEntry(screen, request);
+            shell.Library.ItemContextRequested += shell.ShowLibraryEntryMenu;
+            shell.Library.CategoryContextRequested += shell.ShowCategoryMenu;
             return shell;
         }
 
@@ -357,17 +381,106 @@ namespace DigitalLogicSandbox.UI
             }
         }
 
+        // ------------------------------------------------------------------------------------------------
+        // Gate library menus
+        // ------------------------------------------------------------------------------------------------
+
+        private readonly List<MenuItem> _menuItems = new List<MenuItem>();
+        private readonly List<string> _categories = new List<string>();
+
+        /// <summary>
+        /// Right-click menu of a library entry: place / truth table / open (built by the menu itself), then favorites and,
+        /// for custom gates, rename, details, duplicate and delete.
+        /// </summary>
+        public void ShowLibraryEntryMenu(PlacementRequest request, Vector2 screen)
+        {
+            _menuItems.Clear();
+            bool pinned = Library.IsPinned(request);
+            _menuItems.Add(new MenuItem(pinned ? "Remove from favorites" : "Add to favorites",
+                () => Library.SetPinned(request, !pinned)));
+            if (request.Component.Kind == ComponentKind.Custom)
+            {
+                DefinitionId id = request.Component.Definition.Id;
+                _menuItems.Add(MenuItem.Separator);
+                _menuItems.Add(new MenuItem("Rename…", () => OpenGateDetails(id, focusName: true)));
+                _menuItems.Add(new MenuItem("Edit details…", () => OpenGateDetails(id, focusName: false)));
+                _menuItems.Add(new MenuItem("Duplicate", () => _workspace.DuplicateCustomGate(id)));
+                bool canDelete = _workspace.CanDeleteCustomGate(id, out _);
+                _menuItems.Add(new MenuItem(canDelete ? "Delete…" : "Delete… (in use)", () => RequestDeleteGate(id)));
+            }
+
+            ContextMenu.ShowForLibraryEntry(screen, request, _menuItems);
+        }
+
+        /// <summary>Right-click menu of a custom gate category header.</summary>
+        public void ShowCategoryMenu(string category, IReadOnlyList<DefinitionId> gates, Vector2 screen)
+        {
+            _menuItems.Clear();
+            var ids = new List<DefinitionId>(gates);
+            _menuItems.Add(new MenuItem("Rename category…", () => RequestRenameCategory(category, ids), ids.Count > 0));
+            ContextMenu.ShowItems(screen, _menuItems);
+        }
+
+        /// <summary>Opens the gate details dialog for a custom gate.</summary>
+        public void OpenGateDetails(DefinitionId id, bool focusName)
+        {
+            Library.GetCategories(_categories);
+            GateDetails.Open(id, _categories, focusName);
+        }
+
+        /// <summary>Asks before deleting a custom gate; explains why when it is still in use.</summary>
+        public void RequestDeleteGate(DefinitionId id)
+        {
+            if (!_workspace.Library.TryGetLatest(id, out CircuitDefinition definition))
+            {
+                return;
+            }
+
+            if (!_workspace.CanDeleteCustomGate(id, out string reason))
+            {
+                Confirm.Show("Can\u2019t delete \u2018" + definition.Name + "\u2019", reason, "OK", null, null, null, null);
+                return;
+            }
+
+            Confirm.Show("Delete \u2018" + definition.Name + "\u2019?",
+                "The gate and all its versions are removed from the library. You can undo this.", "Delete",
+                () => _workspace.DeleteCustomGate(id));
+        }
+
+        /// <summary>Asks for a new name for a gate category and moves its gates there (one undoable step).</summary>
+        public void RequestRenameCategory(string category, IReadOnlyList<DefinitionId> gates)
+        {
+            string initial = category == LibraryPanel.UncategorizedLabel ? string.Empty : category;
+            Prompt.Show("Rename Category", "Every gate in \u2018" + category + "\u2019 moves to the new category.", initial,
+                "Rename", name =>
+                {
+                    string target = string.IsNullOrWhiteSpace(name) ? LibraryPanel.UncategorizedLabel : name;
+                    Library.RenameCategoryState(category, target);
+                    _workspace.SetCustomGateCategory(gates, name);
+                });
+        }
+
         private void Update()
         {
             Keyboard keyboard = Keyboard.current;
-            if (Projects == null || keyboard == null || _workspace == null || _workspace.InputSuspended ||
-                IsTextInputFocused())
+            if (keyboard == null || _workspace == null || _workspace.InputSuspended || IsTextInputFocused())
             {
                 return;
             }
 
             bool control = keyboard.leftCtrlKey.isPressed || keyboard.rightCtrlKey.isPressed;
             if (!control)
+            {
+                return;
+            }
+
+            if (keyboard.fKey.wasPressedThisFrame)
+            {
+                Library.FocusSearch();
+                return;
+            }
+
+            if (Projects == null)
             {
                 return;
             }
