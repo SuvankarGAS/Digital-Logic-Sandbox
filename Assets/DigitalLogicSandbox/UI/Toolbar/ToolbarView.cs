@@ -13,6 +13,8 @@ namespace DigitalLogicSandbox.UI.Toolbar
     /// unsaved changes.</item>
     /// <item>Tool bar (top-centre): icon buttons with tooltips for history, simulation, gate creation, analysis and
     /// view settings. Selection tools (Inspect, Delete) appear only while they apply.</item>
+    /// <item>Window controls (top-right): minimize and exit. The app runs borderless fullscreen, so these replace
+    /// the title bar buttons.</item>
     /// <item>View cluster (bottom-right): zoom, frame and grid.</item>
     /// </list>
     /// Every button calls the workspace API. Enabled states follow the undo history, the selection and the
@@ -65,6 +67,24 @@ namespace DigitalLogicSandbox.UI.Toolbar
 
         /// <summary>"Properties" button: show or hide the properties panel.</summary>
         public event System.Action PropertiesRequested;
+
+        /// <summary>Top-right exit button and File > Exit: close the application (the shell asks about unsaved work).</summary>
+        public event System.Action ExitRequested;
+
+        /// <summary>Top-right minimize button.</summary>
+        public event System.Action MinimizeRequested;
+
+        /// <summary>Top-right exit button.</summary>
+        public Button ExitButton { get; private set; }
+
+        /// <summary>Top-right minimize button.</summary>
+        public Button MinimizeButton { get; private set; }
+
+        /// <summary>"Exit" item at the bottom of the file menu.</summary>
+        public Button ExitMenuButton { get; private set; }
+
+        /// <summary>The top-right minimize / exit card.</summary>
+        public RectTransform WindowControls { get; private set; }
 
         public Button CreateGateButton => _createGate;
 
@@ -122,6 +142,7 @@ namespace DigitalLogicSandbox.UI.Toolbar
 
             view.BuildProjectPill(rect);
             view.BuildTools(rect);
+            view.BuildWindowControls(rect);
             view.BuildViewCluster(parent);
             view._fileMenu = FileMenu.Create(parent, ui, view._menu.transform as RectTransform);
             view.NewButton = view._fileMenu.AddItem(Icons.FilePlus, "New project", "Ctrl+N", () => view.NewRequested?.Invoke());
@@ -135,6 +156,9 @@ namespace DigitalLogicSandbox.UI.Toolbar
                 () => view.ExampleGatesRequested?.Invoke());
             view.CpuDemoButton = view._fileMenu.AddItem(Icons.Cpu, "Open CPU demo", string.Empty,
                 () => view.CpuDemoRequested?.Invoke());
+            view._fileMenu.AddSeparator();
+            view.ExitMenuButton = view._fileMenu.AddItem(Icons.Close, "Exit", "Alt+F4",
+                () => view.ExitRequested?.Invoke());
 
             workspace.StatusChanged += view.Refresh;
             view.Refresh();
@@ -202,6 +226,32 @@ namespace DigitalLogicSandbox.UI.Toolbar
                 () => _workspace.OpenSelected());
             _delete = _ui.IconButton("Delete", _selectionGroup, Icons.Trash, "Delete  <color=#687088>Del</color>",
                 () => _workspace.DeleteSelection());
+        }
+
+        /// <summary>Top-right card: minimize and exit, where a window's title bar buttons would be.</summary>
+        private void BuildWindowControls(RectTransform strip)
+        {
+            Image card = _ui.Card("Window Controls", strip, _ui.Theme.PanelBackground);
+            RectTransform rect = card.rectTransform;
+            rect.anchorMin = rect.anchorMax = new Vector2(1f, 1f);
+            rect.pivot = new Vector2(1f, 1f);
+            rect.anchoredPosition = new Vector2(-UiFactory.Margin, -UiFactory.Margin);
+            rect.sizeDelta = new Vector2(0f, UiFactory.ToolbarHeight);
+            UiFactory.Row(rect, 2f, new RectOffset(5, 5, 5, 5), TextAnchor.MiddleCenter);
+            rect.gameObject.AddComponent<ContentSizeFitter>().horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+            MinimizeButton = _ui.IconButton("Minimize", rect, Icons.Minus, "Minimize",
+                () => MinimizeRequested?.Invoke());
+            ExitButton = _ui.IconButton("Exit", rect, Icons.Close, "Exit  <color=#687088>Alt+F4</color>",
+                () => ExitRequested?.Invoke());
+
+            // Exit uses the error colour on hover / press so it reads as "close", like a window's close button.
+            Color error = _ui.Theme.Error;
+            ColorBlock colors = ExitButton.colors;
+            colors.highlightedColor = new Color(error.r, error.g, error.b, 0.85f);
+            colors.pressedColor = new Color(error.r * 0.8f, error.g * 0.8f, error.b * 0.8f, 1f);
+            UiFactory.SetColorsInstant(ExitButton, colors);
+            WindowControls = rect;
         }
 
         private void BuildViewCluster(Transform parent)

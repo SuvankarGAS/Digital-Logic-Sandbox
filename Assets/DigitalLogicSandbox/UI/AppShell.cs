@@ -32,6 +32,13 @@ namespace DigitalLogicSandbox.UI
         private const string ProjectExtension = DigitalLogicSandbox.Persistence.ProjectFormat.FileExtension;
 
         private bool _useNativeFileDialogs;
+        private bool _quitConfirmed;
+
+        /// <summary>
+        /// Performs the actual quit once the user has confirmed. Defaults to <see cref="Application.Quit()"/>;
+        /// tests replace it.
+        /// </summary>
+        public System.Action QuitAction { get; set; } = Application.Quit;
 
         private Canvas _canvas;
 
@@ -185,6 +192,9 @@ namespace DigitalLogicSandbox.UI
             shell.Inspector.SequenceAnalysisRequested += shell.SequenceAnalysis.OpenForCurrentCircuit;
             shell.Library.ItemContextRequested += shell.ShowLibraryEntryMenu;
             shell.Library.CategoryContextRequested += shell.ShowCategoryMenu;
+            shell.Toolbar.ExitRequested += shell.RequestExit;
+            shell.Toolbar.MinimizeRequested += AppWindow.Minimize;
+            Application.wantsToQuit += shell.OnWantsToQuit;
             return shell;
         }
 
@@ -217,6 +227,43 @@ namespace DigitalLogicSandbox.UI
             {
                 ConfirmDiscard("opening another project", () => ShowProjectFiles(ProjectFileDialogMode.Open));
             }
+        }
+
+        /// <summary>Closes the application, asking to save unsaved changes first.</summary>
+        public void RequestExit()
+        {
+            if (Projects == null)
+            {
+                QuitNow();
+                return;
+            }
+
+            ConfirmDiscard("exiting", QuitNow);
+        }
+
+        private void QuitNow()
+        {
+            _quitConfirmed = true;
+            QuitAction?.Invoke();
+        }
+
+        /// <summary>
+        /// Alt+F4 and other close requests from the OS: with unsaved changes, cancel the quit and show the same
+        /// Save / Don't save / Cancel prompt as the exit button.
+        /// </summary>
+        private bool OnWantsToQuit()
+        {
+            if (_quitConfirmed || Projects == null || !Projects.IsDirty)
+            {
+                return true;
+            }
+
+            if (Confirm == null || !Confirm.IsOpen)
+            {
+                RequestExit();
+            }
+
+            return false;
         }
 
         /// <summary>Saves to the current file, or asks for a name when the project was never saved.</summary>
@@ -509,6 +556,7 @@ namespace DigitalLogicSandbox.UI
 
         private void OnDestroy()
         {
+            Application.wantsToQuit -= OnWantsToQuit;
             if (Projects != null)
             {
                 Projects.Changed -= RefreshProjectTitle;

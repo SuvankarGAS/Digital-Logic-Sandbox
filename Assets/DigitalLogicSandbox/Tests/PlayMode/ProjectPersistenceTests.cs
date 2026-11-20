@@ -177,6 +177,47 @@ namespace DigitalLogicSandbox.Tests.PlayMode
         }
 
         [UnityTest]
+        public IEnumerator Exit_WithUnsavedChanges_AsksFirst()
+        {
+            yield return LoadMain();
+            int quits = 0;
+            _app.Shell.QuitAction = () => quits++;
+            _workspace.PlaceNode(ComponentRef.InputBoundary, Vector2.zero);
+            yield return null;
+            Assert.That(_projects.IsDirty, Is.True);
+
+            ConfirmDialog confirm = _app.Shell.Confirm;
+            _app.Shell.Toolbar.ExitButton.onClick.Invoke();
+            Assert.That(confirm.IsOpen, Is.True);
+            Assert.That(confirm.TitleText, Is.EqualTo("Unsaved changes"));
+
+            confirm.CancelButton.onClick.Invoke();
+            Assert.That(quits, Is.Zero, "Cancel keeps the application open.");
+
+            _app.Shell.Toolbar.ExitMenuButton.onClick.Invoke();
+            Assert.That(confirm.IsOpen, Is.True, "File > Exit asks too.");
+            confirm.SecondaryButton.onClick.Invoke(); // Don't save
+            Assert.That(quits, Is.EqualTo(1));
+        }
+
+        [UnityTest]
+        public IEnumerator Exit_CleanProject_QuitsImmediately()
+        {
+            yield return LoadMain();
+            int quits = 0;
+            _app.Shell.QuitAction = () => quits++;
+            Assert.That(_projects.IsDirty, Is.False);
+
+            _app.Shell.Toolbar.ExitButton.onClick.Invoke();
+            Assert.That(_app.Shell.Confirm.IsOpen, Is.False);
+            Assert.That(quits, Is.EqualTo(1));
+
+            Assert.That(_app.Shell.Toolbar.MinimizeButton, Is.Not.Null);
+            Assert.That(_app.Shell.Toolbar.MinimizeButton.gameObject.activeInHierarchy, Is.True);
+            _app.Shell.Toolbar.MinimizeButton.onClick.Invoke(); // no-op in the editor
+        }
+
+        [UnityTest]
         public IEnumerator SaveFromThePrompt_OnAnUntitledProject_AsksForANameThenContinues()
         {
             yield return LoadMain();

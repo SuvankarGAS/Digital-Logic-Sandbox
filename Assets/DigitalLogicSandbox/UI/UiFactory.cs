@@ -174,6 +174,10 @@ namespace DigitalLogicSandbox.UI
             // in the primary font only); line metrics still come from the icon font that draws the glyph.
             TextMeshProUGUI icon = Text(name, parent, glyph, size, color, TextAlignmentOptions.Center);
             icon.overflowMode = TextOverflowModes.Overflow;
+
+            // Pad each glyph quad by the SDF spread. Without it, thin flat glyphs (minus) get a quad only as tall as
+            // the stroke, the anti-aliased edge is cut off and the icon vanishes at toolbar sizes.
+            icon.extraPadding = true;
             return icon;
         }
 
@@ -562,6 +566,65 @@ namespace DigitalLogicSandbox.UI
             }
 
             return field;
+        }
+
+        /// <summary>
+        /// Segmented control: equal-width segments on a recessed track. <paramref name="tooltips"/> is optional
+        /// (one entry per label, null entries allowed).
+        /// </summary>
+        public SegmentedControl Segmented(string name, Transform parent, string[] labels, int selected,
+            System.Action<int> onChanged, string[] tooltips = null, float height = 30f, float fontSize = 12f)
+        {
+            Image track = Panel(name, parent, Theme.WorkspaceBackground, rounded: true, radius: 8f);
+            track.raycastTarget = false;
+            var trackLayout = track.gameObject.AddComponent<LayoutElement>();
+            trackLayout.preferredHeight = trackLayout.minHeight = height;
+            // The tiles force-expand inside the track, which would otherwise make the track itself report a
+            // flexible height and grow inside vertical layouts.
+            trackLayout.flexibleHeight = 0f;
+            trackLayout.flexibleWidth = 0f;
+            var row = track.gameObject.AddComponent<HorizontalLayoutGroup>();
+            row.padding = new RectOffset(3, 3, 3, 3);
+            row.spacing = 2f;
+            row.childControlWidth = true;
+            row.childControlHeight = true;
+            row.childForceExpandWidth = true;
+            row.childForceExpandHeight = true;
+            var control = track.gameObject.AddComponent<SegmentedControl>();
+
+            float width = 6f;
+            for (int i = 0; i < labels.Length; i++)
+            {
+                Image tile = Panel("Segment " + i, track.transform, Color.clear, rounded: true, radius: 6f);
+                var button = tile.gameObject.AddComponent<Button>();
+                button.transition = Selectable.Transition.None;
+                button.navigation = new Navigation { mode = Navigation.Mode.None };
+                TextMeshProUGUI label = Text("Label", tile.transform, labels[i], fontSize, Theme.TextMuted,
+                    TextAlignmentOptions.Center, FontStyles.Bold);
+                label.richText = true;
+                label.overflowMode = TextOverflowModes.Overflow;
+                Stretch(label.rectTransform, 8f, 8f);
+                float preferred = label.GetPreferredValues(labels[i]).x + 22f;
+                tile.gameObject.AddComponent<LayoutElement>().preferredWidth = preferred;
+                width += preferred + 2f;
+                var view = tile.gameObject.AddComponent<Panels.LibraryTabView>();
+                view.Initialize(Theme, tile, label);
+                if (tooltips != null && i < tooltips.Length && !string.IsNullOrEmpty(tooltips[i]))
+                {
+                    AddTooltip(tile.gameObject, tooltips[i]);
+                }
+
+                control.Add(button, view);
+            }
+
+            trackLayout.preferredWidth = width;
+            control.SetSelectedWithoutNotify(selected);
+            if (onChanged != null)
+            {
+                control.Changed += onChanged;
+            }
+
+            return control;
         }
 
         /// <summary>Vertical stack (layout group) for building panels.</summary>

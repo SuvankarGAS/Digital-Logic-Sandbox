@@ -674,17 +674,54 @@ latches, and so on. The engine has no sequential primitive. What makes this well
   self-connections are allowed. `CompiledCircuit.IsSequential` (cycles or a clock) is what consumers check.
 - **Sequence analysis** (`TruthTable.Generation.SequenceAnalyzer`):
   - It is the analysis mode for sequential circuits. The input is a `SequenceSpec`: per-input 0/1 patterns
-    (an input holds its last value), the step count, `PowerOnState`, and `PulseClock`.
+    (an input holds its last value), the step count, `PowerOnState`, and `PulseClock`. `SequencePresets`
+    builds common patterns (binary count, constant, alternate, pulse).
   - It compiles into a fresh, non-recording context; the live context is never touched. Row 0 is the
-    power-on state.
-  - Each step sets the inputs and settles. If the circuit is clocked, the step then applies one base clock
-    cycle (two `ApplyClockEdge` calls, each followed by a settle). Slower domains change only on the steps
-    their schedule says.
-  - Unstable rows are flagged. Each result describes one stimulus, not the whole circuit: the dialog and
-    the docs say so, and the truth table keeps refusing these circuits.
-  - The dialog shows up to the analyzer's limit (1 024 steps). A fixed header sits above a virtualised list:
-    a pool of 32 row texts is refilled from the table as it scrolls, so the row count never reaches TMP's mesh
-    limit. Copy and CSV export always cover every row.
+    power-on state, and its inputs are recorded as they really are (0), not as "-".
+  - Each step sets the inputs and settles. If the circuit is clocked, each row holds three samples
+    (`SequencePhase`):
+    - **AfterInputs**: the inputs are applied and the clock is LOW.
+    - **ClockHigh**: after the rising edge.
+    - **AfterCycle**: after the falling edge.
+
+    `GetOutput(row, col)` returns AfterCycle (the end of the step); `GetOutput(row, col, phase)` returns any
+    sample. Clock-domain levels are recorded per phase (`ClockExponents`, `GetClock`), so the diagram can
+    draw CLK, CLK÷2 and so on. Slower domains follow their own schedule.
+  - **Derived facts:**
+    - `OutputChanged` and `ChangedRowCount`: outputs compared with the previous row.
+    - Per-phase stability: unstable rows read X.
+    - State recurrence: after every row the analyzer hashes all nets (FNV-1a over `CopyNets`) plus the
+      clock-schedule phase (`edge mod 2^(k+1)` for the slowest divider k), because where the schedule
+      stands is state too.
+      - `SettledFromRow` is the first row of the unchanging tail.
+      - `RepeatFromRow`, `RepeatRow` and `RepeatPeriod` record the first return to an earlier state.
+      - Only a row whose state differs from the previous row can count as a return, and it is compared
+        with the state's first occurrence. A held state is therefore never a cycle, and periods stay
+        correct when states hold for several rows.
+  - Each result describes one stimulus, not the whole circuit: the dialog says so, and the truth table keeps
+    refusing these circuits.
+- **Sequence analysis panel** (`UI.Dialogs.SequenceAnalysisDialog` with `UI.Dialogs.Sequence.*`):
+  - **Setup bar:** power-on (`SegmentedControl`), the "Pulse clock" switch (only shown when the circuit has
+    a clock), a steps stepper, and input presets.
+  - **Auto-run:** every edit re-runs the analysis at once (or on the next frame, for typing), so there is
+    no Run button.
+  - **Results** come in three views:
+    - **Timing diagram** (`SequenceTimelineView`):
+      - Lanes for inputs, clocks and outputs, drawn by one `QuadGraphic` mesh for the visible range only.
+        Clocked steps are split ¼ / ½ / ¼ into the three phases. A power-on lead-in, a step ruler, X bands,
+        changed-output tints and unstable-phase tints are drawn too.
+      - Input lanes are editable: click or drag sets steps, which rewrites the pattern text.
+      - Hover or a pinned cursor (←/→) drives a readout. For clocked circuits it says whether each output
+        changed with the inputs or with the clock.
+      - Zoom and scrolling: Ctrl+wheel zooms, there are scrollbars, and the view auto-fits until the user
+        zooms.
+    - **Table** (`SequenceTableView`): a virtualised list (a pool of 24 striped rows); changed outputs are
+      highlighted and unstable rows marked.
+    - **Patterns (text)**: the per-input text fields. These stay the single source of truth.
+  - **Summary chips:** steps, power-on, steady / repeats / still changing, and changes or oscillation. Each
+    chip has a tooltip with the full explanation.
+  - **Budget:** text objects come from fixed pools, so even at 1 024 steps the panel holds fewer than 100 TMP
+    texts. Copy and CSV export always cover every row.
 - **Settings.** `ClockFrequency` (the base rate), `ClockEnabled` and `PowerOnState` are project settings,
   stored in `settings.simulation` (schema v2). A clock's divider is part of its node: `"divider": 4`, written
   only when above 1 (schema v6). The inspector's divider picker changes it through `ChangeComponentCommand`. The main and draft sessions share them through one `SimulationOptions`

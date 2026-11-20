@@ -3,6 +3,7 @@ using DigitalLogicSandbox.Components.BuiltIn;
 using DigitalLogicSandbox.Core.Circuit;
 using DigitalLogicSandbox.Core.Connections;
 using DigitalLogicSandbox.Core.Nodes;
+using DigitalLogicSandbox.Core.Ports;
 using DigitalLogicSandbox.Core.Signals;
 using DigitalLogicSandbox.Core.Validation;
 using DigitalLogicSandbox.Simulation.Context;
@@ -250,6 +251,169 @@ namespace DigitalLogicSandbox.Tests.EditMode.TruthTables
             Assert.That(csv.Length, Is.EqualTo(4));
             Assert.That(table.ToTabSeparated(), Does.StartWith("Cycle\tQ0\tQ1"));
             Assert.That(table.Title, Is.EqualTo("My, Counter"));
+        }
+
+        /// <summary>Clock ÷1 and ÷2 wired straight to outputs C1 and C2.</summary>
+        private static CircuitDefinition BuildClockTaps()
+        {
+            var root = new CircuitDefinition(DefinitionId.New(), "Taps");
+            int[] dividers = { 1, 2 };
+            for (int i = 0; i < dividers.Length; i++)
+            {
+                NodeDefinition clock = root.AddNode(ComponentRef.ClockDivided(dividers[i]), CircuitPoint.Zero);
+                root.Connect(new PinRef(clock.Id, BoundarySignatures.Pin),
+                    BoundaryIn(root.AddOutputBoundary("C" + dividers[i], CircuitPoint.Zero)));
+            }
+
+            return root;
+        }
+
+        [Test]
+        public void ClockedSteps_RecordAfterInputs_ClockHigh_AndAfterCycle()
+        {
+            var report = new ValidationReport();
+            SequenceTable table = _analyzer.Run(BuildClockTaps(), SequenceSpec.FromPatterns(new string[0], 2), report);
+            Assert.That(table, Is.Not.Null, report.ToString());
+            Assert.That(table.Clocked, Is.True);
+            Assert.That(table.ClockExponents, Is.EqualTo(new[] { 0, 1 }));
+            Assert.That(table.ClockName(0), Is.EqualTo("CLK"));
+            Assert.That(table.ClockName(1), Is.EqualTo("CLK÷2"));
+
+            // ÷1: low before the pulse, high during it, low after it, in every cycle.
+            for (int row = 1; row <= 2; row++)
+            {
+                Assert.That(table.GetOutput(row, 0, SequencePhase.AfterInputs), Is.EqualTo(Signal.Low));
+                Assert.That(table.GetOutput(row, 0, SequencePhase.ClockHigh), Is.EqualTo(Signal.High));
+                Assert.That(table.GetOutput(row, 0, SequencePhase.AfterCycle), Is.EqualTo(Signal.Low));
+                Assert.That(table.GetOutput(row, 0), Is.EqualTo(Signal.Low), "The plain accessor is the end of the step.");
+                Assert.That(table.GetClock(row, 0, SequencePhase.ClockHigh), Is.EqualTo(Signal.High));
+            }
+
+            // ÷2 rises with the first base edge and falls with the third.
+            Assert.That(table.GetOutput(1, 1, SequencePhase.AfterInputs), Is.EqualTo(Signal.Low));
+            Assert.That(table.GetOutput(1, 1, SequencePhase.ClockHigh), Is.EqualTo(Signal.High));
+            Assert.That(table.GetOutput(1, 1, SequencePhase.AfterCycle), Is.EqualTo(Signal.High));
+            Assert.That(table.GetOutput(2, 1, SequencePhase.AfterInputs), Is.EqualTo(Signal.High));
+            Assert.That(table.GetOutput(2, 1, SequencePhase.ClockHigh), Is.EqualTo(Signal.Low));
+            Assert.That(table.GetClock(2, 1, SequencePhase.AfterCycle), Is.EqualTo(Signal.Low));
+            Assert.That(table.GetClock(0, 0, SequencePhase.ClockHigh), Is.EqualTo(Signal.Low), "Power-on: clocks LOW.");
+        }
+
+        [Test]
+        public void RisingEdgeFlipFlop_ChangesWithTheClock_NotWithTheInputs()
+        {
+            CircuitDefinition dff = PublishDff();
+            var root = new CircuitDefinition(DefinitionId.New(), "Clocked DFF");
+            NodeDefinition d = root.AddInputBoundary("D", CircuitPoint.Zero);
+            NodeDefinition clock = root.AddNode(ComponentRef.Clock, CircuitPoint.Zero);
+            NodeDefinition ff = root.AddNode(ComponentRef.Custom(dff.Reference), CircuitPoint.Zero);
+            root.Connect(BoundaryOut(d), new PinRef(ff.Id, dff.Inputs[0].Id));
+            root.Connect(new PinRef(clock.Id, BoundarySignatures.Pin), new PinRef(ff.Id, dff.Inputs[1].Id));
+            root.Connect(new PinRef(ff.Id, dff.Outputs[0].Id), BoundaryIn(root.AddOutputBoundary("Q", CircuitPoint.Zero)));
+
+            var report = new ValidationReport();
+            SequenceTable table = _analyzer.Run(root, SequenceSpec.FromPatterns(new[] { "0110" }), report);
+            Assert.That(table, Is.Not.Null, report.ToString());
+
+            // Cycle 2 sets D = 1: Q still shows the old 0 before the edge, then captures 1 on the rising edge.
+            Assert.That(table.GetOutput(1, 0), Is.EqualTo(Signal.Low));
+            Assert.That(table.GetOutput(2, 0, SequencePhase.AfterInputs), Is.EqualTo(Signal.Low));
+            Assert.That(table.GetOutput(2, 0, SequencePhase.ClockHigh), Is.EqualTo(Signal.High));
+            Assert.That(table.GetOutput(2, 0, SequencePhase.AfterCycle), Is.EqualTo(Signal.High));
+            // Cycle 4 sets D = 0: the change appears only with the clock.
+            Assert.That(table.GetOutput(4, 0, SequencePhase.AfterInputs), Is.EqualTo(Signal.High));
+            Assert.That(table.GetOutput(4, 0, SequencePhase.ClockHigh), Is.EqualTo(Signal.Low));
+            Assert.That(table.OutputChanged(2, 0) && table.OutputChanged(4, 0), Is.True);
+            Assert.That(table.OutputChanged(3, 0), Is.False);
+            // Cycle 1 also counts when the resolved power-on state happened to be Q = 1.
+            int powerOnChange = table.GetOutput(0, 0) != table.GetOutput(1, 0) ? 1 : 0;
+            Assert.That(table.OutputChanged(1, 0), Is.EqualTo(powerOnChange == 1));
+            Assert.That(table.ChangedRowCount, Is.EqualTo(2 + powerOnChange));
+        }
+
+        [Test]
+        public void PowerOnRow_HoldsTheRealInputValues()
+        {
+            SequenceTable table = _analyzer.Run(BuildNand(), SequenceSpec.FromPatterns(new[] { "0011", "0101" }), null);
+            Assert.That(table.GetInput(0, 0), Is.EqualTo(Signal.Low));
+            Assert.That(table.GetInput(0, 1), Is.EqualTo(Signal.Low));
+            string[] csv = table.ToCsv().Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
+            Assert.That(csv[1], Is.EqualTo("Power-on,0,0,1"), "Inputs are 0 at power-on, not '-'.");
+        }
+
+        [Test]
+        public void OutputChanges_AreFlaggedPerRow()
+        {
+            SequenceTable table = _analyzer.Run(BuildNand(), SequenceSpec.FromPatterns(new[] { "0011", "0101" }), null);
+            for (int row = 0; row <= 3; row++)
+            {
+                Assert.That(table.OutputChanged(row, 0), Is.False, "NAND stays 1 for rows 0-3.");
+                Assert.That(table.AnyOutputChanged(row), Is.False);
+            }
+
+            Assert.That(table.OutputChanged(4, 0), Is.True);
+            Assert.That(table.AnyOutputChanged(4), Is.True);
+            Assert.That(table.ChangedRowCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void Counter_ReturnsToItsPowerOnState_AfterEightCycles()
+        {
+            SequenceTable table = _analyzer.Run(BuildRippleCounter(PublishDff(), 3),
+                SequenceSpec.FromPatterns(new string[0], 10), null);
+            Assert.That(table.RepeatFromRow, Is.EqualTo(0));
+            Assert.That(table.RepeatRow, Is.EqualTo(8));
+            Assert.That(table.RepeatPeriod, Is.EqualTo(8));
+            Assert.That(table.SettledFromRow, Is.EqualTo(-1), "A counter keeps changing.");
+        }
+
+        [Test]
+        public void HeldInputs_SettleWithoutBeingMistakenForACycle()
+        {
+            // A = 0 then held at 1; B = 1 from the start: NAND settles from step 2 on.
+            SequenceTable table = _analyzer.Run(BuildNand(), SequenceSpec.FromPatterns(new[] { "01", "1" }, 5), null);
+            Assert.That(table.SettledFromRow, Is.EqualTo(2));
+            Assert.That(table.RepeatRow, Is.EqualTo(-1), "An unchanging stretch is not a repeating cycle.");
+            Assert.That(table.RepeatPeriod, Is.Zero);
+
+            SequenceTable changing = _analyzer.Run(BuildNand(), SequenceSpec.FromPatterns(new[] { "0101", "1" }), null);
+            Assert.That(changing.SettledFromRow, Is.EqualTo(-1));
+            Assert.That(changing.RepeatFromRow, Is.EqualTo(1), "Step 3 repeats the inputs and state of step 1.");
+            Assert.That(changing.RepeatPeriod, Is.EqualTo(2));
+        }
+
+        [Test]
+        public void RepeatPeriod_IsRight_WhenStatesHoldForSeveralCycles()
+        {
+            // A ÷4 clock seen at the end of each cycle reads (power-on L) H H L L H H …: the period is 4 cycles.
+            // Cycle 3 (L) has the same signals as power-on but not the same clock-schedule position, so it is not
+            // a repeat; cycle 4 is.
+            var root = new CircuitDefinition(DefinitionId.New(), "Slow");
+            NodeDefinition slow = root.AddNode(ComponentRef.ClockDivided(4), CircuitPoint.Zero);
+            root.Connect(new PinRef(slow.Id, BoundarySignatures.Pin),
+                BoundaryIn(root.AddOutputBoundary("C4", CircuitPoint.Zero)));
+            SequenceTable table = _analyzer.Run(root, SequenceSpec.FromPatterns(new string[0], 10), null);
+
+            Assert.That(table.GetOutput(1, 0), Is.EqualTo(Signal.High));
+            Assert.That(table.GetOutput(2, 0), Is.EqualTo(Signal.High));
+            Assert.That(table.GetOutput(3, 0), Is.EqualTo(Signal.Low));
+            Assert.That(table.RepeatFromRow, Is.EqualTo(0));
+            Assert.That(table.RepeatRow, Is.EqualTo(4));
+            Assert.That(table.RepeatPeriod, Is.EqualTo(4));
+        }
+
+        [Test]
+        public void Presets_ProduceReadablePatterns()
+        {
+            Assert.That(SequencePresets.BinaryCount(0, 2, 4), Is.EqualTo("0011"));
+            Assert.That(SequencePresets.BinaryCount(1, 2, 4), Is.EqualTo("0101"));
+            Assert.That(SequencePresets.BinaryCount(0, 1, 6), Is.EqualTo("0101 01"));
+            Assert.That(SequencePresets.Alternate(5), Is.EqualTo("0101 0"));
+            Assert.That(SequencePresets.Constant(Signal.High, 3), Is.EqualTo("111"));
+            Assert.That(SequencePresets.Pulse(2, 4), Is.EqualTo("0010"));
+            Assert.That(SequencePresets.Format(new[] { Signal.High, Signal.Low, Signal.Low, Signal.High, Signal.High }),
+                Is.EqualTo("1001 1"));
+            Assert.That(SequenceSpec.ParsePattern(SequencePresets.BinaryCount(2, 3, 8)).Length, Is.EqualTo(8));
         }
     }
 

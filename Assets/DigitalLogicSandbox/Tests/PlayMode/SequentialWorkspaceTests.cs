@@ -163,7 +163,7 @@ namespace DigitalLogicSandbox.Tests.PlayMode
             Assert.That(sequence.Run(), Is.Not.Null);
             Assert.That(sequence.Table.RowCount, Is.EqualTo(4));
             Assert.That(sequence.TableText, Does.Contain("Cycle").And.Contain("Power-on"));
-            Assert.That(sequence.StatusText, Does.Contain("one clock pulse per step"));
+            Assert.That(sequence.StatusText, Does.Contain("3 cycles"));
             Assert.That(_workspace.Runner.ClockEdges, Is.EqualTo(liveEdges), "The live clock is untouched.");
 
             string copied = null;
@@ -239,6 +239,110 @@ namespace DigitalLogicSandbox.Tests.PlayMode
             Assert.That(sequence.Run(), Is.Null);
             Assert.That(sequence.StatusText, Does.Contain("limit"));
             Assert.That(sequence.DisplayedRowCount, Is.Zero);
+            sequence.Close();
+        }
+
+        /// <summary>A → NOT → OUT, analysed as a sequence (no clock).</summary>
+        private SequenceAnalysisDialog OpenInverterSequence()
+        {
+            NodeId a = _workspace.PlaceNode(ComponentRef.InputBoundary, new Vector2(-4, 0));
+            NodeId not = _workspace.PlaceNode(ComponentRef.Primitive(BuiltInComponentIds.Not), new Vector2(0, 0));
+            NodeId lamp = _workspace.PlaceNode(ComponentRef.OutputBoundary, new Vector2(4, 0));
+            _workspace.Connect(Pin(a), new PinRef(not, NotGate.Input));
+            _workspace.Connect(new PinRef(not, NotGate.Output), Pin(lamp));
+            SequenceAnalysisDialog sequence = _app.Shell.SequenceAnalysis;
+            sequence.OpenForCurrentCircuit();
+            return sequence;
+        }
+
+        [UnityTest]
+        public IEnumerator SequenceAnalysis_EditingTheTimeline_RewritesThePattern_AndReruns()
+        {
+            yield return LoadMain();
+            SequenceAnalysisDialog sequence = OpenInverterSequence();
+            yield return null;
+            Assert.That(sequence.CurrentView, Is.EqualTo(SequenceAnalysisDialog.ResultView.Timing));
+            Assert.That(sequence.PatternFields[0].text, Is.EqualTo("01"), "Default: a binary count over one input.");
+
+            // Set step 4 HIGH: the pattern is extended with its held value first.
+            Assert.That(sequence.SetCells(0, 4, 4, Signal.High), Is.True);
+            Assert.That(sequence.PatternFields[0].text, Is.EqualTo("0111"));
+            Assert.That(sequence.Table.RowCount, Is.EqualTo(5), "The analysis re-ran with four steps.");
+            Assert.That(sequence.Table.GetOutput(4, 0), Is.EqualTo(Signal.Low), "OUT = NOT A.");
+
+            // A drag across steps 2..3 paints them LOW.
+            Assert.That(sequence.SetCells(0, 2, 3, Signal.Low), Is.True);
+            Assert.That(sequence.PatternFields[0].text, Is.EqualTo("0001"));
+            Assert.That(sequence.Table.GetOutput(2, 0), Is.EqualTo(Signal.High));
+            Assert.That(sequence.Table.ChangedRowCount, Is.EqualTo(1), "Only step 4 changes OUT (1 → 0).");
+            Assert.That(sequence.StatusText, Does.Contain("Outputs change in 1 step"));
+
+            // The steps stepper.
+            sequence.StepsPlusButton.onClick.Invoke();
+            Assert.That(sequence.StepsField.text, Is.EqualTo("5"));
+            Assert.That(sequence.Table.RowCount, Is.EqualTo(6));
+            sequence.StepsMinusButton.onClick.Invoke();
+            sequence.StepsMinusButton.onClick.Invoke();
+            Assert.That(sequence.Table.RowCount, Is.EqualTo(4));
+
+            // Presets.
+            sequence.ApplyConstant(Signal.High);
+            Assert.That(sequence.PatternFields[0].text, Is.EqualTo("111"));
+            sequence.CountUpButton.onClick.Invoke();
+            Assert.That(sequence.PatternFields[0].text, Is.EqualTo("010"), "Counts over the current three steps.");
+            Assert.That(sequence.StepsField.text, Is.Empty, "Count up switches Steps back to auto.");
+            sequence.Close();
+        }
+
+        [UnityTest]
+        public IEnumerator SequenceAnalysis_ReadoutDescribesThePinnedStep_AndViewsSwitch()
+        {
+            yield return LoadMain();
+            SequenceAnalysisDialog sequence = OpenInverterSequence();
+            yield return null;
+            sequence.SetCells(0, 1, 2, Signal.High); // "11": OUT goes 1 → 0 in step 1
+            Assert.That(sequence.Timeline.LaneCount, Is.EqualTo(4), "Inputs header + A, outputs header + OUT.");
+
+            sequence.Timeline.SetCursor(1);
+            Assert.That(sequence.ReadoutText, Does.Contain("Step 1").And.Contain("A=1").And.Contain("1→0"));
+            sequence.Timeline.MoveCursor(1);
+            Assert.That(sequence.Timeline.CursorRow, Is.EqualTo(2));
+            Assert.That(sequence.ReadoutText, Does.Contain("Step 2"));
+
+            sequence.ViewSwitch.Select((int)SequenceAnalysisDialog.ResultView.Table);
+            Assert.That(sequence.CurrentView, Is.EqualTo(SequenceAnalysisDialog.ResultView.Table));
+            Assert.That(sequence.TableView.gameObject.activeInHierarchy, Is.True);
+            Assert.That(sequence.Timeline.gameObject.activeInHierarchy, Is.False);
+            Assert.That(sequence.GetVisibleRowText(0), Does.StartWith("Power-on"));
+
+            sequence.ViewSwitch.Select((int)SequenceAnalysisDialog.ResultView.Patterns);
+            Assert.That(sequence.PatternFields[0].gameObject.activeInHierarchy, Is.True);
+
+            // Power-on choice through the segmented control.
+            sequence.PowerOnControl.Select(1);
+            Assert.That(sequence.Table.PowerOnState, Is.EqualTo(PowerOnState.Unknown));
+            Assert.That(sequence.PowerOnUnknownToggle.isOn, Is.True);
+            sequence.PowerOnUnknownToggle.isOn = false;
+            Assert.That(sequence.PowerOnControl.Selected, Is.Zero);
+            Assert.That(sequence.Table.PowerOnState, Is.EqualTo(PowerOnState.Resolved));
+            sequence.Close();
+        }
+
+        [UnityTest]
+        public IEnumerator SequenceAnalysis_TimelineShowsTheClockLane_ForClockedCircuits()
+        {
+            yield return LoadMain();
+            BuildClocked();
+            yield return null;
+            SequenceAnalysisDialog sequence = _app.Shell.SequenceAnalysis;
+            sequence.OpenForCurrentCircuit();
+            yield return null;
+            Assert.That(sequence.Table.Clocked, Is.True);
+            Assert.That(sequence.Table.ClockExponents.Count, Is.EqualTo(1));
+            Assert.That(sequence.Timeline.LaneCount, Is.EqualTo(4), "Clock header + CLK, outputs header + lamp.");
+            Assert.That(sequence.StatusText, Does.Contain("8 cycles"));
+            sequence.Timeline.SetCursor(3);
+            Assert.That(sequence.ReadoutText, Does.Contain("Cycle 3"));
             sequence.Close();
         }
 

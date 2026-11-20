@@ -2299,3 +2299,98 @@ being dragged were sorted strangely.
 
 ### Known issues
 - Unity Personal 2022.3 still shows the "Made with Unity" splash before the intro; it can only be restyled.
+
+## Borderless fullscreen and window controls (2026-11-20)
+
+### Implemented
+- Player settings: `fullscreenMode` changed from Windowed to FullScreenWindow (borderless, desktop resolution).
+  Alt+Enter still switches to a window for the session.
+- `App/DisplayStartup.cs`: at `BeforeSplashScreen` (player builds only) it calls
+  `Screen.SetResolution(desktop size, FullScreenWindow)`, so every launch, splash included, starts borderless
+  fullscreen.
+- `ToolbarView`: a top-right "Window Controls" card with Minimize and Exit (Exit turns the theme's error colour on
+  hover and press), and File > Exit (Alt+F4) at the bottom of the file menu.
+- `UI/AppWindow.cs`: `Minimize()` through Win32 `ShowWindow(SW_MINIMIZE)`. It does nothing in the editor and on
+  other platforms.
+- `AppShell.RequestExit()`: the same Save / Don't save / Cancel prompt as New and Open, then `QuitAction`
+  (defaults to `Application.Quit`). `Application.wantsToQuit` sends Alt+F4 and OS close requests through the
+  same prompt when there are unsaved changes. The autosave in `ProjectController.OnApplicationQuit` remains a
+  safety net.
+
+- `UiFactory.Icon`: icons now set TMP `extraPadding`. The Lucide minus glyph got a quad only as tall as its
+  stroke, so the anti-aliased edge was cut off and the icon was invisible at toolbar sizes. This fixes the new
+  Minimize button and the existing Zoom Out button.
+
+### Decisions
+- An earlier attempt to open maximized with a title bar was dropped. Unity on Windows has no maximized-window
+  mode (`MaximizedWindow` is macOS-only), and maximizing the window through Win32 at startup was not reliable.
+- The startup call is needed because Unity remembers the last window mode and size in the registry, so the
+  player setting alone only applies on a fresh install.
+
+### Test results
+- New PlayMode tests in `ProjectPersistenceTests`: `Exit_WithUnsavedChanges_AsksFirst` and
+  `Exit_CleanProject_QuitsImmediately`.
+
+## Sequence analysis: sharper logic, timing diagram UI (2026-11-20)
+
+### Logic (`TruthTable/Generation/SequenceAnalysis.cs`)
+- **Three samples per clocked step.** Each clocked step is now recorded as after inputs (clock LOW), clock
+  high (after the rising edge) and after the cycle. Previously only the end of the cycle was recorded, so
+  level-sensitive behaviour was hidden, and so was the difference between outputs that changed with the
+  inputs and outputs that changed with the clock. Clock domains (CLK, CLK÷2, …) are recorded per phase.
+- **Power-on inputs.** The power-on row stores the real input values (0) instead of "-" (CSV too).
+- **Change flags.** `OutputChanged`, `AnyOutputChanged`, `ChangedRowCount` and `UnstableRowCount` are new.
+- **State recurrence.** A hash of every net plus the clock-schedule phase is taken after every row and
+  gives:
+  - `SettledFromRow`: the unchanging tail.
+  - `RepeatFromRow` / `RepeatRow` / `RepeatPeriod`: the first return to an earlier state.
+
+  A held state is never reported as a cycle. A ÷4 clock correctly repeats every 4 cycles: the same signals at
+  a different schedule position are not the same state.
+- **`SequencePresets`** (count up, constant, alternate, pulse, format) are new.
+
+### UI (`UI/Dialogs/SequenceAnalysisDialog.cs`, `UI/Dialogs/Sequence/*`)
+- **Timing diagram** (the default view): square waves for inputs, clocks and outputs, with a power-on
+  lead-in, a step ruler, X bands, changed-output tints and oscillation tints.
+  - Clocked steps are drawn ¼ / ½ / ¼ so the clock reads as a real pulse.
+  - Clicking or dragging on an input lane edits its pattern.
+  - Hovering or pinning (←/→) fills a readout such as "Cycle 5 · in A=1 → out Q=0→1 (clock)".
+  - Ctrl+wheel zooms, there are scrollbars, and the view auto-fits until you zoom.
+- **Setup bar:**
+  - A Resolved / Unknown (X) power-on segmented control.
+  - The "Pulse clock" switch, hidden when there is no clock.
+  - A steps stepper.
+  - Presets: Count up, All 0, All 1.
+- **Auto-run on every change:** the Run button is gone.
+- **Table view:** striped rows, an input/output divider, highlighted changed outputs and ⚠ on unstable
+  rows. A Patterns (text) view holds the per-input fields.
+- **Summary chips** with tooltips (steps, power-on, steady/repeats/still changing, changes/oscillation) and a
+  "for this input sequence only" caveat.
+- **Shared pieces:** `UiFactory.Segmented` / `SegmentedControl` (the library-tab look) and `QuadGraphic` (a
+  batched-rectangle UI mesh).
+
+### Decisions
+- **One diagram for inputs and outputs.** Inputs are edited directly on the timing diagram instead of a
+  separate grid, so inputs and results always line up and use one scroll and zoom.
+- **Text is the source of truth.** The pattern text fields stay the model: grid edits rewrite the text, and
+  invalid text shows an error without losing the last diagram.
+- **State identity includes the clock schedule.** Signals alone are not the full state of a circuit with
+  slower clock dividers.
+
+### Fixes found while testing
+- A segmented control's track reported a flexible height (its tiles force-expand) and stretched vertical
+  layouts. It is now pinned to 0.
+- Adjacent TMP `<mark>` highlights merged across `<pos>` jumps. An unmarked space now ends each one.
+- A `QuadGraphic` added by code needs an explicit `CanvasRenderer` before it is enabled under a `RectMask2D`.
+
+### Test results
+- EditMode: 527 / 527. New sequence tests cover:
+  - The three phases and clock domains.
+  - A rising-edge flip-flop changing with the clock, not the inputs.
+  - Real power-on inputs.
+  - Change flags.
+  - The counter's period of 8, settled versus cycle, and a ÷4 period of 4.
+  - Presets.
+- PlayMode: 135 / 135. New tests cover timeline edits rewriting patterns, the stepper, presets, the
+  readout, view switching, power-on sync and clock lanes. The existing limit / virtualisation / TMP budget
+  test still passes.
