@@ -220,6 +220,27 @@ namespace DigitalLogicSandbox.Tests.PlayMode
         }
 
         [UnityTest]
+        public IEnumerator Tabs_ReactToHover()
+        {
+            yield return null;
+            var favorites = FindDeep(_library.transform, "Tab Favorites").GetComponent<LibraryTabView>();
+            var all = FindDeep(_library.transform, "Tab All").GetComponent<LibraryTabView>();
+            Assert.That(all.IsActive, Is.True);
+            Assert.That(favorites.Tile.color.a, Is.EqualTo(0f), "An inactive tab rests without a tile.");
+
+            var data = new PointerEventData(EventSystem.current);
+            favorites.OnPointerEnter(data);
+            DG.Tweening.DOTween.Complete(favorites.Tile);
+            Assert.That(favorites.IsHovered, Is.True);
+            Assert.That(favorites.Tile.color.a, Is.GreaterThan(0f), "Hovering shows a soft tile.");
+
+            favorites.OnPointerExit(data);
+            DG.Tweening.DOTween.Complete(favorites.Tile);
+            Assert.That(favorites.Tile.color.a, Is.EqualTo(0f));
+            Assert.That(all.Tile.color.a, Is.GreaterThan(0f), "The active tab keeps its raised tile.");
+        }
+
+        [UnityTest]
         public IEnumerator RecentTab_ShowsPlacedParts_AndClears()
         {
             LibraryItemView not = Find("NOT");

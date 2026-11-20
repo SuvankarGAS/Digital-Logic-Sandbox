@@ -131,7 +131,7 @@ namespace DigitalLogicSandbox.UI.Panels
         private LibraryTab _tab;
         private readonly Button[] _tabButtons = new Button[3];
         private readonly TextMeshProUGUI[] _tabLabels = new TextMeshProUGUI[3];
-        private readonly Image[] _tabTiles = new Image[3];
+        private readonly LibraryTabView[] _tabViews = new LibraryTabView[3];
         private GameObject _favoritesEmpty;
         private GameObject _recentEmpty;
         private GameObject _recentBar;
@@ -389,7 +389,6 @@ namespace DigitalLogicSandbox.UI.Panels
 
         private void RefreshTabButtons()
         {
-            VisualTheme theme = _ui.Theme;
             for (int i = 0; i < _tabButtons.Length; i++)
             {
                 if (_tabButtons[i] == null)
@@ -398,9 +397,8 @@ namespace DigitalLogicSandbox.UI.Panels
                 }
 
                 bool active = (int)_tab == i;
-                _tabTiles[i].color = active ? theme.PanelHeader : new Color(0f, 0f, 0f, 0f);
-                _tabLabels[i].color = active ? theme.TextPrimary : theme.TextMuted;
                 _tabLabels[i].text = TabText((LibraryTab)i, active);
+                _tabViews[i].SetActive(active, instant: !Animate);
             }
         }
 
@@ -1100,9 +1098,13 @@ namespace DigitalLogicSandbox.UI.Panels
                 label.richText = true;
                 label.overflowMode = TextOverflowModes.Overflow;
                 UiFactory.Stretch(label.rectTransform, 2f, 2f);
+                var view = tile.gameObject.AddComponent<LibraryTabView>();
+                view.Initialize(_ui.Theme, tile, label);
+                _ui.AddTooltip(tile.gameObject, tab == LibraryTab.All ? "All parts"
+                    : tab == LibraryTab.Favorites ? "Favorites: your starred parts" : "Recently placed parts");
                 _tabButtons[i] = button;
                 _tabLabels[i] = label;
-                _tabTiles[i] = tile;
+                _tabViews[i] = view;
             }
 
             RefreshTabButtons();

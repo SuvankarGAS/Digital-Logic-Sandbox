@@ -2232,3 +2232,8 @@ The user reported four problems after the overhaul:
 - **Removed the TMP warning for U+2605 (★)**, which the Nunito font lacks. The Favorites empty state now uses the Lucide star glyph through the icon-font fallback.
 - **Gentler wheel scrolling:** 40 px per notch instead of 68, at most 3 notches per event, and a slightly snappier glide. Checked in play mode that the UI module sends 6 units per notch, which the scaling assumes.
 - **Tests:** EditMode **519/519** and PlayMode **119/119** passed. New `Escape_HidesKeyboardPreview`; the wheel test now also covers the per-event clamp.
+
+## Library tabs hover feedback (2026-11-20)
+
+- New `LibraryTabView` on each tab segment (All, Favorites, Recent). An inactive tab shows a soft tile when hovered, a darker one while pressed, and a secondary-coloured label. The active tab keeps its raised tile and lightens slightly on hover. Colours fade with DOTween; tooltips name each tab.
+- Tests: PlayMode `Tabs_ReactToHover`. The full suites passed (EditMode 519/519, PlayMode 120/120) before a final alpha tweak; after it, `LibraryPanelTests` passed 18/18.
